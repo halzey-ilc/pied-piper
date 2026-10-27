@@ -237,10 +237,74 @@ SIMPLE_JWT: dict[str, Any] = {
     "USER_ID_CLAIM": "sub",
 }
 
+SPECTACULAR_API_DESCRIPTION = """
+A multi-tenant CRM backend. This page is interactive: you can read every
+endpoint and call it directly with the **Try it out** button.
+
+## Quick start (3 steps)
+
+**1. Get an access token.** Open **Authentication -> POST /api/v1/auth/token/**,
+click **Try it out**, enter your username and password, then **Execute**. Copy
+the `access` value from the response.
+
+**2. Authorize.** Click the green **Authorize** button at the top right, paste
+the access token, and confirm. Every request on this page will now be sent with
+`Authorization: Bearer <token>`. The token is remembered if you reload the page.
+
+**3. Choose your company (tenant).** Business endpoints such as **Customers**
+need an `X-Tenant` header with your company's short name (its "slug"), for
+example `demo`. Each call has an `X-Tenant` field. Without it you get `404` on
+purpose: this is how one company's data stays invisible to another.
+
+## Good to know
+
+- **Tokens expire.** The access token is short-lived; use
+  **POST /api/v1/auth/token/refresh/** with your `refresh` token to get a new
+  one, then Authorize again.
+- **Permissions.** What you can see and change depends on your role in the
+  company (owner, admin, manager, sales rep, viewer).
+- **Errors** always look like
+  `{"error": {"code": "...", "message": "...", "request_id": "..."}}`.
+- **Service health** is served outside this schema: `GET /health/live`
+  (process up) and `GET /health/ready` (database and cache reachable).
+- **Webhooks** are called by external providers, not by you, and are verified
+  by signature instead of a token.
+"""
+
 SPECTACULAR_SETTINGS: dict[str, Any] = {
     "TITLE": "CRM Platform API",
     "VERSION": "0.1.0",
+    "DESCRIPTION": SPECTACULAR_API_DESCRIPTION,
+    "CONTACT": {"name": "CRM Platform"},
+    "LICENSE": {"name": "Proprietary"},
     "SERVE_INCLUDE_SCHEMA": False,
+    "SORT_OPERATIONS": False,
+    "COMPONENT_SPLIT_REQUEST": True,
+    "SERVERS": [{"url": "/", "description": "This server"}],
+    "TAGS": [
+        {"name": "Authentication", "description": "Obtain and refresh JWT access tokens."},
+        {"name": "Account", "description": "The signed-in user and the companies they belong to."},
+        {
+            "name": "Customers",
+            "description": "Customer records. Tenant-scoped: send the X-Tenant header.",
+        },
+        {
+            "name": "Webhooks",
+            "description": "Inbound provider callbacks. Signature-verified, not user-called.",
+        },
+    ],
+    "SWAGGER_UI_SETTINGS": {
+        "deepLinking": True,
+        "persistAuthorization": True,
+        "displayRequestDuration": True,
+        "filter": True,
+        "tryItOutEnabled": True,
+        "docExpansion": "list",
+        "defaultModelsExpandDepth": 1,
+        "requestSnippetsEnabled": True,
+        "syntaxHighlight.theme": "obsidian",
+    },
+    "REDOC_UI_SETTINGS": {"hideDownloadButton": False, "expandResponses": "200,201"},
 }
 
 # --- Async processing -------------------------------------------------------

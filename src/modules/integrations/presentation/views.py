@@ -38,10 +38,20 @@ class WebhookView(APIView):
     throttle_scope = "webhooks"
 
     @extend_schema(
+        tags=["Webhooks"],
         operation_id="webhook_ingest",
+        summary="Receive a provider webhook",
+        description=(
+            "Called by an external provider (WhatsApp, Telegram, Instagram, telephony), not "
+            "by API clients. No JWT: the request is trusted only if its provider signature "
+            "is valid. `provider` is the provider name and the path's tenant slug selects "
+            "the company. Duplicate deliveries are detected and ignored. Returns 401 for a "
+            "bad signature, 404 for an unknown provider or tenant, 503 if the integration "
+            "is not configured."
+        ),
+        auth=[],
         request=OpenApiTypes.OBJECT,
         responses=OpenApiTypes.OBJECT,
-        description="Provider webhook endpoint. Authenticated by provider signature, not JWT.",
     )
     def post(self, request: Request, provider: str, tenant_slug: str) -> Response:
         try:
