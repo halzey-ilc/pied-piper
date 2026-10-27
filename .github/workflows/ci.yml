@@ -1,0 +1,128 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  UV_VERSION: "0.13.6"
+
+jobs:
+  static:
+    name: Lint, types, architecture
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+      - run: uv sync --locked --all-groups
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run mypy
+      - run: uv run lint-imports --no-cache
+      - name: Migrations are in sync with models
+        run: uv run python manage.py makemigrations --check --dry-run
+        env:
+          DJANGO_SETTINGS_MODULE: config.settings.test
+
+  security:
+    name: Security scanners
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+      - run: uv sync --locked --all-groups
+      - run: uv run bandit -q -c pyproject.toml -r config src
+      - run: uv run pip-audit
+
+  tests:
+    name: Tests (PostgreSQL + Redis + RabbitMQ)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-bookworm
+        env:
+          POSTGRES_DB: crm_control
+          POSTGRES_USER: crm_app
+          POSTGRES_PASSWORD: ci-postgres-password
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U crm_app" --health-interval 5s
+          --health-timeout 3s --health-retries 10
+      redis:
+        image: redis:7.4-bookworm
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s
+          --health-timeout 3s --health-retries 10
+      rabbitmq:
+        image: rabbitmq:4-management
+        env:
+          RABBITMQ_DEFAULT_USER: crm
+          RABBITMQ_DEFAULT_PASS: ci-rabbit-password
+          RABBITMQ_DEFAULT_VHOST: crm
+        ports: ["5672:5672"]
+        options: >-
+          --health-cmd "rabbitmq-diagnostics -q check_running" --health-interval 10s
+          --health-timeout 5s --health-retries 10
+    env:
+      DJANGO_SETTINGS_MODULE: config.settings.test
+      DJANGO_ENV: test
+      DB_HOST: localhost
+      DB_PASSWORD: ci-postgres-password
+      REDIS_HOST: localhost
+      RABBITMQ_HOST: localhost
+      RABBITMQ_PASSWORD: ci-rabbit-password
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+      - run: uv sync --locked --all-groups
+      - name: Grant CREATEDB for test tenant databases
+        run: PGPASSWORD=ci-postgres-password psql -h localhost -U crm_app -d crm_control -c "ALTER ROLE crm_app CREATEDB;"
+      - name: Unit, API, security, architecture tests
+        run: uv run pytest -m "not integration" -q
+      - name: Start a Celery worker for integration tests
+        run: |
+          uv run celery -A config worker --loglevel=warning \
+            -Q default,outbox,events,integrations,notifications,reports,diagnostics \
+            --concurrency=2 &
+          echo $! > celery.pid
+        env:
+          DIAGNOSTIC_TASKS_ENABLED: "true"
+      - name: Integration tests
+        run: uv run pytest -m integration -q
+        env:
+          DIAGNOSTIC_TASKS_ENABLED: "true"
+      - name: Stop the worker
+        if: always()
+        run: kill "$(cat celery.pid)" || true
+
+  docker:
+    name: Docker image builds
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          tags: crm-platform:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Validate compose files
+        run: docker compose -f compose.yaml -f compose.test.yaml config -q

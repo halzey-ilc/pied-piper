@@ -1,0 +1,192 @@
+[project]
+name = "crm-platform"
+version = "0.1.0"
+description = "Multi-tenant CRM backend (modular monolith, Django 5.2 LTS)."
+readme = "README.md"
+requires-python = ">=3.13,<3.14"
+license = { text = "Proprietary" }
+# Ranges are intentionally narrow; exact versions are pinned in uv.lock
+# and exported (with hashes) to requirements/*.txt.
+dependencies = [
+    "django>=5.2.7,<5.3",
+    "djangorestframework>=3.16,<3.17",
+    "djangorestframework-simplejwt>=5.5,<6",
+    "drf-spectacular>=0.28,<0.31",
+    "django-cors-headers>=4.7,<5",
+    "psycopg[binary]>=3.2,<3.4",
+    "redis>=5.2,<9",
+    "celery>=5.5,<5.7",
+    "pydantic>=2.11,<3",
+    "pydantic-settings>=2.9,<3",
+    "httpx>=0.28,<0.29",
+    "argon2-cffi>=23.1",
+    "gunicorn>=23,<27",
+    "prometheus-client>=0.21,<1",
+    "sentry-sdk>=2.29,<3",
+    "opentelemetry-api>=1.33,<2",
+    "opentelemetry-sdk>=1.33,<2",
+    "opentelemetry-exporter-otlp-proto-http>=1.33,<2",
+    "opentelemetry-instrumentation-django>=0.54b0",
+    "opentelemetry-instrumentation-celery>=0.54b0",
+    "opentelemetry-instrumentation-psycopg>=0.54b0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3,<10",
+    "pytest-django>=4.11,<5",
+    "ruff>=0.11",
+    "mypy>=1.15,<2",
+    "django-stubs[compatible-mypy]>=5.2,<5.3",
+    "djangorestframework-stubs[compatible-mypy]>=3.16,<3.17",
+    "celery-types>=0.23",
+    "bandit>=1.8,<2",
+    "pip-audit>=2.9,<3",
+    "import-linter>=2.3,<3",
+]
+
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = [
+    "config",
+    "src/platform_core",
+    "src/shared",
+    "src/modules",
+    "src/entrypoints",
+]
+
+[tool.hatch.build]
+dev-mode-dirs = [".", "src"]
+
+[tool.uv]
+required-version = ">=0.13"
+
+# --- pytest -------------------------------------------------------------------
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "config.settings.test"
+pythonpath = [".", "src"]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers --strict-config -p no:cacheprovider"
+markers = [
+    "integration: needs running PostgreSQL, Redis, RabbitMQ and a Celery worker (docker compose)",
+]
+
+# --- Ruff ---------------------------------------------------------------------
+
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+extend-exclude = ["**/migrations/*.py"]
+
+[tool.ruff.lint]
+select = [
+    "E", "W", "F", "I", "B", "UP", "S", "DJ", "N", "C4", "SIM", "RUF", "PT", "T20",
+    "DTZ", "BLE", "TID", "PIE", "RET", "PL",
+]
+ignore = [
+    "PLR0913",  # use cases legitimately take several collaborators
+    "PLR2004",
+    "PLC0415",  # deferred imports are used on purpose (optional deps, Django start-up order)
+    "RUF012",   # Django/DRF class attributes
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = [
+    "S101", "S105", "S106", "S108", "S311", "ARG", "PLR2004", "DJ008",
+    "PT011", "PT012", "PT018",  # explicit, readable assertions in tests
+    "N999", "N818",  # test module / helper names mirror the code under test
+]
+"config/settings/*.py" = ["F403", "F405"]
+"config/gunicorn.conf.py" = ["N999"]  # filename is Gunicorn's required convention
+"scripts/**" = ["T20"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["config", "platform_core", "shared", "modules", "entrypoints", "tests"]
+
+# --- mypy ---------------------------------------------------------------------
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+files = ["config", "src", "tests"]
+mypy_path = "$MYPY_CONFIG_FILE_DIR/src:$MYPY_CONFIG_FILE_DIR"
+explicit_package_bases = true
+plugins = ["mypy_django_plugin.main", "mypy_drf_plugin.main"]
+warn_unreachable = true
+exclude = ["/migrations/"]
+
+[[tool.mypy.overrides]]
+module = ["tests.*"]
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+
+[[tool.mypy.overrides]]
+module = ["grimp.*", "kombu.*"]
+ignore_missing_imports = true
+
+[tool.django-stubs]
+django_settings_module = "config.settings.test"
+
+# --- Bandit -------------------------------------------------------------------
+
+[tool.bandit]
+exclude_dirs = ["tests", ".venv"]
+
+# --- import-linter: architecture contracts -------------------------------------
+
+[tool.importlinter]
+root_packages = ["config", "platform_core", "shared", "modules", "entrypoints"]
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "Domain layers are pure Python (no frameworks, no outer layers)"
+type = "forbidden"
+source_modules = ["shared.domain", "platform_core.domain", "modules.*.domain"]
+forbidden_modules = [
+    "django", "rest_framework", "rest_framework_simplejwt", "celery", "kombu", "redis",
+    "psycopg", "httpx", "pydantic", "pydantic_settings", "opentelemetry", "sentry_sdk",
+    "prometheus_client",
+    "shared.application", "shared.infrastructure",
+    "platform_core.application", "platform_core.infrastructure", "platform_core.presentation",
+    "modules.*.application", "modules.*.infrastructure", "modules.*.presentation",
+    "entrypoints", "config",
+]
+
+[[tool.importlinter.contracts]]
+name = "Application layers do not depend on frameworks or infrastructure"
+type = "forbidden"
+source_modules = ["shared.application", "platform_core.application", "modules.*.application"]
+forbidden_modules = [
+    "django", "rest_framework", "rest_framework_simplejwt", "celery", "kombu", "redis",
+    "psycopg", "httpx", "opentelemetry", "sentry_sdk", "prometheus_client",
+    "shared.infrastructure", "platform_core.infrastructure", "platform_core.presentation",
+    "modules.*.infrastructure", "modules.*.presentation", "entrypoints", "config",
+]
+
+[[tool.importlinter.contracts]]
+name = "Infrastructure does not depend on presentation or entrypoints"
+type = "forbidden"
+source_modules = ["shared.infrastructure", "platform_core.infrastructure", "modules.*.infrastructure"]
+forbidden_modules = ["platform_core.presentation", "modules.*.presentation", "entrypoints"]
+
+[[tool.importlinter.contracts]]
+name = "Platform kernel and shared kernel do not depend on business modules"
+type = "forbidden"
+source_modules = ["platform_core", "shared"]
+forbidden_modules = ["modules", "entrypoints"]
+
+[[tool.importlinter.contracts]]
+name = "Shared kernel does not depend on the platform kernel"
+type = "forbidden"
+source_modules = ["shared"]
+forbidden_modules = ["platform_core"]
+
+[[tool.importlinter.contracts]]
+name = "Business modules do not depend on entrypoints or project config"
+type = "forbidden"
+source_modules = ["modules"]
+forbidden_modules = ["entrypoints", "config"]

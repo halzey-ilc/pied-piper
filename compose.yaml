@@ -1,0 +1,133 @@
+# Local development / evaluation stack. NOT production.
+# Backing services are reachable only on the internal `backend` network; nothing
+# but the API publishes a host port. Credentials come from .env (see .env.example).
+
+name: crm-platform
+
+x-app-env: &app-env
+  DJANGO_SETTINGS_MODULE: config.settings.local
+  DB_HOST: postgres
+  REDIS_HOST: redis
+  RABBITMQ_HOST: rabbitmq
+
+x-app-build: &app-build
+  build:
+    context: .
+    dockerfile: Dockerfile
+  image: crm-platform:local
+  env_file: [.env]
+  depends_on:
+    postgres: {condition: service_healthy}
+    redis: {condition: service_healthy}
+    rabbitmq: {condition: service_healthy}
+  networks: [backend]
+  restart: unless-stopped
+
+services:
+  postgres:
+    image: postgres:17-bookworm
+    environment:
+      POSTGRES_DB: ${DB_NAME:-crm_control}
+      POSTGRES_USER: ${DB_USER:-crm_app}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in .env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./infrastructure/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks: [backend]
+    # No host port: reachable only from other services on the internal network.
+    restart: unless-stopped
+
+  redis:
+    image: redis:7.4-bookworm
+    command: ["redis-server", "/usr/local/etc/redis/redis.conf"]
+    volumes:
+      - ./infrastructure/redis/redis.conf:/usr/local/etc/redis/redis.conf:ro
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks: [backend]
+    restart: unless-stopped
+
+  rabbitmq:
+    image: rabbitmq:4-management
+    hostname: crm-rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-crm}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?set RABBITMQ_PASSWORD in .env}
+      RABBITMQ_DEFAULT_VHOST: ${RABBITMQ_VHOST:-crm}
+    volumes:
+      - rabbitmqdata:/var/lib/rabbitmq
+      - ./infrastructure/rabbitmq/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "check_running"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [backend]
+    # Management UI (15672) is intentionally not published. Use `make rabbitmq-ui`.
+    restart: unless-stopped
+
+  api:
+    <<: *app-build
+    environment:
+      <<: *app-env
+      RUN_MIGRATIONS_ON_START: "1"
+      GUNICORN_WORKERS: "2"
+    command: ["gunicorn", "config.wsgi:application", "-c", "config/gunicorn.conf.py"]
+    ports:
+      - "127.0.0.1:8000:8000"   # bound to localhost only
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=3).status==200 else 1)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  worker:
+    <<: *app-build
+    environment:
+      <<: *app-env
+      CELERY_METRICS_PORT: "9100"
+    command:
+      - celery
+      - -A
+      - config
+      - worker
+      - --loglevel=info
+      - --concurrency=4
+      - -Q
+      - default,outbox,events,integrations,notifications,reports,diagnostics
+    healthcheck:
+      test: ["CMD", "celery", "-A", "config", "inspect", "ping", "-d", "celery@$${HOSTNAME}"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+
+  beat:
+    <<: *app-build
+    command:
+      - celery
+      - -A
+      - config
+      - beat
+      - --loglevel=info
+      - --schedule=/tmp/celerybeat-schedule
+
+volumes:
+  pgdata:
+  redisdata:
+  rabbitmqdata:
+
+networks:
+  backend:
+    driver: bridge
+    internal: false   # services need egress for image pulls; no inbound except api's published port

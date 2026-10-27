@@ -1,0 +1,45 @@
+# Secrets (never commit real values; use .env.example as the template)
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+htmlcov/
+.coverage
+.coverage.*
+
+# Build / runtime artifacts
+/var/
+dist/
+build/
+/static/
+
+# Local tooling
+.python-version
+
+# Editors / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# Unrelated files that happened to be present in the working tree
+# (reverse-engineering / CTF scratch files — not part of this project)
+exploit.py
+fake_time.c
+fake_time.so
+license_check
+license_check.c
+secure_target
+secure_target.c
+solve.gdb

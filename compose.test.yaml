@@ -1,0 +1,28 @@
+# Overlay for running the integration test suite inside the stack:
+#   docker compose -f compose.yaml -f compose.test.yaml run --rm tests
+# Reuses the running postgres/redis/rabbitmq services and a started worker.
+
+name: crm-platform
+
+services:
+  tests:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: crm-platform:local
+    env_file: [.env]
+    environment:
+      DJANGO_SETTINGS_MODULE: config.settings.test
+      DJANGO_ENV: test
+      DB_HOST: postgres
+      REDIS_HOST: redis
+      RABBITMQ_HOST: rabbitmq
+      PYTEST_ADDOPTS: "-p no:cacheprovider"
+    networks: [backend]
+    profiles: ["test"]
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      rabbitmq: {condition: service_healthy}
+      worker: {condition: service_healthy}
+    command: ["pytest", "-m", "integration", "-v"]
