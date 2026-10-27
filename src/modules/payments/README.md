@@ -1,17 +1,29 @@
 # Payments
 
-**Status:** planned, not implemented. Only the package and this note exist.
+**Status:** implemented (tenant plane).
 
-**Plane:** Tenant plane.
+Invoices and their payment status. **No card or bank data is ever stored** —
+payments are recorded amounts received (cash/transfer).
 
-**Responsibility:** Invoices and payment status of deals (no card data is ever stored here).
+## Lifecycle (enforced in the domain)
 
-**Expected domain events:** InvoiceIssued, PaymentReceived.
+```
+DRAFT ──issue──> ISSUED ──record_payment(...)──> PAID (when fully settled)
+  │                 │
+  └──void(reason)───┴──> VOID
+```
 
-**Collaborates with:** sales_pipeline, integrations (payment providers).
+Payments can only be recorded against an issued invoice, must match its
+currency, and cannot exceed the outstanding balance. Paid invoices are terminal.
+An optional linked customer/deal is verified to exist in the same tenant.
 
-When implemented, follow the reference module `modules/customers`:
-`domain/` (pure Python) -> `application/` (use cases, ports) -> `infrastructure/`
-(Django app, ORM records, adapters) -> `presentation/` (DRF views), plus
-`composition.py`. Register the Django app label in `settings.TENANCY` (control,
-tenant or shared plane) or the classification test will fail.
+## Events
+
+`payments.invoice_issued`, `payments.payment_received`, `payments.invoice_paid`,
+`payments.invoice_voided` — written to the outbox in the same transaction.
+
+## API
+
+`GET/POST /api/v1/payments/invoices/`, `GET /api/v1/payments/invoices/{id}/`,
+`POST .../{id}/issue|payments|void/`. Tenant-scoped, RBAC (`payments.*`,
+own/team/all scope).

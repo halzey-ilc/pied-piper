@@ -1,1 +1,1 @@
-"""Invoices and payment status of deals (no card data is ever stored here). (planned)."""
+"""Payments: invoices and payment status of deals (no card data) (tenant plane)."""

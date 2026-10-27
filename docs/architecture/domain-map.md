@@ -18,10 +18,10 @@ shared = table present in every DB).
 | reporting | tenant | implemented | Async report/export jobs (CSV) off the request path |
 | activities | tenant | implemented | Tasks, calls, notes on customers/deals, timeline |
 | meetings | tenant | implemented | Scheduling, participants, reminders, complete/cancel |
-| payments | tenant | stub | Invoices and payment status (no card data) |
-| telephony | tenant | stub | Call records, click-to-call via providers |
+| payments | tenant | implemented | Invoices, payments, void (no card data) |
+| telephony | tenant | implemented | Call records, click-to-call, call lifecycle |
 | communications | tenant | stub | WhatsApp/Telegram/Instagram/e-mail conversations |
-| subscriptions | control | stub | Plans, limits, billing state of tenants |
+| subscriptions | control | implemented | Plans, limits, billing state of organizations |
 | notifications | tenant | stub | User notifications and digests |
 | messaging | shared | implemented | Transactional outbox/inbox (platform_core) |
 

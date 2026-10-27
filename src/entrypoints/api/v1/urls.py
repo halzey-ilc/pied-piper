@@ -14,6 +14,9 @@ urlpatterns = [
     path("sales/", include("modules.sales_pipeline.presentation.urls")),
     path("activities/", include("modules.activities.presentation.urls")),
     path("meetings/", include("modules.meetings.presentation.urls")),
+    path("payments/", include("modules.payments.presentation.urls")),
+    path("telephony/", include("modules.telephony.presentation.urls")),
+    path("subscription/", include("modules.subscriptions.presentation.urls")),
     path("analytics/kpis/", include("modules.sales_kpi.presentation.urls")),
     path("analytics/reports/", include("modules.reporting.presentation.urls")),
     path(

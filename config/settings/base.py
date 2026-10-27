@@ -41,6 +41,9 @@ INSTALLED_APPS = [
     "modules.sales_kpi.infrastructure.apps.SalesKpiConfig",
     "modules.reporting.infrastructure.apps.ReportingConfig",
     "modules.meetings.infrastructure.apps.MeetingsConfig",
+    "modules.payments.infrastructure.apps.PaymentsConfig",
+    "modules.telephony.infrastructure.apps.TelephonyConfig",
+    "modules.subscriptions.infrastructure.apps.SubscriptionsConfig",
 ]
 
 MIDDLEWARE = [
@@ -132,6 +135,7 @@ TENANCY: dict[str, Any] = {
         "identity",
         "organizations",
         "tenant_registry",
+        "subscriptions",
     },
     "TENANT_PLANE_APPS": {
         "customers",
@@ -141,6 +145,8 @@ TENANCY: dict[str, Any] = {
         "sales_kpi",
         "reporting",
         "meetings",
+        "payments",
+        "telephony",
     },
     "SHARED_APPS": {"messaging", "audit"},
     "IGNORED_APPS": {"rest_framework", "corsheaders", "drf_spectacular"},
@@ -296,6 +302,19 @@ SPECTACULAR_SETTINGS: dict[str, Any] = {
     "SERVE_INCLUDE_SCHEMA": False,
     "SORT_OPERATIONS": False,
     "COMPONENT_SPLIT_REQUEST": True,
+    # Several endpoints have a "status" field/param with different value sets;
+    # name each distinctly so the schema has stable, unambiguous enum components.
+    "ENUM_NAME_OVERRIDES": {
+        "LeadStatusEnum": ["new", "qualified", "unqualified", "converted"],
+        "DealStatusEnum": ["open", "won", "lost"],
+        "MeetingStatusEnum": ["scheduled", "completed", "cancelled"],
+        "InvoiceStatusEnum": ["draft", "issued", "paid", "void"],
+        "CallStatusEnum": [
+            "requested", "ringing", "in_progress", "completed", "missed", "failed",
+        ],
+        "CallTerminalStatusEnum": ["completed", "missed", "failed"],
+        "CallProgressStatusEnum": ["ringing", "in_progress"],
+    },
     "SERVERS": [{"url": "/", "description": "This server"}],
     "TAGS": [
         {"name": "Authentication", "description": "Obtain and refresh JWT access tokens."},
@@ -323,6 +342,18 @@ SPECTACULAR_SETTINGS: dict[str, Any] = {
         {
             "name": "Meetings",
             "description": "Scheduling with participants and reminders. Tenant-scoped.",
+        },
+        {
+            "name": "Payments",
+            "description": "Invoices and payment status (no card data). Tenant-scoped.",
+        },
+        {
+            "name": "Telephony",
+            "description": "Call records and click-to-call. Recordings referenced by URL only.",
+        },
+        {
+            "name": "Subscription",
+            "description": "The organization's plan, limits and billing status (control plane).",
         },
         {
             "name": "Analytics",

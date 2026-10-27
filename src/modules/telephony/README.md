@@ -1,17 +1,36 @@
 # Telephony
 
-**Status:** planned, not implemented. Only the package and this note exist.
+**Status:** implemented (tenant plane).
 
-**Plane:** Tenant plane.
+Call records and click-to-call, linked to customers or deals.
 
-**Responsibility:** Call records, recordings metadata and click-to-call through provider adapters.
+**No audio or transcripts are stored or logged.** Recordings are referenced by
+URL only.
 
-**Expected domain events:** CallStarted, CallEnded.
+## Two ways a call appears
 
-**Collaborates with:** integrations (telephony provider spec), activities.
+- **Logged** — a call that already happened, recorded with its numbers (E.164),
+  direction, start time, duration and terminal status (completed/missed/failed).
+- **Click-to-call** — an outbound call started through a provider dialer
+  (`CallDialer` port). In the scaffold the dialer is a stub that returns a
+  synthetic id; a real adapter would place the call through the provider.
 
-When implemented, follow the reference module `modules/customers`:
-`domain/` (pure Python) -> `application/` (use cases, ports) -> `infrastructure/`
-(Django app, ORM records, adapters) -> `presentation/` (DRF views), plus
-`composition.py`. Register the Django app label in `settings.TENANCY` (control,
-tenant or shared plane) or the classification test will fail.
+## Lifecycle (click-to-call)
+
+```
+REQUESTED -> RINGING -> IN_PROGRESS -> (COMPLETED | MISSED | FAILED)
+```
+
+Progress is driven by `advance` (ringing/in_progress) and `end` (terminal). In
+production these would be updated by provider webhooks (integrations).
+
+## Events
+
+`telephony.call_started`, `telephony.call_ended` — written to the outbox in the
+same transaction.
+
+## API
+
+`GET/POST /api/v1/telephony/calls/`, `POST /api/v1/telephony/calls/request/`,
+`GET /api/v1/telephony/calls/{id}/`, `POST .../{id}/advance|end/`. Tenant-scoped,
+RBAC (`telephony.*`, own/team/all scope).

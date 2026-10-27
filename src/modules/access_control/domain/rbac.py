@@ -39,6 +39,14 @@ class Permission(StrEnum):
     MEETINGS_VIEW = "meetings.view"
     MEETINGS_CREATE = "meetings.create"
     MEETINGS_UPDATE = "meetings.update"
+    PAYMENTS_VIEW = "payments.view"
+    PAYMENTS_CREATE = "payments.create"
+    PAYMENTS_UPDATE = "payments.update"
+    TELEPHONY_VIEW = "telephony.view"
+    TELEPHONY_CREATE = "telephony.create"
+    TELEPHONY_UPDATE = "telephony.update"
+    SUBSCRIPTIONS_VIEW = "subscriptions.view"
+    SUBSCRIPTIONS_MANAGE = "subscriptions.manage"
     REPORTS_VIEW = "reports.view"
     REPORTS_GENERATE = "reports.generate"
     MEMBERS_MANAGE = "members.manage"
@@ -82,6 +90,13 @@ ROLE_GRANTS: Mapping[Role, Mapping[Permission, Scope]] = {
         Permission.MEETINGS_VIEW: Scope.TEAM,
         Permission.MEETINGS_CREATE: Scope.TEAM,
         Permission.MEETINGS_UPDATE: Scope.TEAM,
+        Permission.PAYMENTS_VIEW: Scope.TEAM,
+        Permission.PAYMENTS_CREATE: Scope.TEAM,
+        Permission.PAYMENTS_UPDATE: Scope.TEAM,
+        Permission.TELEPHONY_VIEW: Scope.TEAM,
+        Permission.TELEPHONY_CREATE: Scope.TEAM,
+        Permission.TELEPHONY_UPDATE: Scope.TEAM,
+        Permission.SUBSCRIPTIONS_VIEW: Scope.ALL,
         Permission.REPORTS_VIEW: Scope.ALL,
         Permission.REPORTS_GENERATE: Scope.ALL,
     },
@@ -103,6 +118,12 @@ ROLE_GRANTS: Mapping[Role, Mapping[Permission, Scope]] = {
         Permission.MEETINGS_VIEW: Scope.OWN,
         Permission.MEETINGS_CREATE: Scope.OWN,
         Permission.MEETINGS_UPDATE: Scope.OWN,
+        Permission.PAYMENTS_VIEW: Scope.OWN,
+        Permission.PAYMENTS_CREATE: Scope.OWN,
+        Permission.PAYMENTS_UPDATE: Scope.OWN,
+        Permission.TELEPHONY_VIEW: Scope.OWN,
+        Permission.TELEPHONY_CREATE: Scope.OWN,
+        Permission.TELEPHONY_UPDATE: Scope.OWN,
     },
     Role.VIEWER: {
         Permission.CUSTOMERS_VIEW: Scope.ALL,
@@ -111,6 +132,9 @@ ROLE_GRANTS: Mapping[Role, Mapping[Permission, Scope]] = {
         Permission.DEALS_VIEW: Scope.ALL,
         Permission.ACTIVITIES_VIEW: Scope.ALL,
         Permission.MEETINGS_VIEW: Scope.ALL,
+        Permission.PAYMENTS_VIEW: Scope.ALL,
+        Permission.TELEPHONY_VIEW: Scope.ALL,
+        Permission.SUBSCRIPTIONS_VIEW: Scope.ALL,
         Permission.REPORTS_VIEW: Scope.ALL,
     },
 }

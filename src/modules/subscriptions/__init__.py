@@ -1,1 +1,1 @@
-"""Plans, limits and billing state of organizations (tenants). (planned)."""
+"""Subscriptions: plans, limits and billing state of organizations (control plane)."""
