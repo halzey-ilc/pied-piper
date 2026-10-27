@@ -35,6 +35,7 @@ INSTALLED_APPS = [
     "modules.customers.infrastructure.apps.CustomersConfig",
     "modules.leads.infrastructure.apps.LeadsConfig",
     "modules.sales_pipeline.infrastructure.apps.SalesPipelineConfig",
+    "modules.activities.infrastructure.apps.ActivitiesConfig",
 ]
 
 MIDDLEWARE = [
@@ -127,7 +128,7 @@ TENANCY: dict[str, Any] = {
         "organizations",
         "tenant_registry",
     },
-    "TENANT_PLANE_APPS": {"customers", "leads", "sales_pipeline"},
+    "TENANT_PLANE_APPS": {"customers", "leads", "sales_pipeline", "activities"},
     "SHARED_APPS": {"messaging", "audit"},
     "IGNORED_APPS": {"rest_framework", "corsheaders", "drf_spectacular"},
     # Dependency inversion: platform_core only knows these ports by import path.
@@ -301,6 +302,10 @@ SPECTACULAR_SETTINGS: dict[str, Any] = {
         {
             "name": "Deals",
             "description": "Opportunities moving through stages to won/lost. Tenant-scoped.",
+        },
+        {
+            "name": "Activities",
+            "description": "Tasks, calls and notes with a per-subject timeline. Tenant-scoped.",
         },
         {
             "name": "Webhooks",

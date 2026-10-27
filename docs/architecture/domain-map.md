@@ -16,7 +16,7 @@ shared = table present in every DB).
 | sales_pipeline | tenant | implemented | Pipelines, stages, deals, stage moves, win/loss, reopen |
 | sales_kpi | tenant | contracts | KPI definitions, aggregation, snapshots |
 | reporting | tenant | contracts | Async report/export jobs |
-| activities | tenant | stub | Tasks, calls, notes, timeline |
+| activities | tenant | implemented | Tasks, calls, notes on customers/deals, timeline |
 | meetings | tenant | stub | Scheduling, reminders, outcomes |
 | payments | tenant | stub | Invoices and payment status (no card data) |
 | telephony | tenant | stub | Call records, click-to-call via providers |

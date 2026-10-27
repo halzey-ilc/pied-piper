@@ -12,6 +12,7 @@ urlpatterns = [
     path("customers/", include("modules.customers.presentation.urls")),
     path("leads/", include("modules.leads.presentation.urls")),
     path("sales/", include("modules.sales_pipeline.presentation.urls")),
+    path("activities/", include("modules.activities.presentation.urls")),
     path(
         "webhooks/<str:provider>/<slug:tenant_slug>/",
         WebhookView.as_view(),

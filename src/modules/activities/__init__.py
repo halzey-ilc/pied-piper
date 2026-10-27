@@ -1,1 +1,1 @@
-"""Tasks, calls, notes and the activity timeline of customers and deals. (planned)."""
+"""Activities: tasks, calls and notes on customers and deals, with a timeline (tenant plane)."""
