@@ -130,8 +130,12 @@ def test_sales_rep_scope_and_roles(
     assert [lead["id"] for lead in rep.get("/api/v1/leads/").json()["results"]] == [reps_lead]
     assert rep.get(f"/api/v1/leads/{owners_lead}/").status_code == 404
     assert viewer.get("/api/v1/leads/").json()["count"] == 2
-    assert viewer.post("/api/v1/leads/", {"name": "x", "email": "x@example.test"},
-                       format="json").status_code == 403
+    assert (
+        viewer.post(
+            "/api/v1/leads/", {"name": "x", "email": "x@example.test"}, format="json"
+        ).status_code
+        == 403
+    )
 
 
 def test_cross_tenant_isolation(

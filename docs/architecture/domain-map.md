@@ -13,9 +13,9 @@ shared = table present in every DB).
 | customers | tenant | implemented | Customer aggregate — reference implementation of all four layers |
 | integrations | tenant | implemented | Webhook ingestion (signature + dedup), typed contracts, channel adapters |
 | leads | tenant | implemented | Lead capture, qualify/disqualify, convert to customer |
+| sales_pipeline | tenant | implemented | Pipelines, stages, deals, stage moves, win/loss, reopen |
 | sales_kpi | tenant | contracts | KPI definitions, aggregation, snapshots |
 | reporting | tenant | contracts | Async report/export jobs |
-| sales_pipeline | tenant | stub | Pipelines, stages, deals, win/loss |
 | activities | tenant | stub | Tasks, calls, notes, timeline |
 | meetings | tenant | stub | Scheduling, reminders, outcomes |
 | payments | tenant | stub | Invoices and payment status (no card data) |

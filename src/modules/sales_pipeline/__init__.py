@@ -1,1 +1,1 @@
-"""Pipelines, stages, deals, deal amounts and win/loss outcomes. (planned)."""
+"""Sales pipeline: funnels, stages, deals and win/loss outcomes (tenant plane)."""

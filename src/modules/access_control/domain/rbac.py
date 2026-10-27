@@ -28,6 +28,11 @@ class Permission(StrEnum):
     LEADS_CREATE = "leads.create"
     LEADS_UPDATE = "leads.update"
     LEADS_CONVERT = "leads.convert"
+    PIPELINES_VIEW = "pipelines.view"
+    PIPELINES_MANAGE = "pipelines.manage"
+    DEALS_VIEW = "deals.view"
+    DEALS_CREATE = "deals.create"
+    DEALS_UPDATE = "deals.update"
     REPORTS_VIEW = "reports.view"
     MEMBERS_MANAGE = "members.manage"
     INTEGRATIONS_MANAGE = "integrations.manage"
@@ -59,6 +64,11 @@ ROLE_GRANTS: Mapping[Role, Mapping[Permission, Scope]] = {
         Permission.LEADS_CREATE: Scope.TEAM,
         Permission.LEADS_UPDATE: Scope.TEAM,
         Permission.LEADS_CONVERT: Scope.TEAM,
+        Permission.PIPELINES_VIEW: Scope.ALL,
+        Permission.PIPELINES_MANAGE: Scope.ALL,
+        Permission.DEALS_VIEW: Scope.TEAM,
+        Permission.DEALS_CREATE: Scope.TEAM,
+        Permission.DEALS_UPDATE: Scope.TEAM,
         Permission.REPORTS_VIEW: Scope.TEAM,
     },
     Role.SALES_REP: {
@@ -69,10 +79,16 @@ ROLE_GRANTS: Mapping[Role, Mapping[Permission, Scope]] = {
         Permission.LEADS_CREATE: Scope.OWN,
         Permission.LEADS_UPDATE: Scope.OWN,
         Permission.LEADS_CONVERT: Scope.OWN,
+        Permission.PIPELINES_VIEW: Scope.ALL,
+        Permission.DEALS_VIEW: Scope.OWN,
+        Permission.DEALS_CREATE: Scope.OWN,
+        Permission.DEALS_UPDATE: Scope.OWN,
     },
     Role.VIEWER: {
         Permission.CUSTOMERS_VIEW: Scope.ALL,
         Permission.LEADS_VIEW: Scope.ALL,
+        Permission.PIPELINES_VIEW: Scope.ALL,
+        Permission.DEALS_VIEW: Scope.ALL,
         Permission.REPORTS_VIEW: Scope.ALL,
     },
 }

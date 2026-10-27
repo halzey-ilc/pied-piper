@@ -1,17 +1,42 @@
-# Sales Pipeline
+# Sales pipeline
 
-**Status:** planned, not implemented. Only the package and this note exist.
+**Status:** implemented (tenant plane).
 
-**Plane:** Tenant plane.
+Funnels (pipelines) with ordered stages, and deals that move through them to a
+won or lost outcome.
 
-**Responsibility:** Pipelines, stages, deals, deal amounts and win/loss outcomes.
+## Model
 
-**Expected domain events:** DealCreated, DealStageChanged, DealWon, DealLost.
+- **Pipeline** — a named funnel with 1-20 ordered **stages** (name + win
+  probability). At most one pipeline per company is the default.
+- **Deal** — an opportunity with a title, monetary value (amount + currency),
+  owner, optional linked customer and expected close date.
 
-**Collaborates with:** customers, sales_kpi (read models).
+## Deal lifecycle (enforced in the domain)
 
-When implemented, follow the reference module `modules/customers`:
-`domain/` (pure Python) -> `application/` (use cases, ports) -> `infrastructure/`
-(Django app, ORM records, adapters) -> `presentation/` (DRF views), plus
-`composition.py`. Register the Django app label in `settings.TENANCY` (control,
-tenant or shared plane) or the classification test will fail.
+```
+OPEN ──move_to(stage)──> OPEN (another stage of the same pipeline)
+  │
+  ├──win──> WON
+  └──lose(reason)──> LOST
+
+WON / LOST ──reopen──> OPEN
+```
+
+Only open deals can be edited or moved. Won/lost deals are read-only until
+reopened. Moving to a stage that does not belong to the deal's pipeline is
+rejected. A linked `customer_id` is verified to exist in the same tenant
+(`CustomerLookup` port).
+
+## Events
+
+`sales.deal_created`, `sales.deal_stage_changed`, `sales.deal_won`,
+`sales.deal_lost`, `sales.deal_reopened` — written to the outbox in the same
+transaction as the change.
+
+## API
+
+Pipelines: `GET/POST /api/v1/sales/pipelines/`, `GET /api/v1/sales/pipelines/{id}/`.
+Deals: `GET/POST /api/v1/sales/deals/`, `GET/PATCH /api/v1/sales/deals/{id}/`,
+`POST /api/v1/sales/deals/{id}/stage|win|lose|reopen/`. All tenant-scoped and
+RBAC-checked (`pipelines.*`, `deals.*`; deals use own/team/all scope).
