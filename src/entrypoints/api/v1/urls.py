@@ -13,6 +13,8 @@ urlpatterns = [
     path("leads/", include("modules.leads.presentation.urls")),
     path("sales/", include("modules.sales_pipeline.presentation.urls")),
     path("activities/", include("modules.activities.presentation.urls")),
+    path("analytics/kpis/", include("modules.sales_kpi.presentation.urls")),
+    path("analytics/reports/", include("modules.reporting.presentation.urls")),
     path(
         "webhooks/<str:provider>/<slug:tenant_slug>/",
         WebhookView.as_view(),

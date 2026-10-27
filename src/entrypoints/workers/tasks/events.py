@@ -24,11 +24,14 @@ def _dispatch(alias: str, envelope: dict[str, Any]) -> int:
     handlers = event_handlers.handlers_for(envelope["event_type"])
     consumer = IdempotentConsumer(DjangoInboxStore(alias), DjangoUnitOfWork(alias))
     for name, handler in handlers.items():
+        # Handlers receive the full envelope (event_type, event_id, occurred_at,
+        # payload, ...), not just the business payload, so read models can record
+        # when the event happened and dedupe on its id.
         consumer.consume(
             source="event",
             message_id=envelope["event_id"],
             consumer=name,
-            payload=envelope["payload"],
+            payload=envelope,
             correlation_id=envelope.get("correlation_id"),
             handler=handler,
         )

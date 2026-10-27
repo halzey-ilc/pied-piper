@@ -81,7 +81,10 @@ services:
       <<: *app-env
       RUN_MIGRATIONS_ON_START: "1"
       GUNICORN_WORKERS: "2"
+      REPORTS_STORAGE_DIR: /app/var/exports
     command: ["gunicorn", "config.wsgi:application", "-c", "config/gunicorn.conf.py"]
+    volumes:
+      - exportsdata:/app/var/exports
     ports:
       - "127.0.0.1:8000:8000"   # bound to localhost only
     healthcheck:
@@ -96,9 +99,12 @@ services:
     environment:
       <<: *app-env
       CELERY_METRICS_PORT: "9100"
+      REPORTS_STORAGE_DIR: /app/var/exports
       # Local only: lets the integration suite exercise the dead-letter path via
       # diagnostics.fail. Never enabled in production (env validation forbids it).
       DIAGNOSTIC_TASKS_ENABLED: "true"
+    volumes:
+      - exportsdata:/app/var/exports
     command:
       - celery
       - -A
@@ -130,6 +136,7 @@ volumes:
   pgdata:
   redisdata:
   rabbitmqdata:
+  exportsdata:
 
 networks:
   backend:

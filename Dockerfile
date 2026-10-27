@@ -59,7 +59,10 @@ COPY --chown=app:app config ./config
 COPY --chown=app:app src ./src
 COPY --chown=app:app manage.py ./
 COPY --chown=app:app infrastructure/docker/entrypoint.sh /usr/local/bin/entrypoint.sh
-RUN chmod +x /usr/local/bin/entrypoint.sh && mkdir -p /tmp/prometheus && chown app:app /tmp/prometheus
+RUN chmod +x /usr/local/bin/entrypoint.sh \
+    && mkdir -p /tmp/prometheus /app/var/exports \
+    && chown app:app /tmp/prometheus \
+    && chown -R app:app /app/var
 
 USER app
 EXPOSE 8000

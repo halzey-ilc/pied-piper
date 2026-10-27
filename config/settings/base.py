@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
+from celery.schedules import crontab
+
 from config.settings.env import load_env
 from platform_core.infrastructure.messaging.queues import build_task_queues
 
@@ -36,6 +38,8 @@ INSTALLED_APPS = [
     "modules.leads.infrastructure.apps.LeadsConfig",
     "modules.sales_pipeline.infrastructure.apps.SalesPipelineConfig",
     "modules.activities.infrastructure.apps.ActivitiesConfig",
+    "modules.sales_kpi.infrastructure.apps.SalesKpiConfig",
+    "modules.reporting.infrastructure.apps.ReportingConfig",
 ]
 
 MIDDLEWARE = [
@@ -128,7 +132,14 @@ TENANCY: dict[str, Any] = {
         "organizations",
         "tenant_registry",
     },
-    "TENANT_PLANE_APPS": {"customers", "leads", "sales_pipeline", "activities"},
+    "TENANT_PLANE_APPS": {
+        "customers",
+        "leads",
+        "sales_pipeline",
+        "activities",
+        "sales_kpi",
+        "reporting",
+    },
     "SHARED_APPS": {"messaging", "audit"},
     "IGNORED_APPS": {"rest_framework", "corsheaders", "drf_spectacular"},
     # Dependency inversion: platform_core only knows these ports by import path.
@@ -308,6 +319,10 @@ SPECTACULAR_SETTINGS: dict[str, Any] = {
             "description": "Tasks, calls and notes with a per-subject timeline. Tenant-scoped.",
         },
         {
+            "name": "Analytics",
+            "description": "KPIs from the event-driven read model and async report exports.",
+        },
+        {
             "name": "Webhooks",
             "description": "Inbound provider callbacks. Signature-verified, not user-called.",
         },
@@ -366,8 +381,18 @@ CELERY_TASK_ROUTES = {
 }
 CELERY_BEAT_SCHEDULE = {
     "relay-outbox": {"task": "platform.outbox.relay_all", "schedule": 15.0},
+    # Daily KPI snapshots for every active tenant (idempotent upsert).
+    "daily-kpi-snapshots": {
+        "task": "reports.compute_daily_kpis",
+        "schedule": crontab(hour=1, minute=0),
+    },
 }
 DIAGNOSTIC_TASKS_ENABLED = ENV.DIAGNOSTIC_TASKS_ENABLED
+
+# Asynchronous report exports are written here (a shared volume in the stack).
+REPORTS: dict[str, Any] = {
+    "STORAGE_DIR": os.environ.get("REPORTS_STORAGE_DIR", str(BASE_DIR / "var" / "exports")),
+}
 
 # --- Integrations -----------------------------------------------------------
 

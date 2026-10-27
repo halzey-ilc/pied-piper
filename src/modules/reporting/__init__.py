@@ -1,1 +1,1 @@
-"""Reporting: asynchronous report/export jobs and daily reports (contracts only)."""
+"""Reporting: asynchronous report/export jobs rendered off the request path (tenant plane)."""

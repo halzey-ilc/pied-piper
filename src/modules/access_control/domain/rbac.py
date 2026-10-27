@@ -37,6 +37,7 @@ class Permission(StrEnum):
     ACTIVITIES_CREATE = "activities.create"
     ACTIVITIES_UPDATE = "activities.update"
     REPORTS_VIEW = "reports.view"
+    REPORTS_GENERATE = "reports.generate"
     MEMBERS_MANAGE = "members.manage"
     INTEGRATIONS_MANAGE = "integrations.manage"
 
@@ -75,7 +76,8 @@ ROLE_GRANTS: Mapping[Role, Mapping[Permission, Scope]] = {
         Permission.ACTIVITIES_VIEW: Scope.TEAM,
         Permission.ACTIVITIES_CREATE: Scope.TEAM,
         Permission.ACTIVITIES_UPDATE: Scope.TEAM,
-        Permission.REPORTS_VIEW: Scope.TEAM,
+        Permission.REPORTS_VIEW: Scope.ALL,
+        Permission.REPORTS_GENERATE: Scope.ALL,
     },
     Role.SALES_REP: {
         Permission.CUSTOMERS_VIEW: Scope.OWN,

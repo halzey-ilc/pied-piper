@@ -17,6 +17,7 @@ app.conf.include = [
     "entrypoints.workers.tasks.outbox",
     "entrypoints.workers.tasks.events",
     "entrypoints.workers.tasks.integrations",
+    "entrypoints.workers.tasks.reports",
 ]
 
 from platform_core.infrastructure.observability.celery_signals import (  # noqa: E402
