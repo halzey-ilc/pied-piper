@@ -1,1 +1,1 @@
-"""Meeting scheduling, participants, reminders and outcomes. (planned)."""
+"""Meetings: scheduling with participants and reminders on customers/deals (tenant plane)."""

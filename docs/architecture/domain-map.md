@@ -17,7 +17,7 @@ shared = table present in every DB).
 | sales_kpi | tenant | implemented | Event-driven read model, KPI aggregation, snapshots |
 | reporting | tenant | implemented | Async report/export jobs (CSV) off the request path |
 | activities | tenant | implemented | Tasks, calls, notes on customers/deals, timeline |
-| meetings | tenant | stub | Scheduling, reminders, outcomes |
+| meetings | tenant | implemented | Scheduling, participants, reminders, complete/cancel |
 | payments | tenant | stub | Invoices and payment status (no card data) |
 | telephony | tenant | stub | Call records, click-to-call via providers |
 | communications | tenant | stub | WhatsApp/Telegram/Instagram/e-mail conversations |

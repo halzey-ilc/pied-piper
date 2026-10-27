@@ -36,6 +36,9 @@ class Permission(StrEnum):
     ACTIVITIES_VIEW = "activities.view"
     ACTIVITIES_CREATE = "activities.create"
     ACTIVITIES_UPDATE = "activities.update"
+    MEETINGS_VIEW = "meetings.view"
+    MEETINGS_CREATE = "meetings.create"
+    MEETINGS_UPDATE = "meetings.update"
     REPORTS_VIEW = "reports.view"
     REPORTS_GENERATE = "reports.generate"
     MEMBERS_MANAGE = "members.manage"
@@ -76,6 +79,9 @@ ROLE_GRANTS: Mapping[Role, Mapping[Permission, Scope]] = {
         Permission.ACTIVITIES_VIEW: Scope.TEAM,
         Permission.ACTIVITIES_CREATE: Scope.TEAM,
         Permission.ACTIVITIES_UPDATE: Scope.TEAM,
+        Permission.MEETINGS_VIEW: Scope.TEAM,
+        Permission.MEETINGS_CREATE: Scope.TEAM,
+        Permission.MEETINGS_UPDATE: Scope.TEAM,
         Permission.REPORTS_VIEW: Scope.ALL,
         Permission.REPORTS_GENERATE: Scope.ALL,
     },
@@ -94,6 +100,9 @@ ROLE_GRANTS: Mapping[Role, Mapping[Permission, Scope]] = {
         Permission.ACTIVITIES_VIEW: Scope.OWN,
         Permission.ACTIVITIES_CREATE: Scope.OWN,
         Permission.ACTIVITIES_UPDATE: Scope.OWN,
+        Permission.MEETINGS_VIEW: Scope.OWN,
+        Permission.MEETINGS_CREATE: Scope.OWN,
+        Permission.MEETINGS_UPDATE: Scope.OWN,
     },
     Role.VIEWER: {
         Permission.CUSTOMERS_VIEW: Scope.ALL,
@@ -101,6 +110,7 @@ ROLE_GRANTS: Mapping[Role, Mapping[Permission, Scope]] = {
         Permission.PIPELINES_VIEW: Scope.ALL,
         Permission.DEALS_VIEW: Scope.ALL,
         Permission.ACTIVITIES_VIEW: Scope.ALL,
+        Permission.MEETINGS_VIEW: Scope.ALL,
         Permission.REPORTS_VIEW: Scope.ALL,
     },
 }

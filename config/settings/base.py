@@ -40,6 +40,7 @@ INSTALLED_APPS = [
     "modules.activities.infrastructure.apps.ActivitiesConfig",
     "modules.sales_kpi.infrastructure.apps.SalesKpiConfig",
     "modules.reporting.infrastructure.apps.ReportingConfig",
+    "modules.meetings.infrastructure.apps.MeetingsConfig",
 ]
 
 MIDDLEWARE = [
@@ -139,6 +140,7 @@ TENANCY: dict[str, Any] = {
         "activities",
         "sales_kpi",
         "reporting",
+        "meetings",
     },
     "SHARED_APPS": {"messaging", "audit"},
     "IGNORED_APPS": {"rest_framework", "corsheaders", "drf_spectacular"},
@@ -317,6 +319,10 @@ SPECTACULAR_SETTINGS: dict[str, Any] = {
         {
             "name": "Activities",
             "description": "Tasks, calls and notes with a per-subject timeline. Tenant-scoped.",
+        },
+        {
+            "name": "Meetings",
+            "description": "Scheduling with participants and reminders. Tenant-scoped.",
         },
         {
             "name": "Analytics",
