@@ -10,6 +10,8 @@ from __future__ import annotations
 from typing import Any
 
 from django.conf import settings
+from drf_spectacular.types import OpenApiTypes
+from drf_spectacular.utils import extend_schema
 from rest_framework import status
 from rest_framework.permissions import AllowAny
 from rest_framework.request import Request
@@ -35,6 +37,12 @@ class WebhookView(APIView):
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = "webhooks"
 
+    @extend_schema(
+        operation_id="webhook_ingest",
+        request=OpenApiTypes.OBJECT,
+        responses=OpenApiTypes.OBJECT,
+        description="Provider webhook endpoint. Authenticated by provider signature, not JWT.",
+    )
     def post(self, request: Request, provider: str, tenant_slug: str) -> Response:
         try:
             provider_enum = Provider(provider)

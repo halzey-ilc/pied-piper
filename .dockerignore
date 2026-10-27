@@ -17,9 +17,10 @@ var/
 dist/
 build/
 docs/
-tests/
 *.md
 !README.md
+# tests/ is intentionally NOT excluded: the `test` build stage copies it.
+# The runtime stage never copies tests/, so the shipped image stays clean.
 # Unrelated scratch files (see .gitignore)
 exploit.py
 fake_time.*

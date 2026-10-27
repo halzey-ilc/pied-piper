@@ -99,7 +99,11 @@ class ProvisionTenant:
             raise
         logger.info(
             "tenant_provisioned",
-            extra={"job_id": str(job_id), "cluster": locator.cluster, "created": created},
+            extra={
+                "job_id": str(job_id),
+                "cluster": locator.cluster,
+                "created_database": created,
+            },
         )
         return ProvisioningResult(
             database_name=locator.database_name,

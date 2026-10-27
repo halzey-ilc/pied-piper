@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from celery import Task
 
 from shared.application.retry import TransientError
 
 
-class ResilientTask(Task[..., Any]):
+# celery.Task is generic to type-checkers (celery-types) but is NOT subscriptable
+# at runtime, so it must be subclassed bare.
+class ResilientTask(Task):  # type: ignore[type-arg]
     """Retries TransientError with exponential backoff + jitter, then dead-letters.
 
     Tasks built on this class must be idempotent: acks_late means a task can be

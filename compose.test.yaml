@@ -9,7 +9,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: crm-platform:local
+      target: test
+    image: crm-platform:test
     env_file: [.env]
     environment:
       DJANGO_SETTINGS_MODULE: config.settings.test

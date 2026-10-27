@@ -23,19 +23,22 @@ from platform_core.application.context import (
 logger = logging.getLogger(__name__)
 _TIMERS: dict[str, tuple[float, Any]] = {}
 
+# A non-reserved message header. "correlation_id" is a built-in Celery request
+# field (set to the task id), so a custom header of that name would be masked.
+CORRELATION_HEADER = "crm_correlation_id"
+
 
 def _on_before_publish(headers: dict[str, Any] | None = None, **_: Any) -> None:
-    if headers is not None and not headers.get("correlation_id"):
+    if headers is not None and not headers.get(CORRELATION_HEADER):
         cid = current_correlation_id()
         if cid:
-            headers["correlation_id"] = cid
+            headers[CORRELATION_HEADER] = cid
 
 
 def _correlation_from(task: Any) -> str | None:
     request = getattr(task, "request", None)
-    candidate = getattr(request, "correlation_id", None)
-    if candidate is None:
-        candidate = (getattr(request, "headers", None) or {}).get("correlation_id")
+    headers = getattr(request, "headers", None) or {}
+    candidate = headers.get(CORRELATION_HEADER) or getattr(request, CORRELATION_HEADER, None)
     return sanitize_id(candidate) if isinstance(candidate, str) else None
 
 

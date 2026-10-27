@@ -22,6 +22,23 @@ class CustomerUpdateSerializer(serializers.Serializer[dict[str, Any]]):
     version = serializers.IntegerField(required=False, min_value=1)
 
 
+class CustomerReadSerializer(serializers.Serializer[dict[str, Any]]):
+    """Output shape for API documentation; the views return ``customer_to_dict``."""
+
+    id = serializers.UUIDField(read_only=True)
+    name = serializers.CharField(read_only=True)
+    email = serializers.EmailField(read_only=True, allow_null=True)
+    phone = serializers.CharField(read_only=True, allow_null=True)
+    owner_user_id = serializers.UUIDField(read_only=True)
+    version = serializers.IntegerField(read_only=True)
+    created_at = serializers.DateTimeField(read_only=True)
+
+
+class CustomerListSerializer(serializers.Serializer[dict[str, Any]]):
+    count = serializers.IntegerField(read_only=True)
+    results = CustomerReadSerializer(many=True, read_only=True)
+
+
 def customer_to_dict(customer: Customer) -> dict[str, Any]:
     return {
         "id": str(customer.id),

@@ -10,10 +10,11 @@ from typing import Any
 
 _TEST_DEFAULTS = {
     "DJANGO_ENV": "test",
-    "DJANGO_SECRET_KEY": "test-only-secret-key-not-used-anywhere-else-0123456789abcdef",
-    "JWT_SIGNING_KEY": "test-only-jwt-signing-key-not-used-anywhere-else-0123456789",
-    "DB_PASSWORD": "test-only-db-password",
-    "RABBITMQ_PASSWORD": "test-only-rabbitmq-password",
+    # Non-secret, test-only values applied via setdefault (real env still wins). # nosec B105
+    "DJANGO_SECRET_KEY": "test-only-secret-key-not-used-anywhere-else-0123456789abcdef",  # nosec B105
+    "JWT_SIGNING_KEY": "test-only-jwt-signing-key-not-used-anywhere-else-0123456789",  # nosec B105
+    "DB_PASSWORD": "test-only-db-password",  # nosec B105
+    "RABBITMQ_PASSWORD": "test-only-rabbitmq-password",  # nosec B105
     "LOG_JSON": "false",
     "LOG_LEVEL": "WARNING",
     "DIAGNOSTIC_TASKS_ENABLED": "true",

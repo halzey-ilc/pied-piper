@@ -4,13 +4,20 @@
 # contains no build toolchain.
 
 ARG PYTHON_VERSION=3.13
+ARG UV_VERSION=0.13.6
 
 # --- builder --------------------------------------------------------------
-FROM ghcr.io/astral-sh/uv:0.13-python${PYTHON_VERSION}-bookworm-slim AS builder
+# uv is installed from PyPI at a pinned version (no dependency on ghcr.io), and
+# builds the venv against this image's own CPython so it matches the runtime.
+FROM python:${PYTHON_VERSION}-slim-bookworm AS builder
 
 ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
-    UV_PYTHON_DOWNLOADS=never
+    UV_PYTHON_DOWNLOADS=never \
+    UV_PROJECT_ENVIRONMENT=/app/.venv
+
+ARG UV_VERSION
+RUN pip install --no-cache-dir "uv==${UV_VERSION}"
 
 WORKDIR /app
 
@@ -60,3 +67,25 @@ EXPOSE 8000
 ENTRYPOINT ["entrypoint.sh"]
 # Default: the API. Overridden by the worker/beat services in compose.yaml.
 CMD ["gunicorn", "config.wsgi:application", "-c", "config/gunicorn.conf.py"]
+
+# --- test -----------------------------------------------------------------
+# Dev/test image: the builder venv plus dev dependencies and the test suite.
+# Used only by the `tests` service in compose.test.yaml (never shipped).
+FROM builder AS test
+
+ENV PATH="/app/.venv/bin:$PATH" \
+    PYTHONPATH="/app/src:/app" \
+    PYTHONUNBUFFERED=1 \
+    DJANGO_SETTINGS_MODULE=config.settings.test \
+    DJANGO_ENV=test \
+    PROMETHEUS_MULTIPROC_DIR=/tmp/prometheus
+
+RUN --mount=type=cache,target=/root/.cache/uv uv sync --locked --all-groups
+COPY tests ./tests
+# .env.example ships so the placeholder-hygiene test runs here too. .gitignore /
+# .dockerignore are excluded by .dockerignore, so that test skips in-container
+# (it runs against a real checkout in CI's "not integration" job).
+COPY .env.example ./
+RUN mkdir -p /tmp/prometheus
+ENTRYPOINT []
+CMD ["pytest"]

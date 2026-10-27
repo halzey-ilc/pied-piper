@@ -10,6 +10,7 @@ from __future__ import annotations
 from celery import current_app
 
 from platform_core.application.ports import EventEnvelope
+from platform_core.infrastructure.observability.celery_signals import CORRELATION_HEADER
 
 DISPATCH_TASK = "platform.events.dispatch"
 
@@ -20,5 +21,5 @@ class CeleryMessagePublisher:
             DISPATCH_TASK,
             kwargs={"envelope": envelope.as_message()},
             queue="events",
-            headers={"correlation_id": envelope.correlation_id or ""},
+            headers={CORRELATION_HEADER: envelope.correlation_id or ""},
         )

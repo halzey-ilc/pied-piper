@@ -7,6 +7,7 @@ from django.db import transaction
 
 from modules.integrations.domain.providers import Provider
 from platform_core.application.context import current_correlation_id
+from platform_core.infrastructure.observability.celery_signals import CORRELATION_HEADER
 
 PROCESS_WEBHOOK_TASK = "integrations.process_webhook"
 
@@ -28,7 +29,7 @@ class CeleryWebhookScheduler:
                     "provider": provider.value,
                     "inbox_id": str(inbox_id),
                 },
-                headers={"correlation_id": correlation_id},
+                headers={CORRELATION_HEADER: correlation_id},
             )
 
         transaction.on_commit(_send, using=self.using)

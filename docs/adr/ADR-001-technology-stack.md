@@ -19,7 +19,7 @@ Python **3.13** managed by **uv**, with dependencies pinned in `uv.lock` and
 |------|--------|---------|
 | Language | CPython (via uv) | 3.13.18 |
 | Web framework | Django (LTS) | 5.2.18 |
-| API | Django REST Framework | 3.16.1 |
+| API | Django REST Framework | 3.18.3 |
 | Auth | djangorestframework-simplejwt | 5.5.1 |
 | API schema | drf-spectacular | 0.29.0 |
 | DB driver | psycopg (v3, binary) | 3.3.6 |
@@ -44,10 +44,17 @@ Actions.
   working `venv`/`pip`. 3.14 is too new for parts of the pinned stack (notably
   the mypy Django stubs matrix). We installed uv (user-local, no system changes)
   and used its managed **CPython 3.13.18**, which every dependency supports.
-- **DRF pinned to 3.16, not the newest 3.18.** `djangorestframework-stubs` for
-  3.18 requires `django-stubs >= 6.1`, which targets Django 6.x; on Django 5.2
-  LTS the compatible, type-checked combination is DRF 3.16 + stubs 3.16. We
-  prioritised the LTS + strict typing over the newest DRF.
+- **DRF runtime 3.18.3, type stubs kept on the 3.16 line.** We initially pinned
+  DRF 3.16 because `djangorestframework-stubs` 3.18 requires `django-stubs >= 6.1`
+  (which targets Django 6.x), while we stay on Django 5.2 LTS. `pip-audit` then
+  flagged CVEs against DRF 3.16.1 (fixed in 3.18.2), so the **runtime** is pinned
+  to DRF 3.18.3 for the security fix, while the **dev-only** type stubs stay at
+  `djangorestframework-stubs` 3.16.9 + `django-stubs` 5.2.9 to match Django 5.2.
+  The minor stub/runtime skew is benign for the DRF surface we use, and mypy
+  (strict) passes. Revisit the stubs when django-stubs supports a Django 6 LTS.
+- **pytest 9.** Bumped from 8.4.2 to 9.1.1 to clear a pytest advisory
+  (PYSEC-2026-1845); pytest-django 4.14 supports pytest 9. After these bumps
+  `pip-audit` reports no known vulnerabilities.
 - **ClickHouse / OpenSearch not included.** The brief defers these; analytics
   ships as domain contracts only.
 - **pgBouncer / pgBackRest / Prometheus / Grafana** are configured and
