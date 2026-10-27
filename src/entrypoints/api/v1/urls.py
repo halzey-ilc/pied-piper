@@ -10,6 +10,7 @@ urlpatterns = [
     path("auth/token/refresh/", TokenRefreshThrottledView.as_view(), name="auth-token-refresh"),
     path("me/", MeView.as_view(), name="me"),
     path("customers/", include("modules.customers.presentation.urls")),
+    path("leads/", include("modules.leads.presentation.urls")),
     path(
         "webhooks/<str:provider>/<slug:tenant_slug>/",
         WebhookView.as_view(),

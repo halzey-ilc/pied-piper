@@ -89,6 +89,7 @@ select = [
 ]
 ignore = [
     "PLR0913",  # use cases legitimately take several collaborators
+    "PLR0917",  # same: several injected ports as positional arguments
     "PLR2004",
     "PLC0415",  # deferred imports are used on purpose (optional deps, Django start-up order)
     "RUF012",   # Django/DRF class attributes

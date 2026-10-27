@@ -12,9 +12,9 @@ shared = table present in every DB).
 | audit | shared | implemented | Append-only audit log |
 | customers | tenant | implemented | Customer aggregate — reference implementation of all four layers |
 | integrations | tenant | implemented | Webhook ingestion (signature + dedup), typed contracts, channel adapters |
+| leads | tenant | implemented | Lead capture, qualify/disqualify, convert to customer |
 | sales_kpi | tenant | contracts | KPI definitions, aggregation, snapshots |
 | reporting | tenant | contracts | Async report/export jobs |
-| leads | tenant | stub | Lead capture, qualification, conversion |
 | sales_pipeline | tenant | stub | Pipelines, stages, deals, win/loss |
 | activities | tenant | stub | Tasks, calls, notes, timeline |
 | meetings | tenant | stub | Scheduling, reminders, outcomes |

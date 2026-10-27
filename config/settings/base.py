@@ -33,6 +33,7 @@ INSTALLED_APPS = [
     "modules.tenant_registry.infrastructure.apps.TenantRegistryConfig",
     "modules.audit.infrastructure.apps.AuditConfig",
     "modules.customers.infrastructure.apps.CustomersConfig",
+    "modules.leads.infrastructure.apps.LeadsConfig",
 ]
 
 MIDDLEWARE = [
@@ -125,7 +126,7 @@ TENANCY: dict[str, Any] = {
         "organizations",
         "tenant_registry",
     },
-    "TENANT_PLANE_APPS": {"customers"},
+    "TENANT_PLANE_APPS": {"customers", "leads"},
     "SHARED_APPS": {"messaging", "audit"},
     "IGNORED_APPS": {"rest_framework", "corsheaders", "drf_spectacular"},
     # Dependency inversion: platform_core only knows these ports by import path.
@@ -284,6 +285,10 @@ SPECTACULAR_SETTINGS: dict[str, Any] = {
     "TAGS": [
         {"name": "Authentication", "description": "Obtain and refresh JWT access tokens."},
         {"name": "Account", "description": "The signed-in user and the companies they belong to."},
+        {
+            "name": "Leads",
+            "description": "Potential customers: capture, qualify, convert. Tenant-scoped.",
+        },
         {
             "name": "Customers",
             "description": "Customer records. Tenant-scoped: send the X-Tenant header.",

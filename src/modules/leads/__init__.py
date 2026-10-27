@@ -1,1 +1,1 @@
-"""Lead capture, qualification, assignment and conversion to customers/deals. (planned)."""
+"""Leads: capture, qualification and conversion of potential customers (tenant plane)."""
