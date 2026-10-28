@@ -9,32 +9,68 @@ from platform_core.application.context import current_correlation_id
 
 SUBMIT_TASK = "integrations.ai_submit_insight"
 POLL_TASK = "integrations.ai_poll_insight"
+SUBMIT_DIGEST_TASK = "integrations.ai_submit_digest"
+POLL_DIGEST_TASK = "integrations.ai_poll_digest"
 # Outbound calls to an external service: the existing integrations queue.
 QUEUE = "integrations"
 
 
+def _send_on_commit(using: str, task: str, kwargs: dict[str, str], countdown: float | None) -> None:
+    correlation_id = current_correlation_id() or ""
+
+    def _go() -> None:
+        current_app.send_task(
+            task,
+            kwargs=kwargs,
+            queue=QUEUE,
+            countdown=countdown,
+            headers={"crm_correlation_id": correlation_id},
+        )
+
+    transaction.on_commit(_go, using=using)
+
+
 class CeleryInsightScheduler:
-    """Enqueues worker steps only after the insight row has been committed."""
+    """Enqueues call-insight steps only after the insight row has been committed."""
 
     def __init__(self, using: str) -> None:
         self.using = using
 
     def schedule_submit(self, *, tenant_slug: str, insight_id: UUID) -> None:
-        self._send(SUBMIT_TASK, tenant_slug, insight_id, countdown=None)
+        _send_on_commit(
+            self.using,
+            SUBMIT_TASK,
+            {"tenant_slug": tenant_slug, "insight_id": str(insight_id)},
+            None,
+        )
 
     def schedule_poll(self, *, tenant_slug: str, insight_id: UUID, delay_seconds: float) -> None:
-        self._send(POLL_TASK, tenant_slug, insight_id, countdown=delay_seconds)
+        _send_on_commit(
+            self.using,
+            POLL_TASK,
+            {"tenant_slug": tenant_slug, "insight_id": str(insight_id)},
+            delay_seconds,
+        )
 
-    def _send(self, task: str, tenant_slug: str, insight_id: UUID, countdown: float | None) -> None:
-        correlation_id = current_correlation_id() or ""
 
-        def _go() -> None:
-            current_app.send_task(
-                task,
-                kwargs={"tenant_slug": tenant_slug, "insight_id": str(insight_id)},
-                queue=QUEUE,
-                countdown=countdown,
-                headers={"crm_correlation_id": correlation_id},
-            )
+class CeleryDigestScheduler:
+    """Enqueues operations-digest steps only after the digest row has been committed."""
 
-        transaction.on_commit(_go, using=self.using)
+    def __init__(self, using: str) -> None:
+        self.using = using
+
+    def schedule_submit(self, *, tenant_slug: str, digest_id: UUID) -> None:
+        _send_on_commit(
+            self.using,
+            SUBMIT_DIGEST_TASK,
+            {"tenant_slug": tenant_slug, "digest_id": str(digest_id)},
+            None,
+        )
+
+    def schedule_poll(self, *, tenant_slug: str, digest_id: UUID, delay_seconds: float) -> None:
+        _send_on_commit(
+            self.using,
+            POLL_DIGEST_TASK,
+            {"tenant_slug": tenant_slug, "digest_id": str(digest_id)},
+            delay_seconds,
+        )

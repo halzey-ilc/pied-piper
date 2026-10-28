@@ -24,6 +24,27 @@ GET  /api/v1/ai/calls/<call_id>/summary/      -> latest insight of a call the us
 Why pull instead of a callback: the AI Platform holds **no CRM credentials**
 and the CRM exposes **no new inbound endpoint** for a machine identity.
 
+## Operations digests (AI Operations)
+
+The rules live in the CRM (`modules.operations`, no AI): forgotten leads,
+deals without a next step, overdue tasks and stalled deals, with per-company
+thresholds (`GET /api/v1/operations/findings/`, `GET/PUT /api/v1/operations/settings/`).
+The AI Platform only **explains** what the rules found:
+
+```
+POST /api/v1/ai/operations/digest/  {"language": "ru"|"ky"|"en"}   (ai.request; viewer 403)
+  snapshot of the caller's own findings (their visibility), as
+  {"ref": "lead:<uuid>", "kind": "stale_lead", "age_days": 9} + counts + thresholds
+  -> stored, then integrations.ai_submit_digest / ai_poll_digest (job operations.digest.v1)
+GET  /api/v1/ai/operations/digest/   -> the caller's own latest digest (never another user's)
+beat 06:00 integrations.ai_daily_digests -> one daily digest per member with ai.request
+     who has findings (unique per user and day; no-op while AI is off)
+```
+
+Only references, kinds, ages and thresholds are sent; names, e-mails, amounts
+and text never leave the CRM. The AI output cites `finding_refs`; the AI
+Platform rejects outputs that cite anything not in the input.
+
 ## Data and security
 
 | Concern | How |
@@ -38,12 +59,13 @@ and the CRM exposes **no new inbound endpoint** for a machine identity.
 | Queue | Existing `integrations` queue (outbound calls), no topology change |
 
 Tests: `tests/unit/test_ai_insights.py`, `tests/api/test_ai_insights.py`,
-`tests/security/test_ai_insights_isolation.py`.
+`tests/security/test_ai_insights_isolation.py`, `tests/unit/test_operations_rules.py`,
+`tests/api/test_operations.py`, `tests/api/test_ai_operations_digest.py`.
 
 ## Running locally with the AI Platform
 
 ```bash
-(cd ../crm-ai-platform && make up && ./scripts/e2e_with_crm.sh)
+(cd ../crm-ai-platform && ./scripts/e2e_with_crm.sh && ./scripts/e2e_operations.sh)
 ```
 
 The script reconnects `api` and `worker` through `compose.ai.yaml`, which joins
@@ -54,5 +76,8 @@ collide. Without the overlay the CRM runs as before with AI disabled.
 ## Not done yet
 
 - Transcripts / audio (summaries use call notes), language detection.
-- Per-company script-evaluation rules, other insight kinds (operations, KPI explanations).
+- Per-company script-evaluation rules, KPI explanations (Business Analyst).
+- Notifying users when their daily digest is ready (event `ai_insights.operations_digest_completed`
+  is emitted; no handler yet).
+- Stalled deals use `updated_at` because there is no stage history.
 - Showing insights in the call card of a frontend (there is no frontend).

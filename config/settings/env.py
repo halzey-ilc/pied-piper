@@ -154,6 +154,8 @@ class AppEnv(BaseSettings):
     AI_PLATFORM_TOKEN_TTL_SECONDS: int = Field(default=300, ge=30, le=900)
     AI_PLATFORM_TIMEOUT_SECONDS: float = Field(default=10.0, gt=0, le=60)
     AI_PLATFORM_DEADLINE_SECONDS: int = Field(default=900, ge=60, le=86400)
+    # Language of AI texts the CRM requests (operations digests).
+    AI_PLATFORM_LANGUAGE: Literal["ru", "ky", "en"] = "ru"
 
     @field_validator(
         "DJANGO_ALLOWED_HOSTS",

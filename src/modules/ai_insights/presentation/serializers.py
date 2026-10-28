@@ -4,6 +4,7 @@ from typing import Any
 
 from rest_framework import serializers
 
+from modules.ai_insights.domain.digest import LANGUAGES, OperationsDigest
 from modules.ai_insights.domain.insight import CallInsight
 
 
@@ -29,6 +30,53 @@ class CallInsightSerializer(serializers.Serializer[dict[str, Any]]):
     error_code = serializers.CharField(read_only=True, allow_null=True)
     created_at = serializers.DateTimeField(read_only=True)
     finished_at = serializers.DateTimeField(read_only=True, allow_null=True)
+
+
+class DigestRequestSerializer(serializers.Serializer[dict[str, Any]]):
+    language = serializers.ChoiceField(choices=list(LANGUAGES), required=False)
+
+
+class OperationsDigestSerializer(serializers.Serializer[dict[str, Any]]):
+    id = serializers.UUIDField(read_only=True)
+    trigger = serializers.CharField(read_only=True, help_text="manual | daily")
+    digest_date = serializers.DateField(read_only=True)
+    status = serializers.CharField(
+        read_only=True, help_text="pending | submitted | succeeded | failed"
+    )
+    counts = serializers.DictField(
+        child=serializers.IntegerField(), read_only=True, help_text="Findings sent, by kind."
+    )
+    is_mock = serializers.BooleanField(read_only=True)
+    provider = serializers.CharField(read_only=True, allow_null=True)
+    model = serializers.CharField(read_only=True, allow_null=True)
+    result = serializers.JSONField(
+        read_only=True,
+        allow_null=True,
+        help_text=(
+            "operations_digest.output.v1. finding_refs look like 'lead:<uuid>', "
+            "'deal:<uuid>' or 'task:<uuid>'."
+        ),
+    )
+    error_code = serializers.CharField(read_only=True, allow_null=True)
+    created_at = serializers.DateTimeField(read_only=True)
+    finished_at = serializers.DateTimeField(read_only=True, allow_null=True)
+
+
+def digest_to_dict(digest: OperationsDigest) -> dict[str, Any]:
+    return {
+        "id": str(digest.id),
+        "trigger": digest.trigger.value,
+        "digest_date": digest.digest_date.isoformat(),
+        "status": digest.status.value,
+        "counts": digest.payload.get("counts", {}),
+        "is_mock": digest.is_mock,
+        "provider": digest.provider,
+        "model": digest.model,
+        "result": digest.result,
+        "error_code": digest.error_code,
+        "created_at": digest.created_at.isoformat(),
+        "finished_at": digest.finished_at.isoformat() if digest.finished_at else None,
+    }
 
 
 def insight_to_dict(insight: CallInsight) -> dict[str, Any]:

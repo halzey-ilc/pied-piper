@@ -515,6 +515,11 @@ CELERY_BEAT_SCHEDULE = {
         "task": "reports.compute_daily_kpis",
         "schedule": crontab(hour=1, minute=0),
     },
+    # AI operations digests for users with findings; does nothing while AI is off.
+    "daily-ai-operations-digests": {
+        "task": "integrations.ai_daily_digests",
+        "schedule": crontab(hour=6, minute=0),
+    },
 }
 DIAGNOSTIC_TASKS_ENABLED = ENV.DIAGNOSTIC_TASKS_ENABLED
 
@@ -553,6 +558,7 @@ AI_PLATFORM: dict[str, Any] = {
     "CONNECT_TIMEOUT": 3.0,
     "READ_TIMEOUT": ENV.AI_PLATFORM_TIMEOUT_SECONDS,
     "DEADLINE_SECONDS": ENV.AI_PLATFORM_DEADLINE_SECONDS,
+    "DEFAULT_LANGUAGE": ENV.AI_PLATFORM_LANGUAGE,
 }
 
 # --- Observability ----------------------------------------------------------

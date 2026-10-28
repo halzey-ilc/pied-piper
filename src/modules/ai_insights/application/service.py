@@ -173,7 +173,7 @@ class CallInsightService:
                     self._finish(insight, insight.mark_failed("timeout"))
                 return
             self._scheduler.schedule_poll(
-                tenant_slug=self._tenant_slug, insight_id=insight.id, delay_seconds=_poll_delay(age)
+                tenant_slug=self._tenant_slug, insight_id=insight.id, delay_seconds=poll_delay(age)
             )
             return
         with self._uow:
@@ -223,7 +223,7 @@ class CallInsightService:
         )
 
 
-def _poll_delay(age_seconds: float) -> float:
+def poll_delay(age_seconds: float) -> float:
     """Poll quickly at first (most jobs finish in seconds), then back off."""
     if age_seconds < 30:
         return 2.0
