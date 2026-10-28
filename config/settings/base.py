@@ -50,6 +50,7 @@ INSTALLED_APPS = [
     "modules.notifications.infrastructure.apps.NotificationsConfig",
     "modules.communications.infrastructure.apps.CommunicationsConfig",
     "modules.ai_insights.infrastructure.apps.AiInsightsConfig",
+    "modules.operations.infrastructure.apps.OperationsConfig",
 ]
 
 MIDDLEWARE = [
@@ -164,6 +165,7 @@ TENANCY: dict[str, Any] = {
         "notifications",
         "communications",
         "ai_insights",
+        "operations",
     },
     "SHARED_APPS": {"messaging", "audit"},
     "IGNORED_APPS": {"rest_framework", "corsheaders", "drf_spectacular"},

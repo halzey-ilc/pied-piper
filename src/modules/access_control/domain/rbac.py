@@ -55,6 +55,8 @@ class Permission(StrEnum):
     INTEGRATIONS_MANAGE = "integrations.manage"
     # Send a record's content to the AI Platform for analysis (e.g. a call summary).
     AI_REQUEST = "ai.request"
+    # Change the company's operations rules (e.g. when a lead counts as forgotten).
+    OPERATIONS_MANAGE = "operations.manage"
 
 
 class Scope(IntEnum):
