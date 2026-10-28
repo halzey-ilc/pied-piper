@@ -14,7 +14,7 @@ import hashlib
 from dataclasses import dataclass
 from uuid import UUID
 
-from cryptography.fernet import Fernet, InvalidToken
+from cryptography.fernet import Fernet, InvalidToken, MultiFernet
 from django.conf import settings
 from django.utils import timezone
 
@@ -28,13 +28,22 @@ class Enrolment:
     provisioning_uri: str
 
 
-def _fernet() -> Fernet:
+def _as_key(value: str | bytes) -> bytes:
+    return value.encode() if isinstance(value, str) else value
+
+
+def _primary_key() -> bytes:
     configured = settings.MFA.get("ENCRYPTION_KEY")
     if configured:
-        return Fernet(configured.encode() if isinstance(configured, str) else configured)
+        return _as_key(configured)
     # Derive a stable Fernet key from the Django secret key.
-    digest = hashlib.sha256(settings.SECRET_KEY.encode()).digest()
-    return Fernet(base64.urlsafe_b64encode(digest))
+    return base64.urlsafe_b64encode(hashlib.sha256(settings.SECRET_KEY.encode()).digest())
+
+
+def _fernet() -> MultiFernet:
+    """Fernet set: the primary key encrypts; any key (incl. fallbacks) decrypts."""
+    keys = [_primary_key()] + [_as_key(k) for k in settings.MFA.get("ENCRYPTION_KEY_FALLBACKS", [])]
+    return MultiFernet([Fernet(k) for k in keys])
 
 
 def _hash_code(code: str) -> str:
@@ -96,6 +105,21 @@ class MfaService:
 
     def disable(self, *, user_id: UserId) -> None:
         MfaDevice.objects.filter(user_id=user_id).delete()
+
+    def reencrypt_all(self) -> int:
+        """Re-encrypt every stored TOTP secret under the current primary key.
+
+        Used after adding a new ``MFA_ENCRYPTION_KEY`` (with the old one moved to
+        ``MFA_ENCRYPTION_KEY_FALLBACKS``): once this completes the fallback can be
+        dropped. Returns the number of devices re-encrypted.
+        """
+        multi = _fernet()
+        count = 0
+        for device in MfaDevice.objects.all():
+            device.encrypted_secret = multi.rotate(bytes(device.encrypted_secret))
+            device.save(update_fields=["encrypted_secret"])
+            count += 1
+        return count
 
     def _secret(self, device: MfaDevice) -> str:
         try:

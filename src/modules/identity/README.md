@@ -34,6 +34,10 @@ granted through `organizations` memberships, never from token claims.
 - `infrastructure/lockout.py`, `infrastructure/mfa.py`, `infrastructure/oidc.py`,
   `infrastructure/password_reset.py` — stateful services (ORM, Fernet, PyJWT,
   email) and the JWKS resolver.
+- `infrastructure/authentication.py` — `FallbackJWTAuthentication`, which accepts
+  tokens signed by a previous key during signing-key rotation (verification
+  only). The `reencrypt_mfa_secrets` management command re-encrypts TOTP secrets
+  after an MFA-key rotation. See docs/operations/secret-rotation.md.
 - `infrastructure/models.py` — `User`, `LoginState`, `MfaDevice`,
   `MfaRecoveryCode`, `PasswordResetToken`.
 - `presentation/` — DRF serializers, views and auth-specific error types.
@@ -43,5 +47,6 @@ granted through `organizations` memberships, never from token claims.
 `LOGIN_MAX_FAILURES`, `LOGIN_LOCKOUT_MINUTES`, `LOGIN_FAILURE_WINDOW_MINUTES`,
 `MFA_ISSUER`, `MFA_ENCRYPTION_KEY`, `OIDC_ENABLED`, `OIDC_ISSUER`,
 `OIDC_CLIENT_ID`, `OIDC_JWKS_URI`, `OIDC_AUTO_PROVISION`, `EMAIL_*`,
-`DEFAULT_FROM_EMAIL`, `PASSWORD_RESET_TTL_MINUTES`, `PASSWORD_RESET_URL_BASE`
-(see `.env.example`).
+`DEFAULT_FROM_EMAIL`, `PASSWORD_RESET_TTL_MINUTES`, `PASSWORD_RESET_URL_BASE`,
+and the rotation fallbacks `DJANGO_SECRET_KEY_FALLBACKS`,
+`JWT_SIGNING_KEY_FALLBACKS`, `MFA_ENCRYPTION_KEY_FALLBACKS` (see `.env.example`).

@@ -18,6 +18,7 @@ from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 from modules.identity.infrastructure.mfa import MfaService
 from modules.identity.infrastructure.oidc import OidcError, verifier_from_settings
 from modules.identity.infrastructure.password_reset import PasswordResetService
+from modules.identity.presentation import schema as _schema  # noqa: F401 - registers OpenAPI scheme
 from modules.identity.presentation.auth_errors import OidcLoginFailed, OidcNoAccount
 from modules.identity.presentation.serializers import (
     EnrolmentResponseSerializer,

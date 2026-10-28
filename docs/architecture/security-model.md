@@ -111,9 +111,13 @@ Implemented in code/config (needs your infrastructure to activate):
   external login, self-service password reset, and logout/refresh-token
   revocation (`modules.identity`).
 
+- Zero-downtime secret rotation for the JWT signing key
+  (`JWT_SIGNING_KEY_FALLBACKS` + `FallbackJWTAuthentication`), the Django secret
+  (`SECRET_KEY_FALLBACKS`) and the MFA encryption key (Fernet MultiFernet +
+  `reencrypt_mfa_secrets`); see [secret-rotation](../operations/secret-rotation.md).
+
 Still outstanding — needs product/ops decisions or external services:
 
-- Secret **rotation** automation (the delivery mechanism is in place).
 - A managed WAF / DDoS protection in front of the nginx edge; managed TLS certs.
 - Backup **and tested restore** (see [backup-restore](../operations/backup-restore.md)),
   DR runbook, failover.

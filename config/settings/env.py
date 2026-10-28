@@ -39,6 +39,8 @@ class AppEnv(BaseSettings):
 
     DJANGO_ENV: Environment = "local"
     DJANGO_SECRET_KEY: SecretStr
+    # Previous signing secrets still accepted during rotation (comma-separated).
+    DJANGO_SECRET_KEY_FALLBACKS: CommaList = Field(default_factory=list)
     DJANGO_DEBUG: bool = False
     DJANGO_ALLOWED_HOSTS: CommaList = Field(default_factory=lambda: ["localhost", "127.0.0.1"])
     CORS_ALLOWED_ORIGINS: CommaList = Field(default_factory=list)
@@ -48,6 +50,8 @@ class AppEnv(BaseSettings):
     API_DOCS_ENABLED: bool = False
 
     JWT_SIGNING_KEY: SecretStr
+    # Previous JWT signing keys still accepted for verification during rotation.
+    JWT_SIGNING_KEY_FALLBACKS: CommaList = Field(default_factory=list)
     JWT_ACCESS_TTL_MINUTES: int = Field(default=10, ge=1, le=60)
     JWT_REFRESH_TTL_HOURS: int = Field(default=24, ge=1, le=24 * 14)
     JWT_ISSUER: str = "crm-platform"
@@ -75,6 +79,8 @@ class AppEnv(BaseSettings):
     # MFA_ENCRYPTION_KEY is unset a key is derived from DJANGO_SECRET_KEY.
     MFA_ISSUER: str = "CRM Platform"
     MFA_ENCRYPTION_KEY: SecretStr | None = None
+    # Previous Fernet keys still accepted for decryption during rotation.
+    MFA_ENCRYPTION_KEY_FALLBACKS: CommaList = Field(default_factory=list)
 
     # OpenID Connect relying party (log in with an external IdP). Disabled unless
     # OIDC_ENABLED and the issuer/client are configured.
@@ -140,7 +146,13 @@ class AppEnv(BaseSettings):
     TELEPHONY_WEBHOOK_SECRET: SecretStr | None = None
 
     @field_validator(
-        "DJANGO_ALLOWED_HOSTS", "CORS_ALLOWED_ORIGINS", "CSRF_TRUSTED_ORIGINS", mode="before"
+        "DJANGO_ALLOWED_HOSTS",
+        "CORS_ALLOWED_ORIGINS",
+        "CSRF_TRUSTED_ORIGINS",
+        "DJANGO_SECRET_KEY_FALLBACKS",
+        "JWT_SIGNING_KEY_FALLBACKS",
+        "MFA_ENCRYPTION_KEY_FALLBACKS",
+        mode="before",
     )
     @classmethod
     def _split_csv(cls, value: object) -> object:

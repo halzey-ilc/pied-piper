@@ -18,6 +18,9 @@ BASE_DIR = Path(__file__).resolve().parents[2]
 ENV = load_env(None if os.environ.get("DJANGO_ENV") == "test" else BASE_DIR / ".env")
 
 SECRET_KEY = ENV.DJANGO_SECRET_KEY.get_secret_value()
+# Previous secrets still honoured for signature verification during rotation
+# (Django uses these for sessions, password-reset and other signed values).
+SECRET_KEY_FALLBACKS = ENV.DJANGO_SECRET_KEY_FALLBACKS
 DEBUG = ENV.DJANGO_DEBUG
 ALLOWED_HOSTS = ENV.DJANGO_ALLOWED_HOSTS
 API_DOCS_ENABLED = ENV.API_DOCS_ENABLED
@@ -240,7 +243,7 @@ CORS_ALLOW_HEADERS = [
 
 REST_FRAMEWORK: dict[str, Any] = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
-        "rest_framework_simplejwt.authentication.JWTAuthentication",
+        "modules.identity.infrastructure.authentication.FallbackJWTAuthentication",
     ],
     "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.IsAuthenticated"],
     "DEFAULT_RENDERER_CLASSES": ["rest_framework.renderers.JSONRenderer"],
@@ -279,17 +282,24 @@ SIMPLE_JWT: dict[str, Any] = {
     "USER_ID_CLAIM": "sub",
 }
 
+# Old JWT signing keys still accepted for verification during a rotation window.
+# The custom authentication class (DEFAULT_AUTHENTICATION_CLASSES) consults these
+# only after the current key fails; new tokens are always signed with SIGNING_KEY.
+JWT_SIGNING_KEY_FALLBACKS: list[str] = ENV.JWT_SIGNING_KEY_FALLBACKS
+
 # Account lockout, MFA and OIDC relying-party configuration (modules.identity).
 LOGIN_LOCKOUT: dict[str, int] = {
     "MAX_FAILURES": ENV.LOGIN_MAX_FAILURES,
     "LOCKOUT_MINUTES": ENV.LOGIN_LOCKOUT_MINUTES,
     "WINDOW_MINUTES": ENV.LOGIN_FAILURE_WINDOW_MINUTES,
 }
-MFA: dict[str, str | None] = {
+MFA: dict[str, Any] = {
     "ISSUER": ENV.MFA_ISSUER,
     "ENCRYPTION_KEY": (
         ENV.MFA_ENCRYPTION_KEY.get_secret_value() if ENV.MFA_ENCRYPTION_KEY else None
     ),
+    # Old Fernet keys still accepted for decryption until re-encryption completes.
+    "ENCRYPTION_KEY_FALLBACKS": ENV.MFA_ENCRYPTION_KEY_FALLBACKS,
 }
 OIDC: dict[str, Any] = {
     "ENABLED": ENV.OIDC_ENABLED,
