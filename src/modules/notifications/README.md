@@ -1,17 +1,32 @@
 # Notifications
 
-**Status:** planned, not implemented. Only the package and this note exist.
+**Status:** implemented (tenant plane).
 
-**Plane:** Tenant plane.
+In-app notifications for users, built from domain events, with per-user
+preferences.
 
-**Responsibility:** User notifications (in-app, e-mail, push) with preferences and digests.
+## How notifications are created
 
-**Expected domain events:** NotificationRequested.
+Event handlers (`infrastructure/handlers.py`, registered at app ready) turn
+events into notifications for the relevant user:
 
-**Collaborates with:** every module via domain events; runs in the notifications queue.
+- `meetings.meeting_scheduled` -> **Meeting** notification for the owner
+- `sales.deal_created` -> **Deal** notification for the owner
+- `leads.lead_captured` -> **Lead** notification for the owner
 
-When implemented, follow the reference module `modules/customers`:
-`domain/` (pure Python) -> `application/` (use cases, ports) -> `infrastructure/`
-(Django app, ORM records, adapters) -> `presentation/` (DRF views), plus
-`composition.py`. Register the Django app label in `settings.TENANCY` (control,
-tenant or shared plane) or the classification test will fail.
+Handlers run in the event dispatcher's unit of work, are idempotent (unique
+`recipient + source_event_id`) and skip categories the user has muted.
+
+## Preferences
+
+Each user can turn categories (meeting, deal, lead, payment, system) on or off;
+everything is on by default.
+
+## API (your own notifications)
+
+`GET /api/v1/notifications/` (with unread count), `GET .../unread-count/`,
+`POST .../{id}/read/`, `POST .../read-all/`,
+`GET/POST .../preferences/`. Tenant-scoped; each user sees only their own.
+
+> Email/push delivery and scheduled meeting-reminder delivery are out of scope
+> here (channels and a reminder scan are the integration points).

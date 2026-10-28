@@ -20,9 +20,9 @@ shared = table present in every DB).
 | meetings | tenant | implemented | Scheduling, participants, reminders, complete/cancel |
 | payments | tenant | implemented | Invoices, payments, void (no card data) |
 | telephony | tenant | implemented | Call records, click-to-call, call lifecycle |
-| communications | tenant | stub | WhatsApp/Telegram/Instagram/e-mail conversations |
+| communications | tenant | implemented | Conversations/messages over channels; inbound via webhooks |
 | subscriptions | control | implemented | Plans, limits, billing state of organizations |
-| notifications | tenant | stub | User notifications and digests |
+| notifications | tenant | implemented | In-app notifications from events, per-user preferences |
 | messaging | shared | implemented | Transactional outbox/inbox (platform_core) |
 
 ## Context collaboration (events, not calls)

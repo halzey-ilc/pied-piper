@@ -47,6 +47,8 @@ class Permission(StrEnum):
     TELEPHONY_UPDATE = "telephony.update"
     SUBSCRIPTIONS_VIEW = "subscriptions.view"
     SUBSCRIPTIONS_MANAGE = "subscriptions.manage"
+    COMMUNICATIONS_VIEW = "communications.view"
+    COMMUNICATIONS_SEND = "communications.send"
     REPORTS_VIEW = "reports.view"
     REPORTS_GENERATE = "reports.generate"
     MEMBERS_MANAGE = "members.manage"
@@ -97,6 +99,8 @@ ROLE_GRANTS: Mapping[Role, Mapping[Permission, Scope]] = {
         Permission.TELEPHONY_CREATE: Scope.TEAM,
         Permission.TELEPHONY_UPDATE: Scope.TEAM,
         Permission.SUBSCRIPTIONS_VIEW: Scope.ALL,
+        Permission.COMMUNICATIONS_VIEW: Scope.TEAM,
+        Permission.COMMUNICATIONS_SEND: Scope.TEAM,
         Permission.REPORTS_VIEW: Scope.ALL,
         Permission.REPORTS_GENERATE: Scope.ALL,
     },
@@ -124,6 +128,8 @@ ROLE_GRANTS: Mapping[Role, Mapping[Permission, Scope]] = {
         Permission.TELEPHONY_VIEW: Scope.OWN,
         Permission.TELEPHONY_CREATE: Scope.OWN,
         Permission.TELEPHONY_UPDATE: Scope.OWN,
+        Permission.COMMUNICATIONS_VIEW: Scope.OWN,
+        Permission.COMMUNICATIONS_SEND: Scope.OWN,
     },
     Role.VIEWER: {
         Permission.CUSTOMERS_VIEW: Scope.ALL,
@@ -135,6 +141,7 @@ ROLE_GRANTS: Mapping[Role, Mapping[Permission, Scope]] = {
         Permission.PAYMENTS_VIEW: Scope.ALL,
         Permission.TELEPHONY_VIEW: Scope.ALL,
         Permission.SUBSCRIPTIONS_VIEW: Scope.ALL,
+        Permission.COMMUNICATIONS_VIEW: Scope.ALL,
         Permission.REPORTS_VIEW: Scope.ALL,
     },
 }

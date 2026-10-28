@@ -1,1 +1,1 @@
-"""User notifications (in-app, e-mail, push) with preferences and digests. (planned)."""
+"""Notifications: in-app user notifications built from events, with preferences (tenant plane)."""

@@ -17,6 +17,8 @@ urlpatterns = [
     path("payments/", include("modules.payments.presentation.urls")),
     path("telephony/", include("modules.telephony.presentation.urls")),
     path("subscription/", include("modules.subscriptions.presentation.urls")),
+    path("notifications/", include("modules.notifications.presentation.urls")),
+    path("communications/", include("modules.communications.presentation.urls")),
     path("analytics/kpis/", include("modules.sales_kpi.presentation.urls")),
     path("analytics/reports/", include("modules.reporting.presentation.urls")),
     path(

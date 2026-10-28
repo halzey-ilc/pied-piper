@@ -44,6 +44,8 @@ INSTALLED_APPS = [
     "modules.payments.infrastructure.apps.PaymentsConfig",
     "modules.telephony.infrastructure.apps.TelephonyConfig",
     "modules.subscriptions.infrastructure.apps.SubscriptionsConfig",
+    "modules.notifications.infrastructure.apps.NotificationsConfig",
+    "modules.communications.infrastructure.apps.CommunicationsConfig",
 ]
 
 MIDDLEWARE = [
@@ -147,6 +149,8 @@ TENANCY: dict[str, Any] = {
         "meetings",
         "payments",
         "telephony",
+        "notifications",
+        "communications",
     },
     "SHARED_APPS": {"messaging", "audit"},
     "IGNORED_APPS": {"rest_framework", "corsheaders", "drf_spectacular"},
@@ -310,7 +314,12 @@ SPECTACULAR_SETTINGS: dict[str, Any] = {
         "MeetingStatusEnum": ["scheduled", "completed", "cancelled"],
         "InvoiceStatusEnum": ["draft", "issued", "paid", "void"],
         "CallStatusEnum": [
-            "requested", "ringing", "in_progress", "completed", "missed", "failed",
+            "requested",
+            "ringing",
+            "in_progress",
+            "completed",
+            "missed",
+            "failed",
         ],
         "CallTerminalStatusEnum": ["completed", "missed", "failed"],
         "CallProgressStatusEnum": ["ringing", "in_progress"],
@@ -354,6 +363,14 @@ SPECTACULAR_SETTINGS: dict[str, Any] = {
         {
             "name": "Subscription",
             "description": "The organization's plan, limits and billing status (control plane).",
+        },
+        {
+            "name": "Communications",
+            "description": "Conversations and messages over messaging channels. Tenant-scoped.",
+        },
+        {
+            "name": "Notifications",
+            "description": "In-app notifications built from events, with per-user preferences.",
         },
         {
             "name": "Analytics",
