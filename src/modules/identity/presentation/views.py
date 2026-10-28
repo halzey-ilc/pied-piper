@@ -10,6 +10,8 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
+from rest_framework_simplejwt.exceptions import TokenError
+from rest_framework_simplejwt.token_blacklist.models import BlacklistedToken, OutstandingToken
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
@@ -20,6 +22,7 @@ from modules.identity.presentation.auth_errors import OidcLoginFailed, OidcNoAcc
 from modules.identity.presentation.serializers import (
     EnrolmentResponseSerializer,
     HardenedTokenObtainPairSerializer,
+    LogoutSerializer,
     MfaConfirmSerializer,
     MfaDisableSerializer,
     OidcLoginSerializer,
@@ -307,3 +310,56 @@ class PasswordResetConfirmView(APIView):
             new_password=payload.validated_data["new_password"],
         )
         return Response({"detail": "Your password has been reset."})
+
+
+class LogoutView(APIView):
+    """Revoke a refresh token (log out this session)."""
+
+    permission_classes = [IsAuthenticated]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "auth"
+
+    @extend_schema(
+        tags=["Authentication"],
+        summary="Log out (revoke a refresh token)",
+        description=(
+            "Blacklists the given refresh token so it can no longer be used to obtain new "
+            "access tokens. The current access token stays valid until it expires (minutes), "
+            "so revocation is effective within the access-token lifetime."
+        ),
+        request=LogoutSerializer,
+        responses={205: None},
+    )
+    def post(self, request: Request) -> Response:
+        payload = LogoutSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        try:
+            RefreshToken(payload.validated_data["refresh"]).blacklist()
+        except TokenError as exc:
+            raise DomainValidationError("The refresh token is invalid or already revoked.") from exc
+        return Response(status=status.HTTP_205_RESET_CONTENT)
+
+
+class LogoutAllView(APIView):
+    """Revoke every outstanding refresh token for the current user."""
+
+    permission_classes = [IsAuthenticated]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "auth"
+
+    @extend_schema(
+        tags=["Authentication"],
+        summary="Log out everywhere",
+        description=(
+            "Blacklists all of the user's outstanding refresh tokens, ending every session. "
+            "Existing access tokens remain valid until they expire."
+        ),
+        request=None,
+        responses=_DetailSerializer,
+    )
+    def post(self, request: Request) -> Response:
+        revoked = 0
+        for outstanding in OutstandingToken.objects.filter(user_id=cast(UUID, request.user.pk)):
+            _, created = BlacklistedToken.objects.get_or_create(token=outstanding)
+            revoked += int(created)
+        return Response({"detail": f"Revoked {revoked} active session(s)."})

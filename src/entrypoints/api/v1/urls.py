@@ -3,6 +3,8 @@
 from django.urls import include, path
 
 from modules.identity.presentation.views import (
+    LogoutAllView,
+    LogoutView,
     MeView,
     MfaConfirmView,
     MfaDisableView,
@@ -18,6 +20,8 @@ from modules.integrations.presentation.views import WebhookView
 urlpatterns = [
     path("auth/token/", TokenObtainView.as_view(), name="auth-token"),
     path("auth/token/refresh/", TokenRefreshThrottledView.as_view(), name="auth-token-refresh"),
+    path("auth/logout/", LogoutView.as_view(), name="auth-logout"),
+    path("auth/logout-all/", LogoutAllView.as_view(), name="auth-logout-all"),
     path("auth/oidc/", OidcLoginView.as_view(), name="auth-oidc"),
     path("auth/mfa/enroll/", MfaEnrollView.as_view(), name="auth-mfa-enroll"),
     path("auth/mfa/confirm/", MfaConfirmView.as_view(), name="auth-mfa-confirm"),

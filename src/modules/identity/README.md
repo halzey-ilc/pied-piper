@@ -7,6 +7,9 @@ granted through `organizations` memberships, never from token claims.
 
 - **Login / tokens** — `POST /api/v1/auth/token/` and `.../refresh/` (SimpleJWT,
   HS256, rotating refresh + blacklist).
+- **Logout** — `POST /auth/logout/` revokes one refresh token (blacklist);
+  `POST /auth/logout-all/` revokes every outstanding refresh token for the user.
+  Access tokens remain valid until they expire (minutes).
 - **Account lockout** — `LoginLockout` counts failed logins per username within a
   sliding window and locks for a fixed duration (`429 account_locked`). A
   successful login clears the counter. Configured via `LOGIN_*`.

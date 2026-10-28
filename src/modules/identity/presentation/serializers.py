@@ -72,6 +72,10 @@ class PasswordResetConfirmSerializer(serializers.Serializer[dict[str, Any]]):
     new_password = serializers.CharField(help_text="The new password to set.")
 
 
+class LogoutSerializer(serializers.Serializer[dict[str, Any]]):
+    refresh = serializers.CharField(help_text="The refresh token to revoke.")
+
+
 class TokenPairResponseSerializer(serializers.Serializer[dict[str, Any]]):
     access = serializers.CharField()
     refresh = serializers.CharField()

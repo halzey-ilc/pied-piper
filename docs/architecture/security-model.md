@@ -22,6 +22,10 @@
   whether an address exists; tokens are random, stored hashed, single-use and
   expire (`PASSWORD_RESET_TTL_MINUTES`). A completed reset enforces the password
   policy and clears lockout state.
+- **Logout / revocation:** refresh tokens can be revoked individually
+  (`/auth/logout/`) or all at once (`/auth/logout-all/`) via the SimpleJWT
+  blacklist; combined with short-lived access tokens and refresh rotation, this
+  bounds a compromised token's lifetime.
 - **Password storage:** Argon2 (`argon2-cffi`) as the default hasher; minimum
   length and common-password validators. TOTP and OIDC use vetted primitives
   (`hmac`, `PyJWT`/`cryptography`); no bespoke crypto.
@@ -104,12 +108,12 @@ Implemented in code/config (needs your infrastructure to activate):
 - Edge security headers and request rate limiting (nginx).
 
 - Account lockout, TOTP MFA (with recovery codes), an OIDC relying party for
-  external login, and self-service password reset (`modules.identity`).
+  external login, self-service password reset, and logout/refresh-token
+  revocation (`modules.identity`).
 
 Still outstanding — needs product/ops decisions or external services:
 
 - Secret **rotation** automation (the delivery mechanism is in place).
-- Session/refresh-token revocation on logout (reset already rotates passwords).
 - A managed WAF / DDoS protection in front of the nginx edge; managed TLS certs.
 - Backup **and tested restore** (see [backup-restore](../operations/backup-restore.md)),
   DR runbook, failover.
