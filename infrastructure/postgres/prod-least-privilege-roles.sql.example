@@ -1,0 +1,57 @@
+-- Production role separation for PostgreSQL. NOT run automatically.
+--
+-- Only files under infrastructure/postgres/init/*.sql execute at volume
+-- initialisation (local development, single role). In production you run this
+-- script once, as a superuser, after substituting real passwords from your
+-- secret manager. It establishes three roles with least privilege:
+--
+--   crm_provision  CREATEDB, owns tenant databases at creation. Used ONLY by
+--                  the provisioning job (DB_PROVISION_USER / _PASSWORD). Never
+--                  handles API requests.
+--   crm_app        the request-handling role. No CREATEDB, no superuser. SELECT/
+--                  INSERT/UPDATE/DELETE on data tables; it CANNOT UPDATE or DELETE
+--                  audit_record (enforced additionally by a trigger) and cannot
+--                  TRUNCATE it.
+--   crm_migrator   runs migrations (DDL). Owns the schema objects. Optional: you
+--                  may instead let crm_provision/owner run migrations.
+--
+-- Apply per database (control plane and each tenant database). Replace
+-- :'app_password' etc. via psql -v, or inline from your secret store.
+
+\set ON_ERROR_STOP on
+
+-- 1. Roles (idempotent).
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'crm_provision') THEN
+        CREATE ROLE crm_provision LOGIN CREATEDB PASSWORD :'provision_password';
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'crm_app') THEN
+        CREATE ROLE crm_app LOGIN PASSWORD :'app_password';
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'crm_migrator') THEN
+        CREATE ROLE crm_migrator LOGIN PASSWORD :'migrator_password';
+    END IF;
+END $$;
+
+-- 2. Baseline: PUBLIC creates nothing; the app cannot create schema objects.
+REVOKE CREATE ON SCHEMA public FROM PUBLIC;
+GRANT USAGE ON SCHEMA public TO crm_app;
+GRANT CREATE, USAGE ON SCHEMA public TO crm_migrator;
+
+-- 3. Data-plane privileges for the application role on existing objects.
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO crm_app;
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO crm_app;
+
+-- 4. Future objects created by the migrator are reachable by the app role.
+ALTER DEFAULT PRIVILEGES FOR ROLE crm_migrator IN SCHEMA public
+    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO crm_app;
+ALTER DEFAULT PRIVILEGES FOR ROLE crm_migrator IN SCHEMA public
+    GRANT USAGE, SELECT ON SEQUENCES TO crm_app;
+
+-- 5. Audit log: the app role may append and read, never mutate or truncate.
+--    (The 0002 trigger rejects UPDATE/DELETE for everyone; this removes the
+--    privilege as well, defence in depth, and denies TRUNCATE which no trigger
+--    can catch.)
+REVOKE UPDATE, DELETE, TRUNCATE ON audit_record FROM crm_app;
+GRANT SELECT, INSERT ON audit_record TO crm_app;

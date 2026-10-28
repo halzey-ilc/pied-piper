@@ -126,3 +126,26 @@ jobs:
           cache-to: type=gha,mode=max
       - name: Validate compose files
         run: docker compose -f compose.yaml -f compose.test.yaml config -q
+        # The production overlay requires real secrets/certs to interpolate and is
+        # validated at deploy time, not in CI.
+      - name: Scan image for OS/library vulnerabilities (Trivy)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: crm-platform:ci
+          format: table
+          exit-code: "1"           # fail the build on a fixable HIGH/CRITICAL
+          ignore-unfixed: true
+          severity: HIGH,CRITICAL
+          vuln-type: os,library
+      - name: Generate SBOM (CycloneDX)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: crm-platform:ci
+          format: cyclonedx
+          output: sbom.cdx.json
+          scan-type: image
+      - name: Publish SBOM
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: sbom.cdx.json

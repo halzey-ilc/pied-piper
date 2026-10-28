@@ -24,11 +24,13 @@ class PostgresDatabaseProvisioner:
     def _connect(self, cluster: str) -> psycopg.Connection[Any]:
         cfg = self._clusters[cluster]
         options = cfg.get("OPTIONS", {})
+        # Provisioning uses the CREATEDB role when one is configured; otherwise
+        # it falls back to the application role (local development).
         return psycopg.connect(
             host=cfg["HOST"],
             port=cfg["PORT"],
-            user=cfg["USER"],
-            password=cfg["PASSWORD"],
+            user=cfg.get("PROVISION_USER") or cfg["USER"],
+            password=cfg.get("PROVISION_PASSWORD") or cfg["PASSWORD"],
             dbname="postgres",
             connect_timeout=options.get("connect_timeout", 5),
             sslmode=options.get("sslmode", "prefer"),

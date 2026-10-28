@@ -7,8 +7,10 @@ names the offending variables but never echoes their values.
 
 from __future__ import annotations
 
+import os
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import Field, SecretStr, ValidationError, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
@@ -62,6 +64,10 @@ class AppEnv(BaseSettings):
     DB_CONNECT_TIMEOUT: int = Field(default=5, ge=1, le=60)
     DB_STATEMENT_TIMEOUT_MS: int = Field(default=15_000, ge=100, le=600_000)
     DB_USE_PGBOUNCER: bool = False
+    # Optional dedicated provisioning role (CREATEDB), distinct from the
+    # least-privilege application role. Falls back to DB_USER when unset.
+    DB_PROVISION_USER: str | None = None
+    DB_PROVISION_PASSWORD: SecretStr | None = None
 
     # Tenant plane: one PostgreSQL database per company.
     TENANT_DB_PREFIX: str = Field(default="crm_tenant_", pattern=r"^[a-z][a-z0-9_]{1,20}$")
@@ -71,6 +77,8 @@ class AppEnv(BaseSettings):
     REDIS_HOST: str = "localhost"
     REDIS_PORT: int = Field(default=6379, ge=1, le=65535)
     REDIS_PASSWORD: SecretStr | None = None
+    REDIS_USE_TLS: bool = False
+    REDIS_CA_CERT: str | None = None
     REDIS_CACHE_DB: int = Field(default=0, ge=0, le=15)
     REDIS_RESULTS_DB: int = Field(default=1, ge=0, le=15)
 
@@ -79,6 +87,8 @@ class AppEnv(BaseSettings):
     RABBITMQ_USER: str = "crm"
     RABBITMQ_PASSWORD: SecretStr
     RABBITMQ_VHOST: str = "crm"
+    RABBITMQ_USE_TLS: bool = False
+    RABBITMQ_CA_CERT: str | None = None
     CELERY_TASK_TIME_LIMIT: int = Field(default=300, ge=10, le=3600)
     CELERY_TASK_SOFT_TIME_LIMIT: int = Field(default=240, ge=5, le=3600)
     DIAGNOSTIC_TASKS_ENABLED: bool = False
@@ -108,6 +118,7 @@ class AppEnv(BaseSettings):
         return value
 
     @field_validator(
+        "DB_PROVISION_PASSWORD",
         "REDIS_PASSWORD",
         "METRICS_TOKEN",
         "SENTRY_DSN",
@@ -175,16 +186,47 @@ def hardening_errors(env: AppEnv) -> list[str]:  # noqa: PLR0912 - one guard per
     return errors
 
 
+_SECRET_FILE_SUFFIX = "_FILE"  # noqa: S105 - env-var name suffix, not a secret
+
+
+def secret_file_overrides(environ: Mapping[str, str]) -> dict[str, str]:
+    """Resolve ``<FIELD>_FILE`` variables into values read from the named files.
+
+    This is the first rung of secret management: a secret manager (Docker/Compose
+    secrets, Kubernetes secrets, Vault Agent, SOPS) mounts the secret as a file
+    and exports only its path, so the plaintext never appears in the process
+    environment, ``docker inspect`` or a shell's history. For each declared field
+    ``X`` we honour ``X_FILE`` unless ``X`` itself is set (an explicit value wins).
+    Only declared fields are considered; unknown ``*_FILE`` variables are ignored.
+    The trailing newline files commonly carry is stripped.
+    """
+    overrides: dict[str, str] = {}
+    for key, path in environ.items():
+        if not key.endswith(_SECRET_FILE_SUFFIX):
+            continue
+        base = key[: -len(_SECRET_FILE_SUFFIX)]
+        if base not in AppEnv.model_fields or environ.get(base):
+            continue
+        try:
+            overrides[base] = Path(path).read_text(encoding="utf-8").strip("\r\n")
+        except OSError:
+            raise ConfigurationError(f"{key} points to a file that cannot be read") from None
+    return overrides
+
+
 def load_env(env_file: Path | None = None) -> AppEnv:
     """Load and validate the environment.
 
     Real environment variables take precedence over the optional ``.env`` file.
-    Validation errors are re-raised without input values so secrets never reach
-    logs or tracebacks.
+    ``<FIELD>_FILE`` variables are resolved from files first (see
+    :func:`secret_file_overrides`). Validation errors are re-raised without input
+    values so secrets never reach logs or tracebacks.
     """
     env_files = env_file if env_file is not None and env_file.is_file() else None
+    # pydantic coerces these string values per field; typed as Any for the call.
+    overrides: dict[str, Any] = dict(secret_file_overrides(os.environ))
     try:
-        env = AppEnv(_env_file=env_files)  # type: ignore[call-arg]
+        env = AppEnv(_env_file=env_files, **overrides)  # type: ignore[call-arg]
     except ValidationError as exc:
         problems = [
             f"{'.'.join(str(part) for part in error['loc'])}: {error['msg']}"

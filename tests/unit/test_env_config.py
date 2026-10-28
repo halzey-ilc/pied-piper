@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
-from config.settings.env import ConfigurationError, load_env
+from config.settings.env import ConfigurationError, load_env, secret_file_overrides
 
 STRONG_SECRET = "s" * 30 + "0123456789abcdefghijklmnopqrstuv"
 STRONG_JWT = "j" * 30 + "0123456789abcdefghijklmnopqrstuv"
@@ -106,3 +108,31 @@ def test_comma_separated_lists(clean_env: pytest.MonkeyPatch) -> None:
     _production(clean_env, CORS_ALLOWED_ORIGINS="https://a.example.com, https://b.example.com")
     env = load_env(None)
     assert env.CORS_ALLOWED_ORIGINS == ["https://a.example.com", "https://b.example.com"]
+
+
+def test_secret_read_from_file(clean_env: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """A mounted secret file is honoured and its path, not the value, is in the env."""
+    _production(clean_env)
+    secret_file = tmp_path / "db_password"
+    secret_file.write_text("db-password-from-a-mounted-file\n", encoding="utf-8")
+    clean_env.delenv("DB_PASSWORD", raising=False)
+    clean_env.setenv("DB_PASSWORD_FILE", str(secret_file))
+    env = load_env(None)
+    assert env.DB_PASSWORD.get_secret_value() == "db-password-from-a-mounted-file"
+
+
+def test_explicit_value_wins_over_file(clean_env: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    secret_file = tmp_path / "db_password"
+    secret_file.write_text("from-file", encoding="utf-8")
+    clean_env.setenv("DB_PASSWORD_FILE", str(secret_file))
+    overrides = secret_file_overrides({"DB_PASSWORD": "explicit", "DB_PASSWORD_FILE": "/x"})
+    assert "DB_PASSWORD" not in overrides
+
+
+def test_unreadable_secret_file_is_reported(clean_env: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    with pytest.raises(ConfigurationError, match="DB_PASSWORD_FILE"):
+        secret_file_overrides({"DB_PASSWORD_FILE": str(tmp_path / "missing")})
+
+
+def test_unknown_file_variable_is_ignored() -> None:
+    assert secret_file_overrides({"PATH_FILE": "/etc/nonexistent", "NOT_A_FIELD_FILE": "x"}) == {}

@@ -7,10 +7,12 @@ from django.db import models
 
 
 class AuditRecord(models.Model):
-    """Append-only in the application layer: updates and deletes raise.
+    """Append-only at two levels.
 
-    Database-level enforcement (REVOKE UPDATE/DELETE, triggers) is a planned
-    hardening step, see docs/architecture/security-model.md.
+    The application layer refuses updates and deletes (the overrides below), and
+    a database trigger rejects UPDATE/DELETE for every connection regardless of
+    the application (migration ``0002_audit_append_only``), so the guarantee
+    survives a bypass of the ORM. See docs/architecture/security-model.md.
     """
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)

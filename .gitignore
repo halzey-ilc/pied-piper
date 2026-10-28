@@ -4,6 +4,11 @@
 !.env.example
 *.pem
 *.key
+*.crt
+# Production secret files (see docs/operations/production-hardening.md).
+# TLS certs/keys under infrastructure/tls/ are covered by *.crt/*.key above;
+# the committed pg_hba.conf.example carries no secret.
+/secrets/
 
 # Python
 __pycache__/

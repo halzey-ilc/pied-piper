@@ -100,6 +100,14 @@ DATABASE_CLUSTERS: dict[str, dict[str, Any]] = {
         "PORT": ENV.DB_PORT,
         "USER": ENV.DB_USER,
         "PASSWORD": ENV.DB_PASSWORD.get_secret_value(),
+        # Dedicated CREATEDB role for provisioning; falls back to the app role
+        # locally. In production these are two distinct PostgreSQL roles.
+        "PROVISION_USER": ENV.DB_PROVISION_USER or ENV.DB_USER,
+        "PROVISION_PASSWORD": (
+            ENV.DB_PROVISION_PASSWORD.get_secret_value()
+            if ENV.DB_PROVISION_PASSWORD is not None
+            else ENV.DB_PASSWORD.get_secret_value()
+        ),
         "OPTIONS": _database_options(),
         "ACCEPTS_NEW_TENANTS": True,
         "MAX_TENANTS": 500,
@@ -166,7 +174,15 @@ def _redis_url(db: int) -> str:
     auth = (
         f":{quote(ENV.REDIS_PASSWORD.get_secret_value(), safe='')}@" if ENV.REDIS_PASSWORD else ""
     )
-    return f"redis://{auth}{ENV.REDIS_HOST}:{ENV.REDIS_PORT}/{db}"
+    scheme = "rediss" if ENV.REDIS_USE_TLS else "redis"
+    url = f"{scheme}://{auth}{ENV.REDIS_HOST}:{ENV.REDIS_PORT}/{db}"
+    if ENV.REDIS_USE_TLS:
+        # Verify the server certificate when a CA is provided.
+        reqs = "required" if ENV.REDIS_CA_CERT else "none"
+        url += f"?ssl_cert_reqs={reqs}"
+        if ENV.REDIS_CA_CERT:
+            url += f"&ssl_ca_certs={quote(ENV.REDIS_CA_CERT, safe='')}"
+    return url
 
 
 REDIS_CACHE_URL = _redis_url(ENV.REDIS_CACHE_DB)
@@ -397,11 +413,21 @@ SPECTACULAR_SETTINGS: dict[str, Any] = {
 
 # --- Async processing -------------------------------------------------------
 
+_BROKER_SCHEME = "amqps" if ENV.RABBITMQ_USE_TLS else "amqp"
 CELERY_BROKER_URL = (
-    f"amqp://{quote(ENV.RABBITMQ_USER, safe='')}:"
+    f"{_BROKER_SCHEME}://{quote(ENV.RABBITMQ_USER, safe='')}:"
     f"{quote(ENV.RABBITMQ_PASSWORD.get_secret_value(), safe='')}@"
     f"{ENV.RABBITMQ_HOST}:{ENV.RABBITMQ_PORT}/{quote(ENV.RABBITMQ_VHOST, safe='')}"
 )
+if ENV.RABBITMQ_USE_TLS:
+    import ssl as _ssl
+
+    # Encrypt the broker channel; verify the broker certificate against the CA.
+    CELERY_BROKER_USE_SSL: dict[str, Any] = {
+        "cert_reqs": _ssl.CERT_REQUIRED if ENV.RABBITMQ_CA_CERT else _ssl.CERT_NONE,
+    }
+    if ENV.RABBITMQ_CA_CERT:
+        CELERY_BROKER_USE_SSL["ca_certs"] = ENV.RABBITMQ_CA_CERT
 CELERY_RESULT_BACKEND = _redis_url(ENV.REDIS_RESULTS_DB)
 CELERY_RESULT_EXPIRES = 3600
 CELERY_TASK_IGNORE_RESULT = True

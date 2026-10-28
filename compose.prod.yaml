@@ -1,0 +1,193 @@
+# Production hardening overlay. Apply ON TOP of compose.yaml:
+#
+#   docker compose -f compose.yaml -f compose.prod.yaml up -d
+#
+# What it changes versus the base (development) stack:
+#   * production settings module and env validation (config.settings.production)
+#   * secrets come from mounted files (Docker secrets), never from the process
+#     environment — the app reads *_FILE variables (config/settings/env.py)
+#   * TLS on PostgreSQL, Redis and RabbitMQ; the app verifies the server cert
+#   * PgBouncer in front of PostgreSQL (transaction pooling)
+#   * nginx terminates TLS and is the only service with a published port; the
+#     API itself is no longer published
+#   * diagnostics task path disabled
+#
+# You MUST provide, out of band (secret manager / CI), before `up`:
+#   * ./secrets/*          -- the files listed under `secrets:` below
+#   * ./infrastructure/tls -- server certs/keys and the CA bundle (see
+#     docs/operations/production-hardening.md for generation and rotation)
+# None of these are committed.
+
+name: crm-platform-prod
+
+x-prod-app-env: &prod-app-env
+  DJANGO_SETTINGS_MODULE: config.settings.production
+  DJANGO_ENV: production
+  # TLS is terminated by nginx, which forwards X-Forwarded-Proto.
+  SECURE_PROXY_SSL_HEADER_ENABLED: "1"
+  TRUSTED_PROXY_COUNT: "1"
+  DB_HOST: pgbouncer
+  DB_PORT: "6432"
+  DB_SSLMODE: verify-full
+  DB_USE_PGBOUNCER: "1"
+  REDIS_HOST: redis
+  REDIS_USE_TLS: "1"
+  REDIS_CA_CERT: /app/tls/ca.crt
+  RABBITMQ_HOST: rabbitmq
+  RABBITMQ_PORT: "5671"
+  RABBITMQ_USE_TLS: "1"
+  RABBITMQ_CA_CERT: /app/tls/ca.crt
+  # Secrets as file paths; the application resolves <FIELD>_FILE itself.
+  DJANGO_SECRET_KEY_FILE: /run/secrets/django_secret_key
+  JWT_SIGNING_KEY_FILE: /run/secrets/jwt_signing_key
+  DB_PASSWORD_FILE: /run/secrets/db_password
+  DB_PROVISION_PASSWORD_FILE: /run/secrets/db_provision_password
+  RABBITMQ_PASSWORD_FILE: /run/secrets/rabbitmq_password
+  REDIS_PASSWORD_FILE: /run/secrets/redis_password
+  METRICS_TOKEN_FILE: /run/secrets/metrics_token
+  # Point psycopg at the CA so verify-full can validate the server certificate.
+  PGSSLROOTCERT: /app/tls/ca.crt
+
+x-prod-secrets: &prod-secrets
+  - django_secret_key
+  - jwt_signing_key
+  - db_password
+  - db_provision_password
+  - rabbitmq_password
+  - redis_password
+  - metrics_token
+
+services:
+  postgres:
+    # Serve over TLS and refuse non-SSL connections (enforced in pg_hba via
+    # hostssl). Certificates are mounted read-only; key must be chmod 600.
+    command:
+      - postgres
+      - -c
+      - ssl=on
+      - -c
+      - ssl_cert_file=/etc/postgres-tls/server.crt
+      - -c
+      - ssl_key_file=/etc/postgres-tls/server.key
+      - -c
+      - ssl_ca_file=/etc/postgres-tls/ca.crt
+      - -c
+      - hba_file=/etc/postgres-tls/pg_hba.conf
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./infrastructure/postgres/init:/docker-entrypoint-initdb.d:ro
+      - ./infrastructure/tls/postgres:/etc/postgres-tls:ro
+
+  redis:
+    # TLS only: disable the plaintext port, listen on 6379 with TLS.
+    command:
+      - redis-server
+      - /usr/local/etc/redis/redis.conf
+      - --port
+      - "0"
+      - --tls-port
+      - "6379"
+      - --tls-cert-file
+      - /etc/redis-tls/server.crt
+      - --tls-key-file
+      - /etc/redis-tls/server.key
+      - --tls-ca-cert-file
+      - /etc/redis-tls/ca.crt
+      - --requirepass
+      - ${REDIS_PASSWORD:?set in prod env}
+    volumes:
+      - ./infrastructure/redis/redis.conf:/usr/local/etc/redis/redis.conf:ro
+      - ./infrastructure/tls/redis:/etc/redis-tls:ro
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "--tls", "--cacert", "/etc/redis-tls/ca.crt", "ping"]
+
+  rabbitmq:
+    volumes:
+      - rabbitmqdata:/var/lib/rabbitmq
+      - ./infrastructure/rabbitmq/rabbitmq.prod.conf:/etc/rabbitmq/rabbitmq.conf:ro
+      - ./infrastructure/tls/rabbitmq:/etc/rabbitmq-tls:ro
+
+  pgbouncer:
+    image: bitnami/pgbouncer:1.23.1
+    environment:
+      POSTGRESQL_HOST: postgres
+      POSTGRESQL_PORT: "5432"
+      PGBOUNCER_PORT: "6432"
+      PGBOUNCER_POOL_MODE: transaction
+      PGBOUNCER_DATABASE: "*"
+      # TLS from pgbouncer to postgres, and from the app to pgbouncer.
+      PGBOUNCER_CLIENT_TLS_SSLMODE: verify-full
+      PGBOUNCER_CLIENT_TLS_CA_FILE: /tls/ca.crt
+      PGBOUNCER_CLIENT_TLS_CERT_FILE: /tls/server.crt
+      PGBOUNCER_CLIENT_TLS_KEY_FILE: /tls/server.key
+      PGBOUNCER_SERVER_TLS_SSLMODE: verify-full
+      PGBOUNCER_SERVER_TLS_CA_FILE: /tls/ca.crt
+    volumes:
+      - ./infrastructure/tls/pgbouncer:/tls:ro
+    depends_on:
+      postgres: {condition: service_healthy}
+    networks: [backend]
+    restart: unless-stopped
+
+  api:
+    environment:
+      <<: *prod-app-env
+      RUN_MIGRATIONS_ON_START: "0"   # run migrations as a controlled job, not on every boot
+      GUNICORN_WORKERS: "4"
+      REPORTS_STORAGE_DIR: /app/var/exports
+    secrets: *prod-secrets
+    volumes:
+      - exportsdata:/app/var/exports
+      - ./infrastructure/tls/ca.crt:/app/tls/ca.crt:ro
+    depends_on:
+      pgbouncer: {condition: service_started}
+      redis: {condition: service_healthy}
+      rabbitmq: {condition: service_healthy}
+    ports: !reset []   # not published; nginx fronts it
+
+  worker:
+    environment:
+      <<: *prod-app-env
+      CELERY_METRICS_PORT: "9100"
+      REPORTS_STORAGE_DIR: /app/var/exports
+      DIAGNOSTIC_TASKS_ENABLED: "false"
+    secrets: *prod-secrets
+    volumes:
+      - exportsdata:/app/var/exports
+      - ./infrastructure/tls/ca.crt:/app/tls/ca.crt:ro
+
+  beat:
+    environment:
+      <<: *prod-app-env
+    secrets: *prod-secrets
+    volumes:
+      - ./infrastructure/tls/ca.crt:/app/tls/ca.crt:ro
+
+  nginx:
+    image: nginx:1.27-bookworm
+    depends_on:
+      api: {condition: service_healthy}
+    volumes:
+      - ./infrastructure/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./infrastructure/tls/nginx:/etc/nginx/tls:ro
+    ports:
+      - "443:443"
+    networks: [backend]
+    restart: unless-stopped
+
+secrets:
+  django_secret_key:
+    file: ./secrets/django_secret_key
+  jwt_signing_key:
+    file: ./secrets/jwt_signing_key
+  db_password:
+    file: ./secrets/db_password
+  db_provision_password:
+    file: ./secrets/db_provision_password
+  rabbitmq_password:
+    file: ./secrets/rabbitmq_password
+  redis_password:
+    file: ./secrets/redis_password
+  metrics_token:
+    file: ./secrets/metrics_token

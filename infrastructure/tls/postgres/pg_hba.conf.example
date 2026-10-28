@@ -1,0 +1,16 @@
+# Production pg_hba for PostgreSQL (mounted by compose.prod.yaml as
+# /etc/postgres-tls/pg_hba.conf). TLS is mandatory for all network access:
+# only `hostssl` lines, never `host`, so a plaintext connection is refused.
+#
+# Place the real file next to the server cert/key in infrastructure/tls/postgres/.
+# Rename to pg_hba.conf (drop .example) when you provide the certs.
+
+# TYPE      DATABASE   USER            ADDRESS        METHOD
+local       all        all                            scram-sha-256
+
+# Application and provisioning roles must use TLS with SCRAM auth.
+hostssl     all        crm_app         0.0.0.0/0      scram-sha-256
+hostssl     all        crm_provision   0.0.0.0/0      scram-sha-256
+hostssl     all        crm_migrator    0.0.0.0/0      scram-sha-256
+
+# Everything else (including any non-TLS attempt) is rejected by omission.

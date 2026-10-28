@@ -41,8 +41,20 @@
 - **Webhooks:** provider signatures verified (HMAC-SHA256 / shared-secret /
   timestamped HMAC with replay window) before any storage; duplicates dropped
   via the inbox unique constraint.
-- **Audit:** append-only records (application-enforced; DB-level enforcement is
-  a planned step below).
+- **Audit:** append-only records, enforced both in the application (the model
+  refuses update/delete) and in the database (a `BEFORE UPDATE OR DELETE` trigger,
+  migration `audit/0002_audit_append_only`), so the guarantee survives an ORM
+  bypass.
+- **Secret delivery:** every secret can be supplied as a mounted file via a
+  `<FIELD>_FILE` variable (`config/settings/env.py`), so a secret manager
+  (Docker/K8s secrets, Vault Agent, SOPS) can inject it without the plaintext
+  ever entering the process environment. `compose.prod.yaml` wires this.
+- **Least-privilege DB role:** provisioning (CREATEDB) uses a role distinct from
+  the request-handling role when `DB_PROVISION_USER`/`_PASSWORD` are set
+  (`infrastructure/postgres/prod-least-privilege-roles.sql.example`).
+- **Transport security:** opt-in TLS for PostgreSQL (`verify-full`), Redis
+  (`rediss` + CA) and RabbitMQ (`amqps` + CA), plus an nginx TLS edge; see the
+  production-hardening runbook below.
 
 ## Threats explicitly addressed
 
@@ -54,20 +66,32 @@
 - SQL injection on tenant DB names → strict validation + identifier quoting.
 - Retry storms → exponential backoff with full jitter.
 
-## NOT done — required before any production use
+## Hardening status
 
-This scaffold is **not production-ready**. Outstanding hardening:
+The code and configuration for the items below live in the repository; the
+**runbook** that ties them together, including what you must supply (certs,
+secrets, domains), is [production-hardening](../operations/production-hardening.md).
 
-- Real secret management (Vault/KMS/SOPS) instead of a `.env` file; secret
-  rotation.
-- TLS everywhere (PostgreSQL `verify-full`, Redis, RabbitMQ, ingress) with
-  managed certificates.
-- A dedicated least-privilege application DB role, separate from the
-  CREATEDB-capable provisioning role; per-database GRANT hardening.
-- Database-level audit immutability (REVOKE UPDATE/DELETE, append triggers).
+Implemented in code/config (needs your infrastructure to activate):
+
+- Secret delivery via files (`<FIELD>_FILE`), ready for Vault/KMS/SOPS/Docker
+  secrets; wired in `compose.prod.yaml`.
+- TLS for PostgreSQL (`verify-full`), Redis (`rediss`), RabbitMQ (`amqps`) and an
+  nginx TLS edge with HSTS and coarse rate limiting.
+- Least-privilege application DB role separate from the CREATEDB provisioning
+  role; per-database GRANT hardening script.
+- Database-level audit immutability (append-only trigger + REVOKE in the role
+  script).
+- PgBouncer transaction pooling in front of PostgreSQL.
+- Dependency and image scanning in CI with enforced HIGH/CRITICAL thresholds
+  (Trivy) and a published CycloneDX SBOM.
+- Edge security headers and request rate limiting (nginx).
+
+Still outstanding — needs product/ops decisions or external services:
+
+- Secret **rotation** automation (the delivery mechanism is in place).
 - OAuth 2.0 / OIDC, MFA, account lockout and password-reset flows.
-- WAF / ingress rate limiting; DDoS protection; security headers at the edge.
-- Dependency and image scanning in CI with enforced thresholds; SBOM.
+- A managed WAF / DDoS protection in front of the nginx edge; managed TLS certs.
 - Backup **and tested restore** (see [backup-restore](../operations/backup-restore.md)),
   DR runbook, failover.
 - Penetration test and threat-model review.
