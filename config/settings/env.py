@@ -53,6 +53,24 @@ class AppEnv(BaseSettings):
     JWT_ISSUER: str = "crm-platform"
     JWT_AUDIENCE: str = "crm-api"
 
+    # Account lockout after repeated failed logins.
+    LOGIN_MAX_FAILURES: int = Field(default=5, ge=1, le=100)
+    LOGIN_LOCKOUT_MINUTES: int = Field(default=15, ge=1, le=1440)
+    LOGIN_FAILURE_WINDOW_MINUTES: int = Field(default=15, ge=1, le=1440)
+
+    # Multi-factor authentication (TOTP). The secret at rest is encrypted; when
+    # MFA_ENCRYPTION_KEY is unset a key is derived from DJANGO_SECRET_KEY.
+    MFA_ISSUER: str = "CRM Platform"
+    MFA_ENCRYPTION_KEY: SecretStr | None = None
+
+    # OpenID Connect relying party (log in with an external IdP). Disabled unless
+    # OIDC_ENABLED and the issuer/client are configured.
+    OIDC_ENABLED: bool = False
+    OIDC_ISSUER: str | None = None
+    OIDC_CLIENT_ID: str | None = None
+    OIDC_JWKS_URI: str | None = None
+    OIDC_AUTO_PROVISION: bool = False
+
     # Control-plane database (global users, organisations, tenant registry).
     DB_HOST: str = "localhost"
     DB_PORT: int = Field(default=5432, ge=1, le=65535)
@@ -119,6 +137,7 @@ class AppEnv(BaseSettings):
 
     @field_validator(
         "DB_PROVISION_PASSWORD",
+        "MFA_ENCRYPTION_KEY",
         "REDIS_PASSWORD",
         "METRICS_TOKEN",
         "SENTRY_DSN",
@@ -134,7 +153,13 @@ class AppEnv(BaseSettings):
             return None
         return value
 
-    @field_validator("OTEL_EXPORTER_OTLP_ENDPOINT", mode="before")
+    @field_validator(
+        "OTEL_EXPORTER_OTLP_ENDPOINT",
+        "OIDC_ISSUER",
+        "OIDC_CLIENT_ID",
+        "OIDC_JWKS_URI",
+        mode="before",
+    )
     @classmethod
     def _empty_endpoint_as_none(cls, value: object) -> object:
         if isinstance(value, str) and not value.strip():
@@ -155,6 +180,9 @@ def hardening_errors(env: AppEnv) -> list[str]:  # noqa: PLR0912 - one guard per
     for name, secret in secrets_to_check.items():
         if secret is not None and _looks_like_placeholder(secret.get_secret_value()):
             errors.append(f"{name} contains a placeholder value; run scripts/init_env.sh")
+
+    if env.OIDC_ENABLED and not (env.OIDC_ISSUER and env.OIDC_CLIENT_ID and env.OIDC_JWKS_URI):
+        errors.append("OIDC_ENABLED requires OIDC_ISSUER, OIDC_CLIENT_ID and OIDC_JWKS_URI")
 
     if env.DJANGO_ENV != "production":
         return errors
@@ -186,7 +214,7 @@ def hardening_errors(env: AppEnv) -> list[str]:  # noqa: PLR0912 - one guard per
     return errors
 
 
-_SECRET_FILE_SUFFIX = "_FILE"  # noqa: S105 - env-var name suffix, not a secret
+_SECRET_FILE_SUFFIX = "_FILE"  # noqa: S105  # nosec B105 - env-var name suffix, not a secret
 
 
 def secret_file_overrides(environ: Mapping[str, str]) -> dict[str, str]:

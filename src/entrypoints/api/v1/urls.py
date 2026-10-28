@@ -2,12 +2,24 @@
 
 from django.urls import include, path
 
-from modules.identity.presentation.views import MeView, TokenObtainView, TokenRefreshThrottledView
+from modules.identity.presentation.views import (
+    MeView,
+    MfaConfirmView,
+    MfaDisableView,
+    MfaEnrollView,
+    OidcLoginView,
+    TokenObtainView,
+    TokenRefreshThrottledView,
+)
 from modules.integrations.presentation.views import WebhookView
 
 urlpatterns = [
     path("auth/token/", TokenObtainView.as_view(), name="auth-token"),
     path("auth/token/refresh/", TokenRefreshThrottledView.as_view(), name="auth-token-refresh"),
+    path("auth/oidc/", OidcLoginView.as_view(), name="auth-oidc"),
+    path("auth/mfa/enroll/", MfaEnrollView.as_view(), name="auth-mfa-enroll"),
+    path("auth/mfa/confirm/", MfaConfirmView.as_view(), name="auth-mfa-confirm"),
+    path("auth/mfa/disable/", MfaDisableView.as_view(), name="auth-mfa-disable"),
     path("me/", MeView.as_view(), name="me"),
     path("customers/", include("modules.customers.presentation.urls")),
     path("leads/", include("modules.leads.presentation.urls")),

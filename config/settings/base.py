@@ -279,6 +279,26 @@ SIMPLE_JWT: dict[str, Any] = {
     "USER_ID_CLAIM": "sub",
 }
 
+# Account lockout, MFA and OIDC relying-party configuration (modules.identity).
+LOGIN_LOCKOUT: dict[str, int] = {
+    "MAX_FAILURES": ENV.LOGIN_MAX_FAILURES,
+    "LOCKOUT_MINUTES": ENV.LOGIN_LOCKOUT_MINUTES,
+    "WINDOW_MINUTES": ENV.LOGIN_FAILURE_WINDOW_MINUTES,
+}
+MFA: dict[str, str | None] = {
+    "ISSUER": ENV.MFA_ISSUER,
+    "ENCRYPTION_KEY": (
+        ENV.MFA_ENCRYPTION_KEY.get_secret_value() if ENV.MFA_ENCRYPTION_KEY else None
+    ),
+}
+OIDC: dict[str, Any] = {
+    "ENABLED": ENV.OIDC_ENABLED,
+    "ISSUER": ENV.OIDC_ISSUER,
+    "CLIENT_ID": ENV.OIDC_CLIENT_ID,
+    "JWKS_URI": ENV.OIDC_JWKS_URI,
+    "AUTO_PROVISION": ENV.OIDC_AUTO_PROVISION,
+}
+
 SPECTACULAR_API_DESCRIPTION = """
 A multi-tenant CRM backend. This page is interactive: you can read every
 endpoint and call it directly with the **Try it out** button.

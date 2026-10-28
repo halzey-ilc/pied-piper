@@ -6,9 +6,21 @@
   `DJANGO_SECRET_KEY`, short access tokens, rotating refresh tokens with
   blacklist, issuer/audience claims. Token claims carry no tenant or database
   information.
+- **Account lockout:** repeated failed logins per username are counted within a
+  sliding window and lock the account for a fixed duration (`429 account_locked`);
+  a successful login clears the counter (`modules.identity`, configured via
+  `LOGIN_*`).
+- **Multi-factor authentication:** optional per-user TOTP (RFC 6238, stdlib
+  `hmac`), enrolled and confirmed via the API, enforced at login (`401
+  mfa_required` then an `otp` field). Secrets are encrypted at rest (Fernet) and
+  single-use recovery codes are stored hashed.
+- **External login (OIDC):** optional OpenID Connect relying party verifies an
+  IdP-issued ID token against the provider's JWKS (RS256, issuer/audience/expiry
+  checked) and exchanges it for CRM tokens; accounts are matched by verified
+  email (auto-provisioned only when enabled).
 - **Password storage:** Argon2 (`argon2-cffi`) as the default hasher; minimum
-  length and common-password validators. No custom cryptography anywhere —
-  signatures use the standard-library `hmac`.
+  length and common-password validators. TOTP and OIDC use vetted primitives
+  (`hmac`, `PyJWT`/`cryptography`); no bespoke crypto.
 - **Authorization:** RBAC with own/team/all ownership scopes
   (`modules.access_control`), enforced inside use cases on every operation, not
   only in views.
@@ -87,10 +99,13 @@ Implemented in code/config (needs your infrastructure to activate):
   (Trivy) and a published CycloneDX SBOM.
 - Edge security headers and request rate limiting (nginx).
 
+- Account lockout, TOTP MFA (with recovery codes) and an OIDC relying party for
+  external login (`modules.identity`).
+
 Still outstanding — needs product/ops decisions or external services:
 
 - Secret **rotation** automation (the delivery mechanism is in place).
-- OAuth 2.0 / OIDC, MFA, account lockout and password-reset flows.
+- Self-service password-reset and an OIDC/OAuth logout/session-revocation flow.
 - A managed WAF / DDoS protection in front of the nginx edge; managed TLS certs.
 - Backup **and tested restore** (see [backup-restore](../operations/backup-restore.md)),
   DR runbook, failover.

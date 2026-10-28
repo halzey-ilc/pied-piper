@@ -79,7 +79,7 @@ class Participant:
     ) -> Participant:
         clean_name = _clean(name, label="Participant name", max_length=120, required=True)
         clean_email = str(EmailAddress(email)) if email else None
-        assert clean_name is not None  # noqa: S101 - _clean(required=True) guarantees it
+        assert clean_name is not None  # noqa: S101  # nosec B101 - _clean(required=True) guarantees it
         return cls(name=clean_name, email=clean_email, user_id=user_id)
 
     @property

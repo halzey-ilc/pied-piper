@@ -5,7 +5,7 @@ shared = table present in every DB).
 
 | Context | Plane | Status | Responsibility |
 |---------|-------|--------|----------------|
-| identity | control | implemented | Global user accounts, JWT authentication, Argon2 |
+| identity | control | implemented | Global user accounts, JWT auth, Argon2, account lockout, TOTP MFA, OIDC login |
 | organizations | control | implemented | Companies (tenants) and user memberships with roles |
 | access_control | (library) | implemented | RBAC: permissions and own/team/all scopes |
 | tenant_registry | control | implemented | Tenant→database registry, cluster placement, provisioning jobs, tenant migrations |
