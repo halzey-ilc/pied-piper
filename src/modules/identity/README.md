@@ -19,18 +19,26 @@ granted through `organizations` memberships, never from token claims.
 - **OIDC login** — `POST /auth/oidc/` verifies an IdP ID token against the
   provider JWKS (RS256, issuer/audience/expiry) and returns CRM tokens. Users are
   matched by verified email; `OIDC_AUTO_PROVISION` optionally creates them.
+- **Password reset** — `POST /auth/password-reset/` emails a one-time link (same
+  response whether or not the email exists); `POST /auth/password-reset/confirm/`
+  validates the token, applies the password policy, and clears lockout. Tokens
+  are random, stored hashed, single-use and time-limited (`infrastructure/
+  password_reset.py`). Delivery uses Django email (console in dev, SMTP in prod).
 
 ## Layout
 
 - `domain/totp.py` — RFC 6238 TOTP + recovery-code generation (pure Python).
-- `infrastructure/lockout.py`, `infrastructure/mfa.py`, `infrastructure/oidc.py`
-  — stateful services (ORM, Fernet, PyJWT) and the JWKS resolver.
+- `infrastructure/lockout.py`, `infrastructure/mfa.py`, `infrastructure/oidc.py`,
+  `infrastructure/password_reset.py` — stateful services (ORM, Fernet, PyJWT,
+  email) and the JWKS resolver.
 - `infrastructure/models.py` — `User`, `LoginState`, `MfaDevice`,
-  `MfaRecoveryCode`.
+  `MfaRecoveryCode`, `PasswordResetToken`.
 - `presentation/` — DRF serializers, views and auth-specific error types.
 
 ## Configuration
 
 `LOGIN_MAX_FAILURES`, `LOGIN_LOCKOUT_MINUTES`, `LOGIN_FAILURE_WINDOW_MINUTES`,
 `MFA_ISSUER`, `MFA_ENCRYPTION_KEY`, `OIDC_ENABLED`, `OIDC_ISSUER`,
-`OIDC_CLIENT_ID`, `OIDC_JWKS_URI`, `OIDC_AUTO_PROVISION` (see `.env.example`).
+`OIDC_CLIENT_ID`, `OIDC_JWKS_URI`, `OIDC_AUTO_PROVISION`, `EMAIL_*`,
+`DEFAULT_FROM_EMAIL`, `PASSWORD_RESET_TTL_MINUTES`, `PASSWORD_RESET_URL_BASE`
+(see `.env.example`).

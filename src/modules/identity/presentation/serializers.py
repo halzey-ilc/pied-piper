@@ -63,6 +63,15 @@ class OidcLoginSerializer(serializers.Serializer[dict[str, Any]]):
     id_token = serializers.CharField(help_text="The ID token issued by the OIDC provider.")
 
 
+class PasswordResetRequestSerializer(serializers.Serializer[dict[str, Any]]):
+    email = serializers.EmailField(help_text="The account's email address.")
+
+
+class PasswordResetConfirmSerializer(serializers.Serializer[dict[str, Any]]):
+    token = serializers.CharField(help_text="The token from the reset email.")
+    new_password = serializers.CharField(help_text="The new password to set.")
+
+
 class TokenPairResponseSerializer(serializers.Serializer[dict[str, Any]]):
     access = serializers.CharField()
     refresh = serializers.CharField()

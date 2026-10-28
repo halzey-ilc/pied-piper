@@ -71,3 +71,23 @@ class MfaRecoveryCode(models.Model):
 
     def __str__(self) -> str:
         return f"recovery_code:{self.id}"
+
+
+class PasswordResetToken(models.Model):
+    """A single-use, time-limited password-reset token (stored hashed)."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="password_reset_tokens"
+    )
+    token_hash = models.CharField(max_length=64, unique=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+    used_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "identity_password_reset_token"
+        indexes = [models.Index(fields=["user", "used_at"], name="pwreset_user_used_idx")]
+
+    def __str__(self) -> str:
+        return f"password_reset:{self.user_id}"

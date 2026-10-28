@@ -299,6 +299,21 @@ OIDC: dict[str, Any] = {
     "AUTO_PROVISION": ENV.OIDC_AUTO_PROVISION,
 }
 
+# --- Email / password reset -------------------------------------------------
+EMAIL_BACKEND = ENV.EMAIL_BACKEND
+EMAIL_HOST = ENV.EMAIL_HOST
+EMAIL_PORT = ENV.EMAIL_PORT
+EMAIL_HOST_USER = ENV.EMAIL_HOST_USER
+EMAIL_HOST_PASSWORD = ENV.EMAIL_HOST_PASSWORD.get_secret_value() if ENV.EMAIL_HOST_PASSWORD else ""
+EMAIL_USE_TLS = ENV.EMAIL_USE_TLS
+DEFAULT_FROM_EMAIL = ENV.DEFAULT_FROM_EMAIL
+EMAIL_TIMEOUT = 10
+
+PASSWORD_RESET: dict[str, Any] = {
+    "TTL_MINUTES": ENV.PASSWORD_RESET_TTL_MINUTES,
+    "URL_BASE": ENV.PASSWORD_RESET_URL_BASE,
+}
+
 SPECTACULAR_API_DESCRIPTION = """
 A multi-tenant CRM backend. This page is interactive: you can read every
 endpoint and call it directly with the **Try it out** button.

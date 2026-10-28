@@ -15,6 +15,7 @@ from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
 from modules.identity.infrastructure.mfa import MfaService
 from modules.identity.infrastructure.oidc import OidcError, verifier_from_settings
+from modules.identity.infrastructure.password_reset import PasswordResetService
 from modules.identity.presentation.auth_errors import OidcLoginFailed, OidcNoAccount
 from modules.identity.presentation.serializers import (
     EnrolmentResponseSerializer,
@@ -22,6 +23,8 @@ from modules.identity.presentation.serializers import (
     MfaConfirmSerializer,
     MfaDisableSerializer,
     OidcLoginSerializer,
+    PasswordResetConfirmSerializer,
+    PasswordResetRequestSerializer,
     RecoveryCodesResponseSerializer,
     TokenPairResponseSerializer,
 )
@@ -247,3 +250,60 @@ class OidcLoginView(APIView):
             user.save(update_fields=["password"])
         refresh = RefreshToken.for_user(user)
         return Response({"access": str(refresh.access_token), "refresh": str(refresh)})
+
+
+class _DetailSerializer(serializers.Serializer[dict[str, str]]):
+    detail = serializers.CharField()
+
+
+class PasswordResetRequestView(APIView):
+    """Request a password-reset email. Always succeeds (no account enumeration)."""
+
+    permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "auth"
+
+    @extend_schema(
+        tags=["Authentication"],
+        summary="Request a password reset",
+        description=(
+            "Sends a password-reset link to the address if an active account has it. The "
+            "response is the same whether or not the email is registered, so it never "
+            "reveals which addresses exist."
+        ),
+        request=PasswordResetRequestSerializer,
+        responses=_DetailSerializer,
+    )
+    def post(self, request: Request) -> Response:
+        payload = PasswordResetRequestSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        PasswordResetService().request_reset(payload.validated_data["email"])
+        return Response({"detail": "If the email is registered, a reset link has been sent."})
+
+
+class PasswordResetConfirmView(APIView):
+    """Set a new password using a token from the reset email."""
+
+    permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "auth"
+
+    @extend_schema(
+        tags=["Authentication"],
+        summary="Confirm a password reset",
+        description=(
+            "Validates the reset token and sets the new password (subject to the password "
+            "policy). The token is single-use and expires; completing a reset also unlocks "
+            "the account."
+        ),
+        request=PasswordResetConfirmSerializer,
+        responses=_DetailSerializer,
+    )
+    def post(self, request: Request) -> Response:
+        payload = PasswordResetConfirmSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        PasswordResetService().confirm_reset(
+            token=payload.validated_data["token"],
+            new_password=payload.validated_data["new_password"],
+        )
+        return Response({"detail": "Your password has been reset."})

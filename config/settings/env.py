@@ -53,6 +53,19 @@ class AppEnv(BaseSettings):
     JWT_ISSUER: str = "crm-platform"
     JWT_AUDIENCE: str = "crm-api"
 
+    # Email delivery (used for password-reset messages).
+    EMAIL_BACKEND: str = "django.core.mail.backends.console.EmailBackend"
+    EMAIL_HOST: str = "localhost"
+    EMAIL_PORT: int = Field(default=587, ge=1, le=65535)
+    EMAIL_HOST_USER: str = ""
+    EMAIL_HOST_PASSWORD: SecretStr | None = None
+    EMAIL_USE_TLS: bool = True
+    DEFAULT_FROM_EMAIL: str = "no-reply@crm.local"
+
+    # Self-service password reset.
+    PASSWORD_RESET_TTL_MINUTES: int = Field(default=30, ge=5, le=1440)
+    PASSWORD_RESET_URL_BASE: str = "https://app.example.com/reset-password"  # noqa: S105  # nosec B105 - a URL, not a secret
+
     # Account lockout after repeated failed logins.
     LOGIN_MAX_FAILURES: int = Field(default=5, ge=1, le=100)
     LOGIN_LOCKOUT_MINUTES: int = Field(default=15, ge=1, le=1440)
@@ -138,6 +151,7 @@ class AppEnv(BaseSettings):
     @field_validator(
         "DB_PROVISION_PASSWORD",
         "MFA_ENCRYPTION_KEY",
+        "EMAIL_HOST_PASSWORD",
         "REDIS_PASSWORD",
         "METRICS_TOKEN",
         "SENTRY_DSN",

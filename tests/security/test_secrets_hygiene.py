@@ -26,7 +26,9 @@ def test_env_file_is_ignored_by_git_and_docker() -> None:
     reason="requires .env.example from a source checkout",
 )
 def test_env_example_contains_only_placeholders_for_secrets() -> None:
-    secret_keys = re.compile(r"(SECRET|PASSWORD|TOKEN|SIGNING_KEY|DSN)", re.I)
+    # Match keys that actually hold a secret by their suffix, so config knobs that
+    # merely mention a secret (e.g. PASSWORD_RESET_TTL_MINUTES) are not flagged.
+    secret_keys = re.compile(r"(SECRET|PASSWORD|TOKEN|KEY|DSN)$", re.I)
     for line in (ROOT / ".env.example").read_text().splitlines():
         if not line or line.startswith("#") or "=" not in line:
             continue

@@ -8,6 +8,8 @@ from modules.identity.presentation.views import (
     MfaDisableView,
     MfaEnrollView,
     OidcLoginView,
+    PasswordResetConfirmView,
+    PasswordResetRequestView,
     TokenObtainView,
     TokenRefreshThrottledView,
 )
@@ -20,6 +22,16 @@ urlpatterns = [
     path("auth/mfa/enroll/", MfaEnrollView.as_view(), name="auth-mfa-enroll"),
     path("auth/mfa/confirm/", MfaConfirmView.as_view(), name="auth-mfa-confirm"),
     path("auth/mfa/disable/", MfaDisableView.as_view(), name="auth-mfa-disable"),
+    path(
+        "auth/password-reset/",
+        PasswordResetRequestView.as_view(),
+        name="auth-password-reset",
+    ),
+    path(
+        "auth/password-reset/confirm/",
+        PasswordResetConfirmView.as_view(),
+        name="auth-password-reset-confirm",
+    ),
     path("me/", MeView.as_view(), name="me"),
     path("customers/", include("modules.customers.presentation.urls")),
     path("leads/", include("modules.leads.presentation.urls")),

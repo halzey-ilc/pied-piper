@@ -18,6 +18,10 @@
   IdP-issued ID token against the provider's JWKS (RS256, issuer/audience/expiry
   checked) and exchanges it for CRM tokens; accounts are matched by verified
   email (auto-provisioned only when enabled).
+- **Password reset:** self-service reset by email. The request step never reveals
+  whether an address exists; tokens are random, stored hashed, single-use and
+  expire (`PASSWORD_RESET_TTL_MINUTES`). A completed reset enforces the password
+  policy and clears lockout state.
 - **Password storage:** Argon2 (`argon2-cffi`) as the default hasher; minimum
   length and common-password validators. TOTP and OIDC use vetted primitives
   (`hmac`, `PyJWT`/`cryptography`); no bespoke crypto.
@@ -99,13 +103,13 @@ Implemented in code/config (needs your infrastructure to activate):
   (Trivy) and a published CycloneDX SBOM.
 - Edge security headers and request rate limiting (nginx).
 
-- Account lockout, TOTP MFA (with recovery codes) and an OIDC relying party for
-  external login (`modules.identity`).
+- Account lockout, TOTP MFA (with recovery codes), an OIDC relying party for
+  external login, and self-service password reset (`modules.identity`).
 
 Still outstanding — needs product/ops decisions or external services:
 
 - Secret **rotation** automation (the delivery mechanism is in place).
-- Self-service password-reset and an OIDC/OAuth logout/session-revocation flow.
+- Session/refresh-token revocation on logout (reset already rotates passwords).
 - A managed WAF / DDoS protection in front of the nginx edge; managed TLS certs.
 - Backup **and tested restore** (see [backup-restore](../operations/backup-restore.md)),
   DR runbook, failover.
