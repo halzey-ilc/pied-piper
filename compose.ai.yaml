@@ -1,0 +1,29 @@
+# Optional overlay: connects the CRM to a locally running CRM AI Platform stack
+# (../crm-ai-platform; run `make up` there first, which creates the network).
+#
+#   AI_PLATFORM_TOKEN_KEY=<the AI Platform's AI_AUTH_HS256_KEY> \
+#     docker compose -f compose.yaml -f compose.ai.yaml up -d --build api worker
+#
+# Without this file the CRM runs exactly as before, with AI features disabled.
+
+name: crm-platform
+
+x-ai-env: &ai-env
+  AI_PLATFORM_ENABLED: "true"
+  AI_PLATFORM_URL: http://gateway:8090
+  AI_PLATFORM_TOKEN_KEY: ${AI_PLATFORM_TOKEN_KEY:?set AI_PLATFORM_TOKEN_KEY to the AI Platform key}
+
+services:
+  api:
+    environment: *ai-env
+    networks: [backend, ai-platform]
+  worker:
+    environment: *ai-env
+    networks: [backend, ai-platform]
+
+networks:
+  # Contains only the AI Platform gateway (never its database or worker), so
+  # service names such as "postgres" keep resolving to the CRM's own services.
+  ai-platform:
+    external: true
+    name: crm-ai-link

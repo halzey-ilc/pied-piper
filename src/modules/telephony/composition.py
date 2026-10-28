@@ -12,6 +12,12 @@ from platform_core.infrastructure.messaging.stores import DjangoEventOutbox
 from shared.infrastructure.unit_of_work import DjangoUnitOfWork
 
 
+def call_repository() -> DjangoCallRepository:
+    """System-level read access for other modules' workers (no RBAC: callers must
+    only use it for work a user was already authorised to start)."""
+    return DjangoCallRepository(require_tenant().db_alias)
+
+
 def call_service() -> CallService:
     alias = require_tenant().db_alias
     return CallService(

@@ -23,6 +23,7 @@ CommaList = Annotated[list[str], NoDecode]
 
 _PLACEHOLDER_MARKERS = ("__generate__", "change-me", "changeme", "insecure", "placeholder")
 _MIN_SECRET_LENGTH = 50
+_MIN_AI_TOKEN_KEY_LENGTH = 32
 
 
 class ConfigurationError(RuntimeError):
@@ -145,6 +146,15 @@ class AppEnv(BaseSettings):
     TELEGRAM_WEBHOOK_SECRET: SecretStr | None = None
     TELEPHONY_WEBHOOK_SECRET: SecretStr | None = None
 
+    # CRM AI Platform (separate service). Off unless explicitly enabled.
+    AI_PLATFORM_ENABLED: bool = False
+    AI_PLATFORM_URL: str | None = None
+    # HS256 key shared with the AI Platform gateway (its AI_AUTH_HS256_KEY).
+    AI_PLATFORM_TOKEN_KEY: SecretStr | None = None
+    AI_PLATFORM_TOKEN_TTL_SECONDS: int = Field(default=300, ge=30, le=900)
+    AI_PLATFORM_TIMEOUT_SECONDS: float = Field(default=10.0, gt=0, le=60)
+    AI_PLATFORM_DEADLINE_SECONDS: int = Field(default=900, ge=60, le=86400)
+
     @field_validator(
         "DJANGO_ALLOWED_HOSTS",
         "CORS_ALLOWED_ORIGINS",
@@ -171,6 +181,7 @@ class AppEnv(BaseSettings):
         "INSTAGRAM_APP_SECRET",
         "TELEGRAM_WEBHOOK_SECRET",
         "TELEPHONY_WEBHOOK_SECRET",
+        "AI_PLATFORM_TOKEN_KEY",
         mode="before",
     )
     @classmethod
@@ -181,6 +192,7 @@ class AppEnv(BaseSettings):
 
     @field_validator(
         "OTEL_EXPORTER_OTLP_ENDPOINT",
+        "AI_PLATFORM_URL",
         "OIDC_ISSUER",
         "OIDC_CLIENT_ID",
         "OIDC_JWKS_URI",
@@ -210,6 +222,8 @@ def hardening_errors(env: AppEnv) -> list[str]:  # noqa: PLR0912 - one guard per
     if env.OIDC_ENABLED and not (env.OIDC_ISSUER and env.OIDC_CLIENT_ID and env.OIDC_JWKS_URI):
         errors.append("OIDC_ENABLED requires OIDC_ISSUER, OIDC_CLIENT_ID and OIDC_JWKS_URI")
 
+    errors.extend(_ai_platform_errors(env))
+
     if env.DJANGO_ENV != "production":
         return errors
 
@@ -237,6 +251,35 @@ def hardening_errors(env: AppEnv) -> list[str]:  # noqa: PLR0912 - one guard per
         errors.append("DIAGNOSTIC_TASKS_ENABLED must be false in production")
     if env.API_DOCS_ENABLED:
         errors.append("API_DOCS_ENABLED must be false in production")
+    return errors
+
+
+def _ai_platform_errors(env: AppEnv) -> list[str]:
+    if not env.AI_PLATFORM_ENABLED:
+        return []
+    errors: list[str] = []
+    key = env.AI_PLATFORM_TOKEN_KEY.get_secret_value() if env.AI_PLATFORM_TOKEN_KEY else ""
+    if not env.AI_PLATFORM_URL:
+        errors.append("AI_PLATFORM_ENABLED requires AI_PLATFORM_URL")
+    elif not env.AI_PLATFORM_URL.startswith(("http://", "https://")):
+        errors.append("AI_PLATFORM_URL must be an http(s) URL")
+    elif env.DJANGO_ENV == "production" and not env.AI_PLATFORM_URL.startswith("https://"):
+        errors.append("AI_PLATFORM_URL must use https in production")
+    # Same minimum as the AI Platform gateway enforces for this shared key.
+    if len(key) < _MIN_AI_TOKEN_KEY_LENGTH:
+        errors.append(
+            f"AI_PLATFORM_TOKEN_KEY must be at least {_MIN_AI_TOKEN_KEY_LENGTH} characters "
+            "when AI_PLATFORM_ENABLED"
+        )
+    elif _looks_like_placeholder(key):
+        errors.append("AI_PLATFORM_TOKEN_KEY contains a placeholder value")
+    if key and key in (
+        env.JWT_SIGNING_KEY.get_secret_value(),
+        env.DJANGO_SECRET_KEY.get_secret_value(),
+    ):
+        errors.append(
+            "AI_PLATFORM_TOKEN_KEY must differ from JWT_SIGNING_KEY and DJANGO_SECRET_KEY"
+        )
     return errors
 
 

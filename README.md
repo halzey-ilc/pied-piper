@@ -101,6 +101,7 @@ docs/              architecture, operations and ADRs
 - [Multi-tenancy](docs/architecture/multi-tenancy.md)
 - [Security model](docs/architecture/security-model.md)
 - [Async processing](docs/architecture/async-processing.md)
+- [AI integration](docs/architecture/ai-integration.md) (optional, off by default)
 - [Observability](docs/architecture/observability.md)
 - [Local development](docs/operations/local-development.md)
 - [Backup & restore](docs/operations/backup-restore.md)

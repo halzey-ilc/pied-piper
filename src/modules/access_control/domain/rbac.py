@@ -53,6 +53,8 @@ class Permission(StrEnum):
     REPORTS_GENERATE = "reports.generate"
     MEMBERS_MANAGE = "members.manage"
     INTEGRATIONS_MANAGE = "integrations.manage"
+    # Send a record's content to the AI Platform for analysis (e.g. a call summary).
+    AI_REQUEST = "ai.request"
 
 
 class Scope(IntEnum):
@@ -103,6 +105,7 @@ ROLE_GRANTS: Mapping[Role, Mapping[Permission, Scope]] = {
         Permission.COMMUNICATIONS_SEND: Scope.TEAM,
         Permission.REPORTS_VIEW: Scope.ALL,
         Permission.REPORTS_GENERATE: Scope.ALL,
+        Permission.AI_REQUEST: Scope.TEAM,
     },
     Role.SALES_REP: {
         Permission.CUSTOMERS_VIEW: Scope.OWN,
@@ -130,6 +133,7 @@ ROLE_GRANTS: Mapping[Role, Mapping[Permission, Scope]] = {
         Permission.TELEPHONY_UPDATE: Scope.OWN,
         Permission.COMMUNICATIONS_VIEW: Scope.OWN,
         Permission.COMMUNICATIONS_SEND: Scope.OWN,
+        Permission.AI_REQUEST: Scope.OWN,
     },
     Role.VIEWER: {
         Permission.CUSTOMERS_VIEW: Scope.ALL,

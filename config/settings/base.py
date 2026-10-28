@@ -49,6 +49,7 @@ INSTALLED_APPS = [
     "modules.subscriptions.infrastructure.apps.SubscriptionsConfig",
     "modules.notifications.infrastructure.apps.NotificationsConfig",
     "modules.communications.infrastructure.apps.CommunicationsConfig",
+    "modules.ai_insights.infrastructure.apps.AiInsightsConfig",
 ]
 
 MIDDLEWARE = [
@@ -162,6 +163,7 @@ TENANCY: dict[str, Any] = {
         "telephony",
         "notifications",
         "communications",
+        "ai_insights",
     },
     "SHARED_APPS": {"messaging", "audit"},
     "IGNORED_APPS": {"rest_framework", "corsheaders", "drf_spectacular"},
@@ -531,6 +533,24 @@ INTEGRATIONS: dict[str, Any] = {
         "telegram": ENV.TELEGRAM_WEBHOOK_SECRET,
         "telephony": ENV.TELEPHONY_WEBHOOK_SECRET,
     },
+}
+
+# --- CRM AI Platform ----------------------------------------------------------
+# A separate service; the CRM calls it and pulls results. It holds no CRM
+# credentials. Disabled unless AI_PLATFORM_ENABLED=true (validated in env.py).
+
+AI_PLATFORM: dict[str, Any] = {
+    "ENABLED": ENV.AI_PLATFORM_ENABLED,
+    "URL": ENV.AI_PLATFORM_URL,
+    "TOKEN_KEY": (
+        ENV.AI_PLATFORM_TOKEN_KEY.get_secret_value() if ENV.AI_PLATFORM_TOKEN_KEY else None
+    ),
+    "ISSUER": "crm-platform",
+    "AUDIENCE": "crm-ai-platform",
+    "TOKEN_TTL_SECONDS": ENV.AI_PLATFORM_TOKEN_TTL_SECONDS,
+    "CONNECT_TIMEOUT": 3.0,
+    "READ_TIMEOUT": ENV.AI_PLATFORM_TIMEOUT_SECONDS,
+    "DEADLINE_SECONDS": ENV.AI_PLATFORM_DEADLINE_SECONDS,
 }
 
 # --- Observability ----------------------------------------------------------

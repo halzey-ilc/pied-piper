@@ -18,6 +18,7 @@ app.conf.include = [
     "entrypoints.workers.tasks.events",
     "entrypoints.workers.tasks.integrations",
     "entrypoints.workers.tasks.reports",
+    "entrypoints.workers.tasks.ai_insights",
 ]
 
 from platform_core.infrastructure.observability.celery_signals import (  # noqa: E402
