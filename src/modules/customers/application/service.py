@@ -70,6 +70,7 @@ class CustomerService:
         customer, event = Customer.register(
             name=command.name,
             owner_user_id=principal.user_id,
+            team_id=principal.department_id,
             email=command.email,
             phone=command.phone,
         )

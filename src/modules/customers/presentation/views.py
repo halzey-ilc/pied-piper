@@ -61,6 +61,7 @@ class CustomerBaseView(TenantScopedAPIView):
             tenant_id=self.membership.tenant_id,
             role=Role(self.membership.role),
             team_ids=self.membership.team_ids,
+            department_id=self.membership.department_id,
         )
 
 

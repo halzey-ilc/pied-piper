@@ -23,6 +23,7 @@ from platform_core.application.context import TenantContext, activate_tenant, de
 from platform_core.application.ports import TenantMembership
 from platform_core.domain.tenancy import TenantNotFoundError
 from platform_core.infrastructure.tenancy.services import connection_registry, tenant_resolver
+from shared.domain.errors import AccessDeniedError
 
 
 class TenantScopedAPIView(APIView):
@@ -35,6 +36,9 @@ class TenantScopedAPIView(APIView):
         user_id = getattr(request.user, "id", None)
         if user_id is None:
             raise TenantNotFoundError("Tenant not found.")
+        if getattr(request.user, "must_change_password", False):
+            # Signed in with a temporary password: only the password change is allowed.
+            raise AccessDeniedError("Change your temporary password first.")
         header = settings.TENANCY["HEADER"]
         resolved = tenant_resolver().resolve_for_user(request.headers.get(header), user_id)
         if resolved.membership is None:

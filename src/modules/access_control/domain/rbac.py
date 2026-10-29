@@ -60,6 +60,18 @@ class Permission(StrEnum):
     # Risk signals concern employees' actions: owner and admin only (not in other roles).
     RISK_VIEW = "risk.view"
     RISK_MANAGE = "risk.manage"
+    # Organisation (P0): company settings, departments, staff accounts.
+    COMPANY_SETTINGS_MANAGE = "company.settings.manage"
+    DEPARTMENTS_MANAGE = "departments.manage"
+    STAFF_VIEW = "staff.view"
+    STAFF_MANAGE = "staff.manage"
+    # Sales management (P0): plans, absences, the head-of-sales cabinet, call ratings.
+    PLANS_VIEW = "plans.view"
+    PLANS_MANAGE = "plans.manage"
+    ABSENCES_MANAGE = "absences.manage"
+    TEAM_CABINET_VIEW = "team_cabinet.view"
+    # Numeric call-quality ratings: managers never see their own (spec §7).
+    CALL_RATINGS_VIEW = "calls.ratings.view"
 
 
 class Scope(IntEnum):
@@ -69,49 +81,172 @@ class Scope(IntEnum):
 
 
 class Role(StrEnum):
+    """Stored membership roles.
+
+    The first five values predate the P0 product roles and are kept as stored
+    (renaming them would silently change access). ``product_role`` maps every
+    stored value to the product vocabulary of spec §3:
+
+    ========== ============== =========================================
+    stored     product role   notes
+    ========== ============== =========================================
+    owner      director       company owner; same grants as director
+    admin      director       company administrator (legacy)
+    director   director
+    manager    head_of_sales  legacy value for the head of sales (РОП)
+    head_of_sales head_of_sales
+    sales_rep  manager        sales manager
+    lead_caller lead_caller   лидоруб: first contact and qualification
+    operations operations     опердел: client support after the sale
+    viewer     viewer
+    ========== ============== =========================================
+    """
+
     OWNER = "owner"
     ADMIN = "admin"
     MANAGER = "manager"
     SALES_REP = "sales_rep"
     VIEWER = "viewer"
+    DIRECTOR = "director"
+    HEAD_OF_SALES = "head_of_sales"
+    LEAD_CALLER = "lead_caller"
+    OPERATIONS = "operations"
+
+
+PRODUCT_ROLES: Mapping[Role, str] = {
+    Role.OWNER: "director",
+    Role.ADMIN: "director",
+    Role.DIRECTOR: "director",
+    Role.MANAGER: "head_of_sales",
+    Role.HEAD_OF_SALES: "head_of_sales",
+    Role.SALES_REP: "manager",
+    Role.LEAD_CALLER: "lead_caller",
+    Role.OPERATIONS: "operations",
+    Role.VIEWER: "viewer",
+}
+
+
+def product_role(role: Role) -> str:
+    return PRODUCT_ROLES[role]
+
+
+# Which roles a creator may give to a new staff account (spec §3 hierarchy).
+CREATABLE_ROLES: Mapping[Role, tuple[Role, ...]] = {
+    Role.OWNER: (
+        Role.DIRECTOR,
+        Role.HEAD_OF_SALES,
+        Role.SALES_REP,
+        Role.LEAD_CALLER,
+        Role.OPERATIONS,
+        Role.VIEWER,
+    ),
+    Role.ADMIN: (
+        Role.HEAD_OF_SALES,
+        Role.SALES_REP,
+        Role.LEAD_CALLER,
+        Role.OPERATIONS,
+        Role.VIEWER,
+    ),
+    Role.DIRECTOR: (
+        Role.HEAD_OF_SALES,
+        Role.SALES_REP,
+        Role.LEAD_CALLER,
+        Role.OPERATIONS,
+        Role.VIEWER,
+    ),
+    Role.HEAD_OF_SALES: (Role.SALES_REP, Role.LEAD_CALLER),
+    Role.MANAGER: (Role.SALES_REP, Role.LEAD_CALLER),
+}
 
 
 _ALL = Scope.ALL
+_HEAD_OF_SALES: Mapping[Permission, Scope] = {
+    Permission.CUSTOMERS_VIEW: Scope.TEAM,
+    Permission.CUSTOMERS_CREATE: Scope.TEAM,
+    Permission.CUSTOMERS_UPDATE: Scope.TEAM,
+    Permission.LEADS_VIEW: Scope.TEAM,
+    Permission.LEADS_CREATE: Scope.TEAM,
+    Permission.LEADS_UPDATE: Scope.TEAM,
+    Permission.LEADS_CONVERT: Scope.TEAM,
+    Permission.PIPELINES_VIEW: Scope.ALL,
+    Permission.PIPELINES_MANAGE: Scope.ALL,
+    Permission.DEALS_VIEW: Scope.TEAM,
+    Permission.DEALS_CREATE: Scope.TEAM,
+    Permission.DEALS_UPDATE: Scope.TEAM,
+    Permission.ACTIVITIES_VIEW: Scope.TEAM,
+    Permission.ACTIVITIES_CREATE: Scope.TEAM,
+    Permission.ACTIVITIES_UPDATE: Scope.TEAM,
+    Permission.MEETINGS_VIEW: Scope.TEAM,
+    Permission.MEETINGS_CREATE: Scope.TEAM,
+    Permission.MEETINGS_UPDATE: Scope.TEAM,
+    Permission.PAYMENTS_VIEW: Scope.TEAM,
+    Permission.PAYMENTS_CREATE: Scope.TEAM,
+    Permission.PAYMENTS_UPDATE: Scope.TEAM,
+    Permission.TELEPHONY_VIEW: Scope.TEAM,
+    Permission.TELEPHONY_CREATE: Scope.TEAM,
+    Permission.TELEPHONY_UPDATE: Scope.TEAM,
+    Permission.SUBSCRIPTIONS_VIEW: Scope.ALL,
+    Permission.COMMUNICATIONS_VIEW: Scope.TEAM,
+    Permission.COMMUNICATIONS_SEND: Scope.TEAM,
+    Permission.REPORTS_VIEW: Scope.ALL,
+    Permission.REPORTS_GENERATE: Scope.ALL,
+    Permission.AI_REQUEST: Scope.TEAM,
+    Permission.STAFF_VIEW: Scope.TEAM,
+    Permission.STAFF_MANAGE: Scope.TEAM,
+    Permission.PLANS_VIEW: Scope.TEAM,
+    Permission.PLANS_MANAGE: Scope.TEAM,
+    Permission.ABSENCES_MANAGE: Scope.TEAM,
+    Permission.TEAM_CABINET_VIEW: Scope.TEAM,
+    Permission.CALL_RATINGS_VIEW: Scope.TEAM,
+}
 ROLE_GRANTS: Mapping[Role, Mapping[Permission, Scope]] = {
     Role.OWNER: dict.fromkeys(Permission, _ALL),
     Role.ADMIN: dict.fromkeys(Permission, _ALL),
-    Role.MANAGER: {
-        Permission.CUSTOMERS_VIEW: Scope.TEAM,
-        Permission.CUSTOMERS_CREATE: Scope.TEAM,
-        Permission.CUSTOMERS_UPDATE: Scope.TEAM,
+    Role.DIRECTOR: dict.fromkeys(Permission, _ALL),
+    Role.HEAD_OF_SALES: _HEAD_OF_SALES,
+    # Лидоруб: first contact with incoming leads and booking meetings for consultants.
+    # Sees the department's leads (the shared queue), not deals or payments.
+    Role.LEAD_CALLER: {
         Permission.LEADS_VIEW: Scope.TEAM,
         Permission.LEADS_CREATE: Scope.TEAM,
         Permission.LEADS_UPDATE: Scope.TEAM,
-        Permission.LEADS_CONVERT: Scope.TEAM,
+        Permission.CUSTOMERS_VIEW: Scope.OWN,
         Permission.PIPELINES_VIEW: Scope.ALL,
-        Permission.PIPELINES_MANAGE: Scope.ALL,
-        Permission.DEALS_VIEW: Scope.TEAM,
-        Permission.DEALS_CREATE: Scope.TEAM,
-        Permission.DEALS_UPDATE: Scope.TEAM,
-        Permission.ACTIVITIES_VIEW: Scope.TEAM,
-        Permission.ACTIVITIES_CREATE: Scope.TEAM,
-        Permission.ACTIVITIES_UPDATE: Scope.TEAM,
-        Permission.MEETINGS_VIEW: Scope.TEAM,
-        Permission.MEETINGS_CREATE: Scope.TEAM,
-        Permission.MEETINGS_UPDATE: Scope.TEAM,
-        Permission.PAYMENTS_VIEW: Scope.TEAM,
-        Permission.PAYMENTS_CREATE: Scope.TEAM,
-        Permission.PAYMENTS_UPDATE: Scope.TEAM,
-        Permission.TELEPHONY_VIEW: Scope.TEAM,
-        Permission.TELEPHONY_CREATE: Scope.TEAM,
-        Permission.TELEPHONY_UPDATE: Scope.TEAM,
-        Permission.SUBSCRIPTIONS_VIEW: Scope.ALL,
+        Permission.ACTIVITIES_VIEW: Scope.OWN,
+        Permission.ACTIVITIES_CREATE: Scope.OWN,
+        Permission.ACTIVITIES_UPDATE: Scope.OWN,
+        Permission.MEETINGS_VIEW: Scope.OWN,
+        Permission.MEETINGS_CREATE: Scope.OWN,
+        Permission.MEETINGS_UPDATE: Scope.OWN,
+        Permission.TELEPHONY_VIEW: Scope.OWN,
+        Permission.TELEPHONY_CREATE: Scope.OWN,
+        Permission.TELEPHONY_UPDATE: Scope.OWN,
         Permission.COMMUNICATIONS_VIEW: Scope.TEAM,
         Permission.COMMUNICATIONS_SEND: Scope.TEAM,
-        Permission.REPORTS_VIEW: Scope.ALL,
-        Permission.REPORTS_GENERATE: Scope.ALL,
-        Permission.AI_REQUEST: Scope.TEAM,
+        Permission.PLANS_VIEW: Scope.OWN,
     },
+    # Опердел: supports clients after the sale; sees paying clients and their deals
+    # company-wide, records payments, does not manage pipelines, staff or plans.
+    Role.OPERATIONS: {
+        Permission.CUSTOMERS_VIEW: Scope.ALL,
+        Permission.CUSTOMERS_UPDATE: Scope.ALL,
+        Permission.PIPELINES_VIEW: Scope.ALL,
+        Permission.DEALS_VIEW: Scope.ALL,
+        Permission.DEALS_UPDATE: Scope.OWN,
+        Permission.ACTIVITIES_VIEW: Scope.ALL,
+        Permission.ACTIVITIES_CREATE: Scope.OWN,
+        Permission.ACTIVITIES_UPDATE: Scope.OWN,
+        Permission.MEETINGS_VIEW: Scope.ALL,
+        Permission.PAYMENTS_VIEW: Scope.ALL,
+        Permission.PAYMENTS_CREATE: Scope.ALL,
+        Permission.PAYMENTS_UPDATE: Scope.ALL,
+        Permission.TELEPHONY_VIEW: Scope.OWN,
+        Permission.TELEPHONY_CREATE: Scope.OWN,
+        Permission.COMMUNICATIONS_VIEW: Scope.ALL,
+        Permission.COMMUNICATIONS_SEND: Scope.ALL,
+    },
+    # Legacy value of the head of sales: identical grants, kept so stored roles keep working.
+    Role.MANAGER: _HEAD_OF_SALES,
     Role.SALES_REP: {
         Permission.CUSTOMERS_VIEW: Scope.OWN,
         Permission.CUSTOMERS_CREATE: Scope.OWN,
@@ -139,6 +274,7 @@ ROLE_GRANTS: Mapping[Role, Mapping[Permission, Scope]] = {
         Permission.COMMUNICATIONS_VIEW: Scope.OWN,
         Permission.COMMUNICATIONS_SEND: Scope.OWN,
         Permission.AI_REQUEST: Scope.OWN,
+        Permission.PLANS_VIEW: Scope.OWN,
     },
     Role.VIEWER: {
         Permission.CUSTOMERS_VIEW: Scope.ALL,
@@ -162,6 +298,8 @@ class Principal:
     tenant_id: UUID
     role: Role
     team_ids: frozenset[UUID] = field(default_factory=frozenset)
+    # The member's department; new records are attributed to it (their team_id).
+    department_id: UUID | None = None
 
 
 @dataclass(frozen=True, slots=True)

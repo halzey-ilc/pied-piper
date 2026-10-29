@@ -72,6 +72,11 @@ class PasswordResetConfirmSerializer(serializers.Serializer[dict[str, Any]]):
     new_password = serializers.CharField(help_text="The new password to set.")
 
 
+class PasswordChangeSerializer(serializers.Serializer[dict[str, Any]]):
+    current_password = serializers.CharField(help_text="Your current (or temporary) password.")
+    new_password = serializers.CharField(help_text="The new password.")
+
+
 class LogoutSerializer(serializers.Serializer[dict[str, Any]]):
     refresh = serializers.CharField(help_text="The refresh token to revoke.")
 

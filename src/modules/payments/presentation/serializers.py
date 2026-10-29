@@ -10,7 +10,9 @@ from modules.payments.domain.invoice import Invoice
 
 class InvoiceCreateSerializer(serializers.Serializer[dict[str, Any]]):
     amount = serializers.DecimalField(max_digits=16, decimal_places=2, min_value=Decimal("0.01"))
-    currency = serializers.CharField(max_length=3, default="USD")
+    currency = serializers.CharField(
+        max_length=3, required=False, help_text="Default: the company currency"
+    )
     number = serializers.CharField(required=False, max_length=32)
     customer_id = serializers.UUIDField(required=False, allow_null=True)
     deal_id = serializers.UUIDField(required=False, allow_null=True)

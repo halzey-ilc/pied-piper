@@ -120,6 +120,7 @@ class CallService:
                 from_number=command.from_number,
                 to_number=command.to_number,
                 owner_user_id=principal.user_id,
+                team_id=principal.department_id,
                 status=command.status,
                 started_at=command.started_at,
                 duration_seconds=command.duration_seconds,
@@ -141,6 +142,7 @@ class CallService:
                 from_number=command.from_number,
                 to_number=command.to_number,
                 owner_user_id=principal.user_id,
+                team_id=principal.department_id,
                 link=command.link,
             )
             external_id = self._dialer.dial(

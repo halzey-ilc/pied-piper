@@ -19,9 +19,17 @@ class DjangoMembershipProvider:
                 organization__is_active=True,
                 user__is_active=True,
             )
-            .only("role")
+            .only("role", "department_id")
             .first()
         )
         if row is None:
             return None
-        return TenantMembership(user_id=user_id, tenant_id=tenant_id, role=row.role)
+        # TEAM scope = the member's department: records carry it as their team_id.
+        department = row.department_id
+        return TenantMembership(
+            user_id=user_id,
+            tenant_id=tenant_id,
+            role=row.role,
+            team_ids=frozenset({department}) if department else frozenset(),
+            department_id=department,
+        )

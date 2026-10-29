@@ -3,8 +3,11 @@ from __future__ import annotations
 from typing import cast
 from uuid import UUID
 
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError as DjangoValidationError
 from drf_spectacular.utils import OpenApiExample, extend_schema, extend_schema_view
 from rest_framework import serializers, status
+from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.request import Request
 from rest_framework.response import Response
@@ -16,6 +19,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
 from modules.identity.infrastructure.mfa import MfaService
+from modules.identity.infrastructure.models import User
 from modules.identity.infrastructure.oidc import OidcError, verifier_from_settings
 from modules.identity.infrastructure.password_reset import PasswordResetService
 from modules.identity.presentation import schema as _schema  # noqa: F401 - registers OpenAPI scheme
@@ -27,6 +31,7 @@ from modules.identity.presentation.serializers import (
     MfaConfirmSerializer,
     MfaDisableSerializer,
     OidcLoginSerializer,
+    PasswordChangeSerializer,
     PasswordResetConfirmSerializer,
     PasswordResetRequestSerializer,
     RecoveryCodesResponseSerializer,
@@ -129,15 +134,53 @@ class MeView(APIView):
         ],
     )
     def get(self, request: Request) -> Response:
-        user = request.user
-        user_id = cast(UUID, user.pk)  # IsAuthenticated guarantees a persisted user
+        user = cast(User, request.user)  # IsAuthenticated guarantees a persisted user
+        user_id: UUID = user.pk
+        full_name = " ".join(p for p in (user.first_name, user.last_name) if p)
         return Response(
             {
                 "id": str(user_id),
                 "username": user.get_username(),
+                "display_name": full_name or user.get_username(),
+                "is_platform_admin": bool(getattr(user, "is_platform_admin", False)),
+                "must_change_password": bool(getattr(user, "must_change_password", False)),
                 "memberships": list_memberships_for_user(user_id),
             }
         )
+
+
+class PasswordChangeView(APIView):
+    """Change your own password; clears the temporary-password flag."""
+
+    permission_classes = [IsAuthenticated]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "auth"
+
+    @extend_schema(
+        tags=["Account"],
+        summary="Change your password",
+        description=(
+            "Requires the current password. The new one must pass the password rules. After a "
+            "temporary password this is the only allowed action until it succeeds."
+        ),
+        request=PasswordChangeSerializer,
+        responses={204: None},
+    )
+    def post(self, request: Request) -> Response:
+        serializer = PasswordChangeSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        user = cast(User, request.user)
+        if not user.check_password(serializer.validated_data["current_password"]):
+            raise DomainValidationError("The current password is not correct.")
+        new = serializer.validated_data["new_password"]
+        try:
+            validate_password(new, user=user)
+        except DjangoValidationError as exc:
+            raise ValidationError({"new_password": list(exc.messages)}) from exc
+        user.set_password(new)
+        user.must_change_password = False
+        user.save(update_fields=["password", "must_change_password"])
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class MfaEnrollView(APIView):

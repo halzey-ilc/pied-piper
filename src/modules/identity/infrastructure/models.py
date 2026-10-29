@@ -11,7 +11,13 @@ class User(AbstractUser):
     """Global user account (control plane). Tenant access is granted via memberships."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    email = models.EmailField(unique=True)
+    # Optional for staff created by a manager; still unique when present.
+    email = models.EmailField(unique=True, null=True, blank=True)  # type: ignore[assignment]
+    phone = models.CharField(max_length=16, blank=True, default="")
+    # Administers the platform across companies; not a company role.
+    is_platform_admin = models.BooleanField(default=False)
+    # Signed in with a temporary password: only the password change is allowed.
+    must_change_password = models.BooleanField(default=False)
 
     class Meta:
         db_table = "identity_user"

@@ -34,7 +34,11 @@ def test_token_obtain_and_me(
     client.credentials(HTTP_AUTHORIZATION=f"Bearer {access}")
     me = client.get("/api/v1/me/")
     assert me.status_code == 200
-    assert me.json()["memberships"] == [{"tenant": "acme", "role": "owner"}]
+    [membership] = me.json()["memberships"]
+    # The original fields keep their meaning; P0 only adds fields.
+    assert (membership["tenant"], membership["role"]) == ("acme", "owner")
+    assert membership["product_role"] == "director"
+    assert membership["company"]["timezone"] == "Asia/Bishkek"
 
 
 def test_wrong_password_is_rejected(make_user: Callable[..., Any]) -> None:

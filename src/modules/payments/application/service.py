@@ -109,6 +109,7 @@ class InvoiceService:
             invoice = Invoice.draft(
                 total=Money(command.amount, command.currency),
                 owner_user_id=principal.user_id,
+                team_id=principal.department_id,
                 number=command.number,
                 customer_id=command.customer_id,
                 deal_id=command.deal_id,
