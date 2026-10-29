@@ -51,6 +51,10 @@ class ConversationRepository(Protocol):
 
     def list_messages(self, conversation_id: UUID, *, limit: int, offset: int) -> list[Message]: ...
 
+    def recent_messages(self, conversation_id: UUID, *, limit: int) -> list[Message]:
+        """The newest ``limit`` messages, oldest first."""
+        ...
+
 
 class ChannelSender(Protocol):
     """Sends an outbound message through a provider. Returns the provider message id.

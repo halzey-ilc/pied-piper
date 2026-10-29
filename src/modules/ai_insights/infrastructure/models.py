@@ -86,3 +86,38 @@ class AiReportRecord(models.Model):
 
     def __str__(self) -> str:
         return f"{self.kind} {self.requested_by} {self.report_date} ({self.status})"
+
+
+class ReplySuggestionRecord(models.Model):
+    """AI classification and reply draft for a conversation's latest customer message."""
+
+    id = models.UUIDField(primary_key=True, editable=False)
+    conversation_id = models.UUIDField()
+    requested_by = models.UUIDField()
+    language = models.CharField(max_length=2)
+    # sha256 of the job input (message texts are not copied here).
+    source_hash = models.CharField(max_length=64)
+    status = models.CharField(
+        max_length=12, choices=[(s.value, s.name.title()) for s in InsightStatus]
+    )
+    ai_job_id = models.CharField(max_length=64, null=True, blank=True)  # noqa: DJ001
+    result = models.JSONField(null=True, blank=True)
+    provider = models.CharField(max_length=64, null=True, blank=True)  # noqa: DJ001
+    model = models.CharField(max_length=128, null=True, blank=True)  # noqa: DJ001
+    is_mock = models.BooleanField(default=False)
+    error_code = models.CharField(max_length=64, null=True, blank=True)  # noqa: DJ001
+    version = models.PositiveIntegerField(default=1)
+    created_at = models.DateTimeField()
+    finished_at = models.DateTimeField(null=True, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "ai_insights_reply_suggestion"
+        indexes = [
+            models.Index(
+                fields=["conversation_id", "created_at"], name="reply_suggestion_conv_idx"
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"reply {self.conversation_id} ({self.status})"

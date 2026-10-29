@@ -8,14 +8,21 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 
 from modules.access_control.domain.rbac import Principal, Role
-from modules.ai_insights.composition import ai_report_service, call_insight_service
+from modules.ai_insights.composition import (
+    ai_report_service,
+    call_insight_service,
+    reply_suggestion_service,
+)
 from modules.ai_insights.domain.report import ReportKind
 from modules.ai_insights.presentation.serializers import (
     AiReportSerializer,
     CallInsightSerializer,
     DigestRequestSerializer,
     KpiExplanationRequestSerializer,
+    ReplyRequestSerializer,
+    ReplySuggestionSerializer,
     insight_to_dict,
+    reply_to_dict,
     report_to_dict,
 )
 from platform_core.presentation.tenancy import TenantScopedAPIView
@@ -114,6 +121,44 @@ class OperationsDigestView(_Scoped):
     def get(self, request: Request) -> Response:
         report = ai_report_service().latest(self.principal(), ReportKind.OPERATIONS_DIGEST)
         return Response(report_to_dict(report))
+
+
+class ConversationReplyView(_Scoped):
+    @extend_schema(
+        tags=_TAGS,
+        operation_id="ai_conversation_reply_request",
+        summary="Request an AI reply suggestion for a conversation (Communication Assistant)",
+        description=(
+            "Classifies the customer's latest message (intent, urgency, with a verbatim quote "
+            "as evidence) and drafts a reply. The latest messages are sent to the AI Platform "
+            "without the contact's phone number or name. **Nothing is sent to the customer**: "
+            "send your own message with the conversation's send endpoint. Returns 202 at once; "
+            "poll GET. An unchanged conversation returns the existing suggestion (200). 400 "
+            "when the last message is the company's. Requires ai.request on the conversation "
+            "(assign an unassigned conversation first)."
+        ),
+        parameters=[_TENANT_HEADER],
+        request=ReplyRequestSerializer,
+        responses={202: ReplySuggestionSerializer, 200: ReplySuggestionSerializer},
+    )
+    def post(self, request: Request, conversation_id: UUID) -> Response:
+        serializer = ReplyRequestSerializer(data=request.data or {})
+        serializer.is_valid(raise_exception=True)
+        suggestion, created = reply_suggestion_service().request_reply(
+            self.principal(), conversation_id, language=serializer.validated_data.get("language")
+        )
+        return Response(reply_to_dict(suggestion), status=_accepted(created))
+
+    @extend_schema(
+        tags=_TAGS,
+        operation_id="ai_conversation_reply_latest",
+        summary="Latest AI reply suggestion for a conversation",
+        parameters=[_TENANT_HEADER],
+        responses=ReplySuggestionSerializer,
+    )
+    def get(self, request: Request, conversation_id: UUID) -> Response:
+        suggestion = reply_suggestion_service().latest(self.principal(), conversation_id)
+        return Response(reply_to_dict(suggestion))
 
 
 class KpiExplanationView(_Scoped):

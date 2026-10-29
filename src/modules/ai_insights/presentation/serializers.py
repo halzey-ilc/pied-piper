@@ -6,6 +6,7 @@ from rest_framework import serializers
 
 from modules.ai_insights.domain.insight import CallInsight
 from modules.ai_insights.domain.kpi_payload import PERIODS
+from modules.ai_insights.domain.reply import ReplySuggestion
 from modules.ai_insights.domain.report import LANGUAGES, AiReport, ReportKind
 
 
@@ -82,6 +83,57 @@ class AiReportSerializer(serializers.Serializer[dict[str, Any]]):
     error_code = serializers.CharField(read_only=True, allow_null=True)
     created_at = serializers.DateTimeField(read_only=True)
     finished_at = serializers.DateTimeField(read_only=True, allow_null=True)
+
+
+class ReplyRequestSerializer(serializers.Serializer[dict[str, Any]]):
+    language = serializers.ChoiceField(
+        choices=list(LANGUAGES), required=False, help_text="Language of the draft."
+    )
+
+
+class ReplySuggestionSerializer(serializers.Serializer[dict[str, Any]]):
+    id = serializers.UUIDField(read_only=True)
+    conversation_id = serializers.UUIDField(read_only=True)
+    status = serializers.CharField(
+        read_only=True, help_text="pending | submitted | succeeded | failed"
+    )
+    language = serializers.CharField(read_only=True)
+    is_mock = serializers.BooleanField(read_only=True)
+    provider = serializers.CharField(read_only=True, allow_null=True)
+    model = serializers.CharField(read_only=True, allow_null=True)
+    result = serializers.JSONField(
+        read_only=True,
+        allow_null=True,
+        help_text=(
+            "message_reply.output.v1: intent, urgency, evidence (a verbatim quote of a customer "
+            "message), draft_reply (null when no safe draft exists) and needs_human. The draft "
+            "has no numbers, links or e-mails that are not in the conversation."
+        ),
+    )
+    auto_send = serializers.BooleanField(
+        read_only=True,
+        help_text="Always false: the draft is never sent; a person sends their own message.",
+    )
+    error_code = serializers.CharField(read_only=True, allow_null=True)
+    created_at = serializers.DateTimeField(read_only=True)
+    finished_at = serializers.DateTimeField(read_only=True, allow_null=True)
+
+
+def reply_to_dict(suggestion: ReplySuggestion) -> dict[str, Any]:
+    return {
+        "id": str(suggestion.id),
+        "conversation_id": str(suggestion.conversation_id),
+        "status": suggestion.status.value,
+        "language": suggestion.language,
+        "is_mock": suggestion.is_mock,
+        "provider": suggestion.provider,
+        "model": suggestion.model,
+        "result": suggestion.result,
+        "auto_send": False,
+        "error_code": suggestion.error_code,
+        "created_at": suggestion.created_at.isoformat(),
+        "finished_at": suggestion.finished_at.isoformat() if suggestion.finished_at else None,
+    }
 
 
 def report_to_dict(report: AiReport) -> dict[str, Any]:

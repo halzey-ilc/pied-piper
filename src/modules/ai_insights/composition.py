@@ -6,10 +6,13 @@ from functools import cache
 
 from django.conf import settings
 
+from modules.ai_insights.application.reply_service import ReplySuggestionService
 from modules.ai_insights.application.report_service import AiReportService
 from modules.ai_insights.application.service import CallInsightService
 from modules.ai_insights.infrastructure.calls import TelephonyCallReader
 from modules.ai_insights.infrastructure.client import HttpAiPlatformClient
+from modules.ai_insights.infrastructure.conversations import CommunicationsConversationReader
+from modules.ai_insights.infrastructure.reply_repository import DjangoReplyRepository
 from modules.ai_insights.infrastructure.report_repository import DjangoReportRepository
 from modules.ai_insights.infrastructure.report_sources import (
     OperationsFindingsSource,
@@ -19,6 +22,7 @@ from modules.ai_insights.infrastructure.report_sources import (
 from modules.ai_insights.infrastructure.repository import DjangoInsightRepository
 from modules.ai_insights.infrastructure.scheduler import (
     CeleryInsightScheduler,
+    CeleryReplyScheduler,
     CeleryReportScheduler,
 )
 from modules.audit.infrastructure.audit_log import DjangoAuditLog
@@ -57,6 +61,25 @@ def ai_report_service() -> AiReportService:
         audit=DjangoAuditLog(alias),
         tenant_slug=tenant.slug,
         tenant_id=tenant.tenant_id,
+        enabled=cfg["ENABLED"],
+        default_language=cfg["DEFAULT_LANGUAGE"],
+        deadline_seconds=cfg["DEADLINE_SECONDS"],
+    )
+
+
+def reply_suggestion_service() -> ReplySuggestionService:
+    tenant = require_tenant()
+    alias = tenant.db_alias
+    cfg = settings.AI_PLATFORM
+    return ReplySuggestionService(
+        repository=DjangoReplyRepository(alias),
+        conversations=CommunicationsConversationReader(),
+        client=ai_platform_client(),
+        scheduler=CeleryReplyScheduler(alias),
+        uow=DjangoUnitOfWork(alias),
+        outbox=DjangoEventOutbox(alias),
+        audit=DjangoAuditLog(alias),
+        tenant_slug=tenant.slug,
         enabled=cfg["ENABLED"],
         default_language=cfg["DEFAULT_LANGUAGE"],
         deadline_seconds=cfg["DEADLINE_SECONDS"],

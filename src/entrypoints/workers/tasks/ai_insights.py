@@ -12,7 +12,11 @@ from uuid import UUID
 
 from celery import shared_task
 
-from modules.ai_insights.composition import ai_report_service, call_insight_service
+from modules.ai_insights.composition import (
+    ai_report_service,
+    call_insight_service,
+    reply_suggestion_service,
+)
 from platform_core.infrastructure.messaging.tasks import ResilientTask
 from platform_core.infrastructure.tenancy.services import system_tenant_scope, tenant_directory
 
@@ -41,6 +45,18 @@ def submit_report(tenant_slug: str, report_id: str) -> None:
 def poll_report(tenant_slug: str, report_id: str) -> None:
     with system_tenant_scope(tenant_slug):
         ai_report_service().poll(UUID(report_id))
+
+
+@shared_task(base=ResilientTask, name="integrations.ai_submit_reply", ignore_result=True)
+def submit_reply(tenant_slug: str, suggestion_id: str) -> None:
+    with system_tenant_scope(tenant_slug):
+        reply_suggestion_service().submit(UUID(suggestion_id))
+
+
+@shared_task(base=ResilientTask, name="integrations.ai_poll_reply", ignore_result=True)
+def poll_reply(tenant_slug: str, suggestion_id: str) -> None:
+    with system_tenant_scope(tenant_slug):
+        reply_suggestion_service().poll(UUID(suggestion_id))
 
 
 @shared_task(base=ResilientTask, name="integrations.ai_daily_digests", ignore_result=True)

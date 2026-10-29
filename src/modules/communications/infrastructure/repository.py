@@ -145,6 +145,14 @@ class DjangoConversationRepository:
         )
         return [_msg_to_domain(row) for row in rows]
 
+    def recent_messages(self, conversation_id: UUID, *, limit: int) -> list[Message]:
+        rows = (
+            self._msg()
+            .filter(conversation_id=conversation_id)
+            .order_by("-created_at", "-id")[:limit]
+        )
+        return [_msg_to_domain(row) for row in reversed(rows)]
+
     def _fields(self, conversation: Conversation) -> dict[str, object]:
         return {
             "channel": conversation.channel.value,

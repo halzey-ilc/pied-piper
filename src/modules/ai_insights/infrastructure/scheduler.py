@@ -11,6 +11,8 @@ SUBMIT_TASK = "integrations.ai_submit_insight"
 POLL_TASK = "integrations.ai_poll_insight"
 SUBMIT_REPORT_TASK = "integrations.ai_submit_report"
 POLL_REPORT_TASK = "integrations.ai_poll_report"
+SUBMIT_REPLY_TASK = "integrations.ai_submit_reply"
+POLL_REPLY_TASK = "integrations.ai_poll_reply"
 # Outbound calls to an external service: the existing integrations queue.
 QUEUE = "integrations"
 
@@ -72,5 +74,28 @@ class CeleryReportScheduler:
             self.using,
             POLL_REPORT_TASK,
             {"tenant_slug": tenant_slug, "report_id": str(report_id)},
+            delay_seconds,
+        )
+
+
+class CeleryReplyScheduler:
+    """Enqueues reply-suggestion steps only after the suggestion row has been committed."""
+
+    def __init__(self, using: str) -> None:
+        self.using = using
+
+    def schedule_submit(self, *, tenant_slug: str, suggestion_id: UUID) -> None:
+        _send_on_commit(
+            self.using,
+            SUBMIT_REPLY_TASK,
+            {"tenant_slug": tenant_slug, "suggestion_id": str(suggestion_id)},
+            None,
+        )
+
+    def schedule_poll(self, *, tenant_slug: str, suggestion_id: UUID, delay_seconds: float) -> None:
+        _send_on_commit(
+            self.using,
+            POLL_REPLY_TASK,
+            {"tenant_slug": tenant_slug, "suggestion_id": str(suggestion_id)},
             delay_seconds,
         )

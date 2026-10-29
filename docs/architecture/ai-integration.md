@@ -68,6 +68,29 @@ Operations digests and KPI explanations are both **AI reports**:
 - the response always includes `input`, the exact numbers sent, so every statement can be
   traced back to them.
 
+## Reply suggestions (AI Communication Assistant)
+
+```
+POST /api/v1/ai/conversations/<id>/reply/ {"language"?}  -> 202, or 200 for an unchanged conversation
+GET  /api/v1/ai/conversations/<id>/reply/               -> the latest suggestion
+     (conversation visibility + ai.request on it; a sales_rep assigns an unassigned
+      conversation first; 400 when the company wrote last)
+```
+
+The worker sends the latest 20 messages (direction and text) of the conversation
+as `message.reply.v1`. The contact's phone number, username and name are **not**
+sent. The result has `intent`, `urgency`, `evidence` (a verbatim quote of a
+customer message), `draft_reply` and `needs_human`.
+
+- **Nothing is sent to the customer.** `auto_send` is always `false`; a person
+  sends their own message through `POST .../communications/conversations/<id>/messages/`.
+- The AI Platform rejects drafts containing numbers, links or e-mails that are not in
+  the conversation: prices, dates and terms come from people, not from the model.
+- Complaints and cancellations always have `needs_human: true`.
+- The suggestion row stores the input's sha256, not the message texts. If a message
+  arrives between the request and the worker, the suggestion fails `source_changed`
+  instead of answering an outdated conversation.
+
 ## Call summaries: what is verified
 
 `result.key_points` and `result.next_step` carry verbatim quotes from the call
@@ -91,12 +114,13 @@ contained factual errors (see `crm-ai-platform/docs/MODEL_EVALUATION.md`).
 Tests: `tests/unit/test_ai_insights.py`, `tests/api/test_ai_insights.py`,
 `tests/security/test_ai_insights_isolation.py`, `tests/unit/test_operations_rules.py`,
 `tests/api/test_operations.py`, `tests/api/test_ai_operations_digest.py`,
-`tests/unit/test_kpi_payload.py`, `tests/api/test_ai_kpi_explanation.py`.
+`tests/unit/test_kpi_payload.py`, `tests/api/test_ai_kpi_explanation.py`,
+`tests/api/test_ai_reply_suggestions.py`.
 
 ## Running locally with the AI Platform
 
 ```bash
-(cd ../crm-ai-platform && ./scripts/e2e_with_crm.sh && ./scripts/e2e_operations.sh && ./scripts/e2e_kpi.sh)
+(cd ../crm-ai-platform && ./scripts/e2e_with_crm.sh && ./scripts/e2e_operations.sh && ./scripts/e2e_kpi.sh && ./scripts/e2e_reply.sh)
 ```
 
 The script reconnects `api` and `worker` through `compose.ai.yaml`, which joins
@@ -107,7 +131,9 @@ collide. Without the overlay the CRM runs as before with AI disabled.
 ## Not done yet
 
 - Transcripts / audio (summaries use call notes), language detection.
-- Per-company script-evaluation rules, KPI explanations (Business Analyst).
+- Per-company script-evaluation rules.
+- Reply suggestions: product facts (price list, availability) as CRM data the
+  draft may cite; measuring how often drafts are used; a real-model evaluation.
 - Notifying users when their daily digest is ready (event `ai_insights.operations_digest_completed`
   is emitted; no handler yet).
 - Stalled deals use `updated_at` because there is no stage history.
