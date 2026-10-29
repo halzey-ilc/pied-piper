@@ -29,7 +29,11 @@ class CallInsightSerializer(serializers.Serializer[dict[str, Any]]):
     result = serializers.JSONField(
         read_only=True,
         allow_null=True,
-        help_text="Structured output (call_summary.output.v1); every item cites the call text.",
+        help_text=(
+            "Structured output (call_summary.output.v2; older results v1); every item cites the "
+            "call text. With insufficient_data=true the notes had nothing to summarise: "
+            "key_points is empty and summary is a fixed notice."
+        ),
     )
     summary_grounded = serializers.BooleanField(
         read_only=True,

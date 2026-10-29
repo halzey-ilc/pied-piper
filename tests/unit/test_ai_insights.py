@@ -57,6 +57,29 @@ def test_lifecycle_and_event() -> None:
         insight.mark_failed("late")
 
 
+def test_requests_v2_and_accepts_v1_results_in_flight() -> None:
+    insight = _insight()
+    assert insight.job_type == "call.summary.v2"
+    insight.mark_submitted("job-1")
+    insight.mark_succeeded(
+        result={"summary": "Недостаточно данных.", "insufficient_data": True},
+        schema_id="call_summary.output.v2",
+        provider="mock",
+        model="m",
+        is_mock=True,
+    )
+    older = _insight()
+    older.mark_submitted("job-2")
+    older.mark_succeeded(  # submitted as v1 before the switch
+        result={"summary": "Hi."},
+        schema_id="call_summary.output.v1",
+        provider="mock",
+        model="m",
+        is_mock=True,
+    )
+    assert _status(insight) is _status(older) is InsightStatus.SUCCEEDED
+
+
 def test_rejects_empty_text_and_foreign_contract() -> None:
     with pytest.raises(DomainValidationError):
         CallInsight.request(

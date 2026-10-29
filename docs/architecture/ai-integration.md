@@ -172,6 +172,12 @@ The events carry ids only, never texts or results.
 
 ## Call summaries: what is verified
 
+The CRM requests `call.summary.v2`. Results of `v1` jobs submitted before the switch are
+still accepted. With `result.insufficient_data: true` the notes had nothing to summarise:
+for example "Не дозвонился.", or nothing could be confirmed by a quote. In that case
+`key_points` is empty and `summary` is a fixed notice, never invented text.
+
+
 `result.key_points` and `result.next_step` carry verbatim quotes from the call
 and are checked. `result.summary` is free text and is **not** checked, so the API
 marks it `summary_grounded: false`. On a local 4B model, Kyrgyz summaries

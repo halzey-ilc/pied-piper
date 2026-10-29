@@ -29,9 +29,12 @@ class InsightStatus(StrEnum):
     FAILED = "failed"
 
 
-# The AI Platform job type and the only output contract this version accepts.
-JOB_TYPES: dict[InsightKind, str] = {InsightKind.CALL_SUMMARY: "call.summary.v1"}
-OUTPUT_SCHEMAS: dict[InsightKind, str] = {InsightKind.CALL_SUMMARY: "call_summary.output.v1"}
+# The AI Platform job type requested now, and the output contracts accepted.
+# v2 adds insufficient_data; v1 stays accepted for jobs submitted before the switch.
+JOB_TYPES: dict[InsightKind, str] = {InsightKind.CALL_SUMMARY: "call.summary.v2"}
+OUTPUT_SCHEMAS: dict[InsightKind, tuple[str, ...]] = {
+    InsightKind.CALL_SUMMARY: ("call_summary.output.v2", "call_summary.output.v1"),
+}
 
 
 def source_fingerprint(text: str) -> str:
@@ -116,7 +119,7 @@ class CallInsight:
     ) -> CallInsightCompleted:
         if self.status is not InsightStatus.SUBMITTED:
             raise DomainValidationError("Only a submitted insight can succeed.")
-        if schema_id != OUTPUT_SCHEMAS[self.kind]:
+        if schema_id not in OUTPUT_SCHEMAS[self.kind]:
             raise DomainValidationError("The AI result uses an unsupported output contract.")
         self.result = result
         self.schema_id = schema_id
