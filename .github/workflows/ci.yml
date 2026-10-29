@@ -91,11 +91,13 @@ jobs:
             -e RABBITMQ_DEFAULT_VHOST=crm \
             -v "$PWD/infrastructure/rabbitmq/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro" \
             rabbitmq:4-management
-          for i in $(seq 1 30); do
-            docker exec rabbitmq rabbitmq-diagnostics -q check_running && exit 0
+          # Wait on the server's own log: running rabbitmq-diagnostics via docker exec
+          # this early creates .erlang.cookie as root and the server then fails (eacces).
+          for i in $(seq 1 60); do
+            docker logs rabbitmq 2>&1 | grep -q "Server startup complete" && exit 0
             sleep 2
           done
-          docker logs rabbitmq | tail -40; exit 1
+          docker logs rabbitmq 2>&1 | tail -40; exit 1
       - name: Grant CREATEDB for test tenant databases
         run: PGPASSWORD=ci-postgres-password psql -h localhost -U crm_app -d crm_control -c "ALTER ROLE crm_app CREATEDB;"
       - name: Unit, API, security, architecture tests
@@ -136,6 +138,8 @@ jobs:
       - uses: docker/build-push-action@v6
         with:
           context: .
+          # Scan what is deployed: the last Dockerfile stage is `test` (dev tools, uv).
+          target: runtime
           push: false
           load: true
           tags: crm-platform:ci
