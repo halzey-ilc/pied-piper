@@ -102,6 +102,17 @@ jobs:
           echo $! > celery.pid
         env:
           DIAGNOSTIC_TASKS_ENABLED: "true"
+      - name: Wait until the worker answers (it declares the queues and DLQs on start)
+        run: |
+          for i in $(seq 1 30); do
+            if uv run celery -A config inspect ping --timeout 2 >/dev/null 2>&1; then
+              echo "worker ready after ${i} attempt(s)"; exit 0
+            fi
+            sleep 2
+          done
+          echo "Celery worker did not become ready"; exit 1
+        env:
+          DIAGNOSTIC_TASKS_ENABLED: "true"
       - name: Integration tests
         run: uv run pytest -m integration -q
         env:
@@ -129,7 +140,7 @@ jobs:
         # The production overlay requires real secrets/certs to interpolate and is
         # validated at deploy time, not in CI.
       - name: Scan image for OS/library vulnerabilities (Trivy)
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25  # v0.36.0
         with:
           image-ref: crm-platform:ci
           format: table
@@ -138,7 +149,7 @@ jobs:
           severity: HIGH,CRITICAL
           vuln-type: os,library
       - name: Generate SBOM (CycloneDX)
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25  # v0.36.0
         with:
           image-ref: crm-platform:ci
           format: cyclonedx
