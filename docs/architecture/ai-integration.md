@@ -91,6 +91,21 @@ customer message), `draft_reply` and `needs_human`.
   arrives between the request and the worker, the suggestion fails `source_changed`
   instead of answering an outdated conversation.
 
+## Notifications
+
+Every finished AI result emits an event through the outbox:
+- `ai_insights.report_completed`;
+- `ai_insights.call_insight_completed`;
+- `ai_insights.reply_suggestion_completed`.
+
+`modules.notifications` turns each event into an in-app notification for the person who
+asked, or the person a daily digest is for:
+- category `ai`, which users can mute;
+- a link to the result;
+- a "failed" title when no result came back.
+
+The events carry ids only, never texts or results.
+
 ## Call summaries: what is verified
 
 `result.key_points` and `result.next_step` carry verbatim quotes from the call
@@ -134,7 +149,6 @@ collide. Without the overlay the CRM runs as before with AI disabled.
 - Per-company script-evaluation rules.
 - Reply suggestions: product facts (price list, availability) as CRM data the
   draft may cite; measuring how often drafts are used; a real-model evaluation.
-- Notifying users when their daily digest is ready (event `ai_insights.operations_digest_completed`
-  is emitted; no handler yet).
+- E-mail/push delivery of AI notifications (in-app only for now).
 - Stalled deals use `updated_at` because there is no stage history.
 - Showing insights in the call card of a frontend (there is no frontend).

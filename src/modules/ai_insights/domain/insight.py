@@ -46,6 +46,7 @@ class CallInsightCompleted(DomainEvent):
     insight_id: UUID
     call_id: UUID
     kind: str
+    requested_by: UUID
     succeeded: bool
 
     def payload(self) -> dict[str, Any]:
@@ -53,6 +54,7 @@ class CallInsightCompleted(DomainEvent):
             "insight_id": str(self.insight_id),
             "call_id": str(self.call_id),
             "kind": self.kind,
+            "requested_by": str(self.requested_by),
             "succeeded": self.succeeded,
         }
 
@@ -135,5 +137,9 @@ class CallInsight:
 
     def _completed(self, *, succeeded: bool) -> CallInsightCompleted:
         return CallInsightCompleted(
-            insight_id=self.id, call_id=self.call_id, kind=self.kind.value, succeeded=succeeded
+            insight_id=self.id,
+            call_id=self.call_id,
+            kind=self.kind.value,
+            requested_by=self.requested_by,
+            succeeded=succeeded,
         )

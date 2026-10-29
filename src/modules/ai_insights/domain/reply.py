@@ -65,12 +65,14 @@ class ReplySuggestionCompleted(DomainEvent):
 
     suggestion_id: UUID
     conversation_id: UUID
+    requested_by: UUID
     succeeded: bool
 
     def payload(self) -> dict[str, Any]:
         return {
             "suggestion_id": str(self.suggestion_id),
             "conversation_id": str(self.conversation_id),
+            "requested_by": str(self.requested_by),
             "succeeded": self.succeeded,
         }
 
@@ -142,5 +144,8 @@ class ReplySuggestion:
 
     def _completed(self, *, succeeded: bool) -> ReplySuggestionCompleted:
         return ReplySuggestionCompleted(
-            suggestion_id=self.id, conversation_id=self.conversation_id, succeeded=succeeded
+            suggestion_id=self.id,
+            conversation_id=self.conversation_id,
+            requested_by=self.requested_by,
+            succeeded=succeeded,
         )

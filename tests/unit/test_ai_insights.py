@@ -52,7 +52,7 @@ def test_lifecycle_and_event() -> None:
     )
     assert _status(insight) is InsightStatus.SUCCEEDED and insight.finished_at is not None
     # Events carry identifiers only, never the analysed text or the result.
-    assert set(event.payload()) == {"insight_id", "call_id", "kind", "succeeded"}
+    assert set(event.payload()) == {"insight_id", "call_id", "kind", "requested_by", "succeeded"}
     with pytest.raises(DomainValidationError):
         insight.mark_failed("late")
 

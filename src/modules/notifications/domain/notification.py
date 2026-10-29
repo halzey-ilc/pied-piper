@@ -19,6 +19,7 @@ class NotificationCategory(StrEnum):
     LEAD = "lead"
     PAYMENT = "payment"
     SYSTEM = "system"
+    AI = "ai"
 
 
 def _clean(text: str, *, label: str, max_length: int, required: bool) -> str:
