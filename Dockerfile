@@ -46,9 +46,12 @@ ENV PYTHONUNBUFFERED=1 \
     PROMETHEUS_MULTIPROC_DIR=/tmp/prometheus
 
 # libpq5 is the only runtime system dependency (psycopg binary wheels bundle the rest).
+# pip is removed: the app runs from its own venv, and the base image's pip vendors
+# old msgpack/setuptools/urllib3 copies that image scanners (rightly) flag.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends libpq5 \
     && rm -rf /var/lib/apt/lists/* \
+    && python -m pip uninstall -y pip \
     && groupadd --system --gid 10001 app \
     && useradd --system --uid 10001 --gid app --no-create-home app
 
