@@ -17,7 +17,7 @@ from rest_framework.test import APIClient
 from modules.access_control.domain.rbac import Role
 from modules.ai_insights import composition
 from modules.ai_insights.application.ports import AiJobState
-from modules.ai_insights.infrastructure.models import OperationsDigestRecord
+from modules.ai_insights.infrastructure.models import AiReportRecord
 from modules.leads.infrastructure.models import LeadRecord
 from platform_core.infrastructure.tenancy.services import system_tenant_scope
 from tests.conftest import ALL_DATABASES, TenantFixture
@@ -78,7 +78,7 @@ def _stale_lead(client: APIClient, alias: str, name: str = "Ivan Petrov") -> str
 
 def _run_worker(slug: str, digest_id: str) -> None:
     with system_tenant_scope(slug):
-        service = composition.operations_digest_service()
+        service = composition.ai_report_service()
         service.submit(UUID(digest_id))
         service.poll(UUID(digest_id))
 
@@ -96,7 +96,8 @@ def test_request_sends_ids_only_and_stores_explanation(
     created = client.post(URL, {"language": "en"}, format="json")
     assert created.status_code == 202, created.content
     body = created.json()
-    assert body["status"] == "pending" and body["counts"]["stale_lead"] == 1
+    assert body["status"] == "pending" and body["kind"] == "operations_digest"
+    assert body["input"]["counts"]["stale_lead"] == 1
 
     _run_worker("acme", body["id"])
     sent = ai.submits[0]
@@ -133,7 +134,7 @@ def test_rbac_privacy_and_switch(
 
     assert viewer.post(URL, {}, format="json").status_code == 403
     rep_digest = rep.post(URL, {}, format="json").json()
-    record = OperationsDigestRecord.objects.using("tenant_acme").get(id=rep_digest["id"])
+    record = AiReportRecord.objects.using("tenant_acme").get(id=rep_digest["id"])
     refs = {f["ref"] for f in record.payload["findings"]}
     # A sales rep's digest covers their own leads only.
     assert refs == {f"lead:{reps_lead}"} and f"lead:{owners_lead}" not in refs
@@ -159,11 +160,11 @@ def test_daily_run_is_targeted_and_idempotent(
     _stale_lead(client_for(rep, "acme"), "tenant_acme")
 
     with system_tenant_scope("acme"):
-        first = composition.operations_digest_service().create_daily()
-        second = composition.operations_digest_service().create_daily()
+        first = composition.ai_report_service().create_daily_digests()
+        second = composition.ai_report_service().create_daily_digests()
     assert (first, second) == (2, 0)  # owner sees the rep's lead too; rerun adds nothing
     users = set(
-        OperationsDigestRecord.objects.using("tenant_acme")
+        AiReportRecord.objects.using("tenant_acme")
         .filter(trigger="daily")
         .values_list("requested_by", flat=True)
     )
@@ -182,9 +183,9 @@ def test_digest_never_mixes_companies(
     acme_lead = _stale_lead(alice, "tenant_acme")
 
     digest_id = alice.post(URL, {}, format="json").json()["id"]
-    record = OperationsDigestRecord.objects.using("tenant_acme").get(id=digest_id)
+    record = AiReportRecord.objects.using("tenant_acme").get(id=digest_id)
     refs = {f["ref"] for f in record.payload["findings"]}
     assert refs == {f"lead:{acme_lead}"} and f"lead:{globex_lead}" not in refs
-    assert not OperationsDigestRecord.objects.using("tenant_globex").exists()
+    assert not AiReportRecord.objects.using("tenant_globex").exists()
     _run_worker("acme", digest_id)
     assert ai.submits[0]["tenant_slug"] == "acme"

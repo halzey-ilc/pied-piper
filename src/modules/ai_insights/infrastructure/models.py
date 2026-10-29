@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from django.db import models
 
-from modules.ai_insights.domain.digest import DigestTrigger
 from modules.ai_insights.domain.insight import InsightKind, InsightStatus
+from modules.ai_insights.domain.report import ReportKind, ReportTrigger
 
 
 class CallInsightRecord(models.Model):
@@ -39,14 +39,21 @@ class CallInsightRecord(models.Model):
         return f"{self.kind}:{self.call_id} ({self.status})"
 
 
-class OperationsDigestRecord(models.Model):
+class AiReportRecord(models.Model):
+    """AI explanations of CRM-computed numbers (operations digests, KPI explanations)."""
+
     id = models.UUIDField(primary_key=True, editable=False)
+    kind = models.CharField(
+        max_length=32,
+        choices=[(k.value, k.name.title()) for k in ReportKind],
+        default=ReportKind.OPERATIONS_DIGEST.value,
+    )
     requested_by = models.UUIDField()
     trigger = models.CharField(
-        max_length=8, choices=[(t.value, t.name.title()) for t in DigestTrigger]
+        max_length=8, choices=[(t.value, t.name.title()) for t in ReportTrigger]
     )
-    digest_date = models.DateField()
-    # The exact job input: refs ("lead:<uuid>"), kinds, ages and thresholds only.
+    report_date = models.DateField()
+    # The exact job input: ids, kinds, numbers and thresholds only (no names or text).
     payload = models.JSONField()
     payload_hash = models.CharField(max_length=64)
     status = models.CharField(
@@ -64,18 +71,18 @@ class OperationsDigestRecord(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        db_table = "ai_insights_operations_digest"
+        db_table = "ai_insights_report"
         constraints = [
-            # At most one daily digest per user and day, even if the beat job runs twice.
+            # At most one daily report per kind, user and day, even if the beat job runs twice.
             models.UniqueConstraint(
-                fields=["requested_by", "digest_date"],
+                fields=["kind", "requested_by", "report_date"],
                 condition=models.Q(trigger="daily"),
-                name="ops_digest_one_daily_per_user",
+                name="ai_report_one_daily_per_user",
             ),
         ]
         indexes = [
-            models.Index(fields=["requested_by", "created_at"], name="ops_digest_user_idx"),
+            models.Index(fields=["requested_by", "kind", "created_at"], name="ai_report_user_idx"),
         ]
 
     def __str__(self) -> str:
-        return f"digest {self.requested_by} {self.digest_date} ({self.status})"
+        return f"{self.kind} {self.requested_by} {self.report_date} ({self.status})"

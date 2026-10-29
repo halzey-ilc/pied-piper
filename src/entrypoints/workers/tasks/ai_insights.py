@@ -12,7 +12,7 @@ from uuid import UUID
 
 from celery import shared_task
 
-from modules.ai_insights.composition import call_insight_service, operations_digest_service
+from modules.ai_insights.composition import ai_report_service, call_insight_service
 from platform_core.infrastructure.messaging.tasks import ResilientTask
 from platform_core.infrastructure.tenancy.services import system_tenant_scope, tenant_directory
 
@@ -31,16 +31,16 @@ def poll_insight(tenant_slug: str, insight_id: str) -> None:
         call_insight_service().poll(UUID(insight_id))
 
 
-@shared_task(base=ResilientTask, name="integrations.ai_submit_digest", ignore_result=True)
-def submit_digest(tenant_slug: str, digest_id: str) -> None:
+@shared_task(base=ResilientTask, name="integrations.ai_submit_report", ignore_result=True)
+def submit_report(tenant_slug: str, report_id: str) -> None:
     with system_tenant_scope(tenant_slug):
-        operations_digest_service().submit(UUID(digest_id))
+        ai_report_service().submit(UUID(report_id))
 
 
-@shared_task(base=ResilientTask, name="integrations.ai_poll_digest", ignore_result=True)
-def poll_digest(tenant_slug: str, digest_id: str) -> None:
+@shared_task(base=ResilientTask, name="integrations.ai_poll_report", ignore_result=True)
+def poll_report(tenant_slug: str, report_id: str) -> None:
     with system_tenant_scope(tenant_slug):
-        operations_digest_service().poll(UUID(digest_id))
+        ai_report_service().poll(UUID(report_id))
 
 
 @shared_task(base=ResilientTask, name="integrations.ai_daily_digests", ignore_result=True)
@@ -50,7 +50,7 @@ def daily_digests() -> dict[str, int]:
     for locator in tenant_directory().list_routable():
         try:
             with system_tenant_scope(locator.slug):
-                created += operations_digest_service().create_daily()
+                created += ai_report_service().create_daily_digests()
         except Exception:
             # One broken tenant must not stop the others; the next run retries it.
             logger.exception("ai_daily_digest_failed", extra={"tenant_slug": locator.slug})

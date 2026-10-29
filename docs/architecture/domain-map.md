@@ -23,7 +23,7 @@ shared = table present in every DB).
 | communications | tenant | implemented | Conversations/messages over channels; inbound via webhooks |
 | subscriptions | control | implemented | Plans, limits, billing state of organizations |
 | notifications | tenant | implemented | In-app notifications from events, per-user preferences |
-| ai_insights | tenant | implemented | AI call summaries and operations digests via the separate CRM AI Platform; off by default ([ai-integration](ai-integration.md)) |
+| ai_insights | tenant | implemented | AI call summaries, operations digests and KPI explanations via the separate CRM AI Platform; off by default ([ai-integration](ai-integration.md)) |
 | operations | tenant | implemented | Deterministic operations rules (forgotten leads, deals without next step, overdue tasks, stalled deals), per-company thresholds |
 | messaging | shared | implemented | Transactional outbox/inbox (platform_core) |
 

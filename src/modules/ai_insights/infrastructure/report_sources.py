@@ -1,14 +1,18 @@
-"""Adapters to the operations and organizations modules (public composition APIs)."""
+"""Adapters to the operations, sales_kpi and organizations modules (public composition APIs)."""
 
 from __future__ import annotations
 
+from datetime import date
 from uuid import UUID
 
 from modules.access_control.domain.rbac import Principal
-from modules.ai_insights.application.digest_ports import FindingsSnapshot, Member
-from modules.ai_insights.domain.digest import finding_ref
+from modules.ai_insights.application.report_ports import FindingsSnapshot, Member
+from modules.ai_insights.domain.kpi_payload import KpiReading
+from modules.ai_insights.domain.report import finding_ref
 from modules.operations.composition import operations_service
 from modules.organizations.composition import list_active_members
+from modules.sales_kpi.composition import analytics_service
+from modules.sales_kpi.domain.kpi import Period
 
 
 class OperationsFindingsSource:
@@ -30,6 +34,15 @@ class OperationsFindingsSource:
                 for f in report.findings
             ],
         )
+
+
+class SalesKpiSource:
+    def readings(self, principal: Principal, period: str, start: date) -> list[KpiReading]:
+        # The analytics service enforces reports.view; values come from its SQL aggregation.
+        return [
+            KpiReading(code=v.code, name=v.name, unit=v.unit, value=v.value)
+            for v in analytics_service().kpis(principal, Period(period), start)
+        ]
 
 
 class OrganizationMemberDirectory:

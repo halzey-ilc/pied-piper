@@ -8,13 +8,15 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 
 from modules.access_control.domain.rbac import Principal, Role
-from modules.ai_insights.composition import call_insight_service, operations_digest_service
+from modules.ai_insights.composition import ai_report_service, call_insight_service
+from modules.ai_insights.domain.report import ReportKind
 from modules.ai_insights.presentation.serializers import (
+    AiReportSerializer,
     CallInsightSerializer,
     DigestRequestSerializer,
-    OperationsDigestSerializer,
-    digest_to_dict,
+    KpiExplanationRequestSerializer,
     insight_to_dict,
+    report_to_dict,
 )
 from platform_core.presentation.tenancy import TenantScopedAPIView
 
@@ -74,6 +76,10 @@ class CallSummaryView(_Scoped):
         return Response(insight_to_dict(insight))
 
 
+def _accepted(created: bool) -> int:
+    return status.HTTP_202_ACCEPTED if created else status.HTTP_200_OK
+
+
 class OperationsDigestView(_Scoped):
     @extend_schema(
         tags=_TAGS,
@@ -83,22 +89,19 @@ class OperationsDigestView(_Scoped):
             "Takes the findings of the CRM's operations rules over the records you can see "
             "(ids, kinds and ages only), asks the AI Platform to explain them and returns "
             "immediately (202). Poll GET. An unchanged set of findings returns the existing "
-            "digest (200). Requires the ai.request permission. 409 `ai_disabled` when AI is off."
+            "report (200). Requires ai.request. 409 `ai_disabled` when AI is off."
         ),
         parameters=[_TENANT_HEADER],
         request=DigestRequestSerializer,
-        responses={202: OperationsDigestSerializer, 200: OperationsDigestSerializer},
+        responses={202: AiReportSerializer, 200: AiReportSerializer},
     )
     def post(self, request: Request) -> Response:
         serializer = DigestRequestSerializer(data=request.data or {})
         serializer.is_valid(raise_exception=True)
-        digest, created = operations_digest_service().request(
+        report, created = ai_report_service().request_digest(
             self.principal(), language=serializer.validated_data.get("language")
         )
-        return Response(
-            digest_to_dict(digest),
-            status=status.HTTP_202_ACCEPTED if created else status.HTTP_200_OK,
-        )
+        return Response(report_to_dict(report), status=_accepted(created))
 
     @extend_schema(
         tags=_TAGS,
@@ -106,7 +109,48 @@ class OperationsDigestView(_Scoped):
         summary="Your latest operations digest",
         description="Your own newest digest (manual or daily), or 404. Never another user's.",
         parameters=[_TENANT_HEADER],
-        responses=OperationsDigestSerializer,
+        responses=AiReportSerializer,
     )
     def get(self, request: Request) -> Response:
-        return Response(digest_to_dict(operations_digest_service().latest(self.principal())))
+        report = ai_report_service().latest(self.principal(), ReportKind.OPERATIONS_DIGEST)
+        return Response(report_to_dict(report))
+
+
+class KpiExplanationView(_Scoped):
+    @extend_schema(
+        tags=_TAGS,
+        operation_id="ai_kpi_explanation_request",
+        summary="Request an AI explanation of company KPIs (AI Business Analyst)",
+        description=(
+            "The CRM computes the KPIs of the period containing `date` and of the period "
+            "before it, and the changes between them (SQL and code, never the AI). The AI "
+            "Platform explains these numbers; any text with a number not in `input` is "
+            "rejected. Returns 202 at once; poll GET. Unchanged numbers return the existing "
+            "report (200). Requires reports.view and ai.request."
+        ),
+        parameters=[_TENANT_HEADER],
+        request=KpiExplanationRequestSerializer,
+        responses={202: AiReportSerializer, 200: AiReportSerializer},
+    )
+    def post(self, request: Request) -> Response:
+        serializer = KpiExplanationRequestSerializer(data=request.data or {})
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        report, created = ai_report_service().request_kpi_explanation(
+            self.principal(),
+            period=data["period"],
+            day=data.get("date"),
+            language=data.get("language"),
+        )
+        return Response(report_to_dict(report), status=_accepted(created))
+
+    @extend_schema(
+        tags=_TAGS,
+        operation_id="ai_kpi_explanation_latest",
+        summary="Your latest KPI explanation",
+        parameters=[_TENANT_HEADER],
+        responses=AiReportSerializer,
+    )
+    def get(self, request: Request) -> Response:
+        report = ai_report_service().latest(self.principal(), ReportKind.KPI_EXPLANATION)
+        return Response(report_to_dict(report))

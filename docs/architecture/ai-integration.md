@@ -45,6 +45,36 @@ Only references, kinds, ages and thresholds are sent; names, e-mails, amounts
 and text never leave the CRM. The AI output cites `finding_refs`; the AI
 Platform rejects outputs that cite anything not in the input.
 
+## KPI explanations (AI Business Analyst)
+
+KPIs are computed by `modules.sales_kpi` (SQL aggregation over the metric read
+model). For an explanation the CRM also computes, in `domain/kpi_payload.py`:
+- the period before;
+- each metric's change, and its relative change in %;
+- ratios turned into percentages, whose change is in percentage points.
+
+The AI receives only these numbers and may not introduce any other: the AI
+Platform rejects every text containing a number that is not in the input.
+
+```
+POST /api/v1/ai/analytics/kpi-explanation/ {"period": "month"|"week"|"day", "date"?, "language"?}
+     (reports.view + ai.request: owner, admin, manager; not sales_rep, not viewer)
+GET  /api/v1/ai/analytics/kpi-explanation/ -> the caller's own latest explanation
+```
+
+Operations digests and KPI explanations are both **AI reports**:
+- one table `ai_insights_report` with a `kind` column;
+- one worker pair `integrations.ai_submit_report` / `ai_poll_report`;
+- the response always includes `input`, the exact numbers sent, so every statement can be
+  traced back to them.
+
+## Call summaries: what is verified
+
+`result.key_points` and `result.next_step` carry verbatim quotes from the call
+and are checked. `result.summary` is free text and is **not** checked, so the API
+marks it `summary_grounded: false`. On a local 4B model, Kyrgyz summaries
+contained factual errors (see `crm-ai-platform/docs/MODEL_EVALUATION.md`).
+
 ## Data and security
 
 | Concern | How |
@@ -60,12 +90,13 @@ Platform rejects outputs that cite anything not in the input.
 
 Tests: `tests/unit/test_ai_insights.py`, `tests/api/test_ai_insights.py`,
 `tests/security/test_ai_insights_isolation.py`, `tests/unit/test_operations_rules.py`,
-`tests/api/test_operations.py`, `tests/api/test_ai_operations_digest.py`.
+`tests/api/test_operations.py`, `tests/api/test_ai_operations_digest.py`,
+`tests/unit/test_kpi_payload.py`, `tests/api/test_ai_kpi_explanation.py`.
 
 ## Running locally with the AI Platform
 
 ```bash
-(cd ../crm-ai-platform && ./scripts/e2e_with_crm.sh && ./scripts/e2e_operations.sh)
+(cd ../crm-ai-platform && ./scripts/e2e_with_crm.sh && ./scripts/e2e_operations.sh && ./scripts/e2e_kpi.sh)
 ```
 
 The script reconnects `api` and `worker` through `compose.ai.yaml`, which joins

@@ -6,19 +6,20 @@ from functools import cache
 
 from django.conf import settings
 
-from modules.ai_insights.application.digest_service import OperationsDigestService
+from modules.ai_insights.application.report_service import AiReportService
 from modules.ai_insights.application.service import CallInsightService
 from modules.ai_insights.infrastructure.calls import TelephonyCallReader
 from modules.ai_insights.infrastructure.client import HttpAiPlatformClient
-from modules.ai_insights.infrastructure.digest_repository import DjangoDigestRepository
-from modules.ai_insights.infrastructure.digest_sources import (
+from modules.ai_insights.infrastructure.report_repository import DjangoReportRepository
+from modules.ai_insights.infrastructure.report_sources import (
     OperationsFindingsSource,
     OrganizationMemberDirectory,
+    SalesKpiSource,
 )
 from modules.ai_insights.infrastructure.repository import DjangoInsightRepository
 from modules.ai_insights.infrastructure.scheduler import (
-    CeleryDigestScheduler,
     CeleryInsightScheduler,
+    CeleryReportScheduler,
 )
 from modules.audit.infrastructure.audit_log import DjangoAuditLog
 from platform_core.application.context import require_tenant
@@ -40,16 +41,17 @@ def ai_platform_client() -> HttpAiPlatformClient:
     )
 
 
-def operations_digest_service() -> OperationsDigestService:
+def ai_report_service() -> AiReportService:
     tenant = require_tenant()
     alias = tenant.db_alias
     cfg = settings.AI_PLATFORM
-    return OperationsDigestService(
-        repository=DjangoDigestRepository(alias),
+    return AiReportService(
+        repository=DjangoReportRepository(alias),
         findings=OperationsFindingsSource(),
+        kpis=SalesKpiSource(),
         members=OrganizationMemberDirectory(),
         client=ai_platform_client(),
-        scheduler=CeleryDigestScheduler(alias),
+        scheduler=CeleryReportScheduler(alias),
         uow=DjangoUnitOfWork(alias),
         outbox=DjangoEventOutbox(alias),
         audit=DjangoAuditLog(alias),

@@ -9,8 +9,8 @@ from platform_core.application.context import current_correlation_id
 
 SUBMIT_TASK = "integrations.ai_submit_insight"
 POLL_TASK = "integrations.ai_poll_insight"
-SUBMIT_DIGEST_TASK = "integrations.ai_submit_digest"
-POLL_DIGEST_TASK = "integrations.ai_poll_digest"
+SUBMIT_REPORT_TASK = "integrations.ai_submit_report"
+POLL_REPORT_TASK = "integrations.ai_poll_report"
 # Outbound calls to an external service: the existing integrations queue.
 QUEUE = "integrations"
 
@@ -53,24 +53,24 @@ class CeleryInsightScheduler:
         )
 
 
-class CeleryDigestScheduler:
-    """Enqueues operations-digest steps only after the digest row has been committed."""
+class CeleryReportScheduler:
+    """Enqueues AI report steps only after the report row has been committed."""
 
     def __init__(self, using: str) -> None:
         self.using = using
 
-    def schedule_submit(self, *, tenant_slug: str, digest_id: UUID) -> None:
+    def schedule_submit(self, *, tenant_slug: str, report_id: UUID) -> None:
         _send_on_commit(
             self.using,
-            SUBMIT_DIGEST_TASK,
-            {"tenant_slug": tenant_slug, "digest_id": str(digest_id)},
+            SUBMIT_REPORT_TASK,
+            {"tenant_slug": tenant_slug, "report_id": str(report_id)},
             None,
         )
 
-    def schedule_poll(self, *, tenant_slug: str, digest_id: UUID, delay_seconds: float) -> None:
+    def schedule_poll(self, *, tenant_slug: str, report_id: UUID, delay_seconds: float) -> None:
         _send_on_commit(
             self.using,
-            POLL_DIGEST_TASK,
-            {"tenant_slug": tenant_slug, "digest_id": str(digest_id)},
+            POLL_REPORT_TASK,
+            {"tenant_slug": tenant_slug, "report_id": str(report_id)},
             delay_seconds,
         )

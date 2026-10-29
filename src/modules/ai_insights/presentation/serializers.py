@@ -4,8 +4,9 @@ from typing import Any
 
 from rest_framework import serializers
 
-from modules.ai_insights.domain.digest import LANGUAGES, OperationsDigest
 from modules.ai_insights.domain.insight import CallInsight
+from modules.ai_insights.domain.kpi_payload import PERIODS
+from modules.ai_insights.domain.report import LANGUAGES, AiReport, ReportKind
 
 
 class CallInsightSerializer(serializers.Serializer[dict[str, Any]]):
@@ -27,6 +28,14 @@ class CallInsightSerializer(serializers.Serializer[dict[str, Any]]):
         allow_null=True,
         help_text="Structured output (call_summary.output.v1); every item cites the call text.",
     )
+    summary_grounded = serializers.BooleanField(
+        read_only=True,
+        help_text=(
+            "Always false: result.summary is free text the AI wrote and is not checked against "
+            "the call. key_points and next_step are, by verbatim quotes. Show those first; "
+            "measured summaries in Kyrgyz contained factual errors."
+        ),
+    )
     error_code = serializers.CharField(read_only=True, allow_null=True)
     created_at = serializers.DateTimeField(read_only=True)
     finished_at = serializers.DateTimeField(read_only=True, allow_null=True)
@@ -36,15 +45,28 @@ class DigestRequestSerializer(serializers.Serializer[dict[str, Any]]):
     language = serializers.ChoiceField(choices=list(LANGUAGES), required=False)
 
 
-class OperationsDigestSerializer(serializers.Serializer[dict[str, Any]]):
+class KpiExplanationRequestSerializer(serializers.Serializer[dict[str, Any]]):
+    period = serializers.ChoiceField(choices=list(PERIODS), default="month")
+    date = serializers.DateField(
+        required=False, help_text="Any day of the period to explain (default: today)."
+    )
+    language = serializers.ChoiceField(choices=list(LANGUAGES), required=False)
+
+
+class AiReportSerializer(serializers.Serializer[dict[str, Any]]):
     id = serializers.UUIDField(read_only=True)
+    kind = serializers.ChoiceField(choices=[k.value for k in ReportKind], read_only=True)
     trigger = serializers.CharField(read_only=True, help_text="manual | daily")
-    digest_date = serializers.DateField(read_only=True)
+    report_date = serializers.DateField(read_only=True)
     status = serializers.CharField(
         read_only=True, help_text="pending | submitted | succeeded | failed"
     )
-    counts = serializers.DictField(
-        child=serializers.IntegerField(), read_only=True, help_text="Findings sent, by kind."
+    input = serializers.JSONField(
+        read_only=True,
+        help_text=(
+            "What was sent to the AI: ids, kinds and CRM-computed numbers only. For KPI "
+            "explanations this is the source of truth for every number in the result."
+        ),
     )
     is_mock = serializers.BooleanField(read_only=True)
     provider = serializers.CharField(read_only=True, allow_null=True)
@@ -53,8 +75,8 @@ class OperationsDigestSerializer(serializers.Serializer[dict[str, Any]]):
         read_only=True,
         allow_null=True,
         help_text=(
-            "operations_digest.output.v1. finding_refs look like 'lead:<uuid>', "
-            "'deal:<uuid>' or 'task:<uuid>'."
+            "operations_digest.output.v1 (finding_refs like 'lead:<uuid>') or "
+            "kpi_explanation.output.v1 (metric_codes)."
         ),
     )
     error_code = serializers.CharField(read_only=True, allow_null=True)
@@ -62,20 +84,21 @@ class OperationsDigestSerializer(serializers.Serializer[dict[str, Any]]):
     finished_at = serializers.DateTimeField(read_only=True, allow_null=True)
 
 
-def digest_to_dict(digest: OperationsDigest) -> dict[str, Any]:
+def report_to_dict(report: AiReport) -> dict[str, Any]:
     return {
-        "id": str(digest.id),
-        "trigger": digest.trigger.value,
-        "digest_date": digest.digest_date.isoformat(),
-        "status": digest.status.value,
-        "counts": digest.payload.get("counts", {}),
-        "is_mock": digest.is_mock,
-        "provider": digest.provider,
-        "model": digest.model,
-        "result": digest.result,
-        "error_code": digest.error_code,
-        "created_at": digest.created_at.isoformat(),
-        "finished_at": digest.finished_at.isoformat() if digest.finished_at else None,
+        "id": str(report.id),
+        "kind": report.kind.value,
+        "trigger": report.trigger.value,
+        "report_date": report.report_date.isoformat(),
+        "status": report.status.value,
+        "input": report.payload,
+        "is_mock": report.is_mock,
+        "provider": report.provider,
+        "model": report.model,
+        "result": report.result,
+        "error_code": report.error_code,
+        "created_at": report.created_at.isoformat(),
+        "finished_at": report.finished_at.isoformat() if report.finished_at else None,
     }
 
 
@@ -90,6 +113,7 @@ def insight_to_dict(insight: CallInsight) -> dict[str, Any]:
         "model": insight.model,
         "schema_id": insight.schema_id,
         "result": insight.result,
+        "summary_grounded": False,
         "error_code": insight.error_code,
         "created_at": insight.created_at.isoformat(),
         "finished_at": insight.finished_at.isoformat() if insight.finished_at else None,

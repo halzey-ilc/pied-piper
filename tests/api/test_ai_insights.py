@@ -136,6 +136,8 @@ def test_request_then_worker_stores_structured_result(
     latest = client.get(_url(call)).json()
     assert latest["status"] == "succeeded"
     assert latest["is_mock"] is True and latest["result"]["summary"] == "Hello."
+    # The free-text summary is never presented as verified (only quotes are checked).
+    assert latest["summary_grounded"] is False
     assert (
         OutboxMessage.objects.using("tenant_acme")
         .filter(event_type="ai_insights.call_insight_completed")
