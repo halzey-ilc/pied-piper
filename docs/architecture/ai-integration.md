@@ -91,6 +91,29 @@ customer message), `draft_reply` and `needs_human`.
   arrives between the request and the worker, the suggestion fails `source_changed`
   instead of answering an outdated conversation.
 
+## Deal briefs (AI Sales Coach)
+
+```
+POST /api/v1/ai/deals/<id>/brief/ {"language"?}  -> 202, or 200 when nothing changed
+GET  /api/v1/ai/deals/<id>/brief/               -> your own latest brief
+```
+
+The CRM reads the deal and its notes, tasks, meetings and calls through each
+module's own service **with the requesting user**. Anything the user cannot
+open is left out of the input.
+
+The CRM itself computes:
+- the stage position;
+- the deal's age;
+- each task's `open | done | overdue` status.
+
+Phone numbers are not sent. The result lists the situation, risks, questions to
+clarify and a next step. Every point cites `deal:`, `activity:`, `meeting:` or
+`call:` refs and contains no numbers outside the input.
+
+Because the input depends on the user's rights, briefs are personal. The input is
+stored only until it is submitted, then cleared.
+
 ## Notifications
 
 Every finished AI result emits an event through the outbox:

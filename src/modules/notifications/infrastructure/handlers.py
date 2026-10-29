@@ -107,7 +107,14 @@ def _on_reply_suggestion_completed(message: dict[str, Any]) -> None:
         )
 
 
+def _on_deal_brief_completed(message: dict[str, Any]) -> None:
+    deal_id = _uuid(message["payload"], "deal_id")
+    if deal_id is not None:
+        _notify_ai(message, "requested_by", "AI deal brief", f"/api/v1/ai/deals/{deal_id}/brief/")
+
+
 _HANDLERS: dict[str, Callable[[dict[str, Any]], None]] = {
+    "ai_insights.deal_brief_completed": _on_deal_brief_completed,
     "meetings.meeting_scheduled": _on_meeting_scheduled,
     "sales.deal_created": _on_deal_created,
     "leads.lead_captured": _on_lead_captured,

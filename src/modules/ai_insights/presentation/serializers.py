@@ -4,6 +4,7 @@ from typing import Any
 
 from rest_framework import serializers
 
+from modules.ai_insights.domain.deal_brief import DealBrief
 from modules.ai_insights.domain.insight import CallInsight
 from modules.ai_insights.domain.kpi_payload import PERIODS
 from modules.ai_insights.domain.reply import ReplySuggestion
@@ -133,6 +134,44 @@ def reply_to_dict(suggestion: ReplySuggestion) -> dict[str, Any]:
         "error_code": suggestion.error_code,
         "created_at": suggestion.created_at.isoformat(),
         "finished_at": suggestion.finished_at.isoformat() if suggestion.finished_at else None,
+    }
+
+
+class DealBriefSerializer(serializers.Serializer[dict[str, Any]]):
+    id = serializers.UUIDField(read_only=True)
+    deal_id = serializers.UUIDField(read_only=True)
+    status = serializers.CharField(
+        read_only=True, help_text="pending | submitted | succeeded | failed"
+    )
+    is_mock = serializers.BooleanField(read_only=True)
+    provider = serializers.CharField(read_only=True, allow_null=True)
+    model = serializers.CharField(read_only=True, allow_null=True)
+    result = serializers.JSONField(
+        read_only=True,
+        allow_null=True,
+        help_text=(
+            "deal_coach.output.v1: situation, risks, questions to clarify and next_step; each "
+            "point cites refs like 'deal:<uuid>', 'activity:<uuid>', 'meeting:<uuid>', "
+            "'call:<uuid>'. No numbers that are not in the deal data."
+        ),
+    )
+    error_code = serializers.CharField(read_only=True, allow_null=True)
+    created_at = serializers.DateTimeField(read_only=True)
+    finished_at = serializers.DateTimeField(read_only=True, allow_null=True)
+
+
+def brief_to_dict(brief: DealBrief) -> dict[str, Any]:
+    return {
+        "id": str(brief.id),
+        "deal_id": str(brief.deal_id),
+        "status": brief.status.value,
+        "is_mock": brief.is_mock,
+        "provider": brief.provider,
+        "model": brief.model,
+        "result": brief.result,
+        "error_code": brief.error_code,
+        "created_at": brief.created_at.isoformat(),
+        "finished_at": brief.finished_at.isoformat() if brief.finished_at else None,
     }
 
 

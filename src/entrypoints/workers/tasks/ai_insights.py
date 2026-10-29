@@ -15,6 +15,7 @@ from celery import shared_task
 from modules.ai_insights.composition import (
     ai_report_service,
     call_insight_service,
+    deal_brief_service,
     reply_suggestion_service,
 )
 from platform_core.infrastructure.messaging.tasks import ResilientTask
@@ -57,6 +58,18 @@ def submit_reply(tenant_slug: str, suggestion_id: str) -> None:
 def poll_reply(tenant_slug: str, suggestion_id: str) -> None:
     with system_tenant_scope(tenant_slug):
         reply_suggestion_service().poll(UUID(suggestion_id))
+
+
+@shared_task(base=ResilientTask, name="integrations.ai_submit_brief", ignore_result=True)
+def submit_brief(tenant_slug: str, brief_id: str) -> None:
+    with system_tenant_scope(tenant_slug):
+        deal_brief_service().submit(UUID(brief_id))
+
+
+@shared_task(base=ResilientTask, name="integrations.ai_poll_brief", ignore_result=True)
+def poll_brief(tenant_slug: str, brief_id: str) -> None:
+    with system_tenant_scope(tenant_slug):
+        deal_brief_service().poll(UUID(brief_id))
 
 
 @shared_task(base=ResilientTask, name="integrations.ai_daily_digests", ignore_result=True)

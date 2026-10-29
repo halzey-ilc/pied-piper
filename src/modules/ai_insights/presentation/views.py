@@ -11,16 +11,19 @@ from modules.access_control.domain.rbac import Principal, Role
 from modules.ai_insights.composition import (
     ai_report_service,
     call_insight_service,
+    deal_brief_service,
     reply_suggestion_service,
 )
 from modules.ai_insights.domain.report import ReportKind
 from modules.ai_insights.presentation.serializers import (
     AiReportSerializer,
     CallInsightSerializer,
+    DealBriefSerializer,
     DigestRequestSerializer,
     KpiExplanationRequestSerializer,
     ReplyRequestSerializer,
     ReplySuggestionSerializer,
+    brief_to_dict,
     insight_to_dict,
     reply_to_dict,
     report_to_dict,
@@ -159,6 +162,43 @@ class ConversationReplyView(_Scoped):
     def get(self, request: Request, conversation_id: UUID) -> Response:
         suggestion = reply_suggestion_service().latest(self.principal(), conversation_id)
         return Response(reply_to_dict(suggestion))
+
+
+class DealBriefView(_Scoped):
+    @extend_schema(
+        tags=_TAGS,
+        operation_id="ai_deal_brief_request",
+        summary="Request an AI brief for the next conversation about a deal (Sales Coach)",
+        description=(
+            "Collects the deal (stage, amount, dates) and its notes, tasks, meetings and calls "
+            "that you can see, computes overdue tasks and the deal's age, and asks the AI "
+            "Platform for the situation, risks, questions to clarify and a next step. Every "
+            "point cites the records it is based on. Phone numbers are not sent. Returns 202 "
+            "at once; poll GET. Unchanged data returns your existing brief (200). Briefs are "
+            "personal. Requires ai.request on the deal."
+        ),
+        parameters=[_TENANT_HEADER],
+        request=ReplyRequestSerializer,
+        responses={202: DealBriefSerializer, 200: DealBriefSerializer},
+    )
+    def post(self, request: Request, deal_id: UUID) -> Response:
+        serializer = ReplyRequestSerializer(data=request.data or {})
+        serializer.is_valid(raise_exception=True)
+        brief, created = deal_brief_service().request_brief(
+            self.principal(), deal_id, language=serializer.validated_data.get("language")
+        )
+        return Response(brief_to_dict(brief), status=_accepted(created))
+
+    @extend_schema(
+        tags=_TAGS,
+        operation_id="ai_deal_brief_latest",
+        summary="Your latest AI brief for a deal",
+        parameters=[_TENANT_HEADER],
+        responses=DealBriefSerializer,
+    )
+    def get(self, request: Request, deal_id: UUID) -> Response:
+        brief = deal_brief_service().latest(self.principal(), deal_id)
+        return Response(brief_to_dict(brief))
 
 
 class KpiExplanationView(_Scoped):

@@ -121,3 +121,38 @@ class ReplySuggestionRecord(models.Model):
 
     def __str__(self) -> str:
         return f"reply {self.conversation_id} ({self.status})"
+
+
+class DealBriefRecord(models.Model):
+    """AI preparation for the next conversation about a deal (personal to the requester)."""
+
+    id = models.UUIDField(primary_key=True, editable=False)
+    deal_id = models.UUIDField()
+    requested_by = models.UUIDField()
+    # The job input until it is submitted; cleared afterwards (only the hash stays).
+    payload = models.JSONField(null=True, blank=True)
+    source_hash = models.CharField(max_length=64)
+    status = models.CharField(
+        max_length=12, choices=[(s.value, s.name.title()) for s in InsightStatus]
+    )
+    ai_job_id = models.CharField(max_length=64, null=True, blank=True)  # noqa: DJ001
+    result = models.JSONField(null=True, blank=True)
+    provider = models.CharField(max_length=64, null=True, blank=True)  # noqa: DJ001
+    model = models.CharField(max_length=128, null=True, blank=True)  # noqa: DJ001
+    is_mock = models.BooleanField(default=False)
+    error_code = models.CharField(max_length=64, null=True, blank=True)  # noqa: DJ001
+    version = models.PositiveIntegerField(default=1)
+    created_at = models.DateTimeField()
+    finished_at = models.DateTimeField(null=True, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "ai_insights_deal_brief"
+        indexes = [
+            models.Index(
+                fields=["deal_id", "requested_by", "created_at"], name="deal_brief_deal_user_idx"
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"brief {self.deal_id} ({self.status})"
