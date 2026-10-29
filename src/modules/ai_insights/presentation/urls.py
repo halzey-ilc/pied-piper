@@ -6,6 +6,7 @@ from modules.ai_insights.presentation.views import (
     DealBriefView,
     KpiExplanationView,
     OperationsDigestView,
+    RiskReviewView,
 )
 
 urlpatterns = [
@@ -16,6 +17,7 @@ urlpatterns = [
         name="ai-conversation-reply",
     ),
     path("deals/<uuid:deal_id>/brief/", DealBriefView.as_view(), name="ai-deal-brief"),
+    path("risk/review/", RiskReviewView.as_view(), name="ai-risk-review"),
     path("operations/digest/", OperationsDigestView.as_view(), name="ai-operations-digest"),
     path("analytics/kpi-explanation/", KpiExplanationView.as_view(), name="ai-kpi-explanation"),
 ]

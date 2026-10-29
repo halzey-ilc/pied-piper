@@ -32,6 +32,7 @@ MAX_FINDINGS_SENT = 200
 class ReportKind(StrEnum):
     OPERATIONS_DIGEST = "operations_digest"
     KPI_EXPLANATION = "kpi_explanation"
+    RISK_REVIEW = "risk_review"
 
 
 class ReportTrigger(StrEnum):
@@ -42,10 +43,12 @@ class ReportTrigger(StrEnum):
 JOB_TYPES: dict[ReportKind, str] = {
     ReportKind.OPERATIONS_DIGEST: "operations.digest.v1",
     ReportKind.KPI_EXPLANATION: "kpi.explanation.v1",
+    ReportKind.RISK_REVIEW: "risk.review.v1",
 }
 OUTPUT_SCHEMAS: dict[ReportKind, str] = {
     ReportKind.OPERATIONS_DIGEST: "operations_digest.output.v1",
     ReportKind.KPI_EXPLANATION: "kpi_explanation.output.v1",
+    ReportKind.RISK_REVIEW: "risk_review.output.v1",
 }
 
 

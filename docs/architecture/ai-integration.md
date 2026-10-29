@@ -114,6 +114,25 @@ clarify and a next step. Every point cites `deal:`, `activity:`, `meeting:` or
 Because the input depends on the user's rights, briefs are personal. The input is
 stored only until it is submitted, then cleared.
 
+## Risk signals and AI risk review (AI Risk & Anomaly)
+
+```
+GET  /api/v1/risk/signals/       deterministic signals (risk.view: owner, admin)
+GET/PUT /api/v1/risk/settings/   company thresholds (PUT: risk.manage)
+POST/GET /api/v1/ai/risk/review/ neutral AI explanation (risk.view + ai.request)
+```
+
+`modules.risk` applies rules to deals and the audit log over the last `window_days`:
+- `won_without_activity`: a deal won with no recorded note, task, call or meeting;
+- `reopened_after_close`: a closed deal reopened;
+- `amount_outlier`: an open deal at least N times the median (only with 10+ open deals);
+- bursts by one person: leads disqualified on one day, deals lost on one day, invoices
+  voided in the window.
+
+Signals contain ids and numbers only. A signal is a reason to check, **not
+evidence** (`is_evidence: false`). The AI Platform rejects explanations that
+accuse anyone, and the CRM takes no automatic action on a signal.
+
 ## Notifications
 
 Every finished AI result emits an event through the outbox:

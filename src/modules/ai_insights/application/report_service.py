@@ -20,6 +20,7 @@ from modules.ai_insights.application.report_ports import (
     MemberDirectory,
     ReportRepository,
     ReportScheduler,
+    RiskSource,
 )
 from modules.ai_insights.application.service import AiDisabledError, poll_delay
 from modules.ai_insights.domain.insight import InsightStatus
@@ -68,8 +69,10 @@ class AiReportService:
         default_language: str = "ru",
         deadline_seconds: float = 900.0,
         policy: AccessPolicy | None = None,
+        risks: RiskSource | None = None,
     ) -> None:
         self._repo = repository
+        self._risks = risks
         self._findings = findings
         self._kpis = kpis
         self._members = members
@@ -166,6 +169,25 @@ class AiReportService:
             previous=previous,
         )
         return self._create(principal, ReportKind.KPI_EXPLANATION, ReportTrigger.MANUAL, payload)
+
+    # --- risk review (AI Risk & Anomaly Detection) ------------------------------------
+
+    def request_risk_review(
+        self, principal: Principal, *, language: str | None = None
+    ) -> tuple[AiReport, bool]:
+        """Explain the company's risk signals in neutral terms; requires risk.view and
+        ai.request. The input holds refs, kinds and numbers only."""
+        self._require_ai(principal)
+        if self._risks is None:
+            raise AiDisabledError("Risk signals are not available in this installation.")
+        snap = self._risks.snapshot_for(principal)
+        payload = {
+            "language": validate_language(language or self._language),
+            "window_days": snap.window_days,
+            "counts": snap.counts,
+            "signals": snap.signals[:MAX_FINDINGS_SENT],
+        }
+        return self._create(principal, ReportKind.RISK_REVIEW, ReportTrigger.MANUAL, payload)
 
     # --- reading ----------------------------------------------------------------
 

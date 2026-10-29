@@ -55,6 +55,7 @@ def _on_lead_captured(message: dict[str, Any]) -> None:
 _REPORTS: dict[str, tuple[str, str]] = {
     "operations_digest": ("AI operations digest", "/api/v1/ai/operations/digest/"),
     "kpi_explanation": ("AI KPI explanation", "/api/v1/ai/analytics/kpi-explanation/"),
+    "risk_review": ("AI risk review", "/api/v1/ai/risk/review/"),
 }
 
 

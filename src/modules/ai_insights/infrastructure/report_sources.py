@@ -6,11 +6,12 @@ from datetime import date
 from uuid import UUID
 
 from modules.access_control.domain.rbac import Principal
-from modules.ai_insights.application.report_ports import FindingsSnapshot, Member
+from modules.ai_insights.application.report_ports import FindingsSnapshot, Member, RiskSnapshot
 from modules.ai_insights.domain.kpi_payload import KpiReading
 from modules.ai_insights.domain.report import finding_ref
 from modules.operations.composition import operations_service
 from modules.organizations.composition import list_active_members
+from modules.risk.composition import risk_service
 from modules.sales_kpi.composition import analytics_service
 from modules.sales_kpi.domain.kpi import Period
 
@@ -43,6 +44,20 @@ class SalesKpiSource:
             KpiReading(code=v.code, name=v.name, unit=v.unit, value=v.value)
             for v in analytics_service().kpis(principal, Period(period), start)
         ]
+
+
+class RiskSignalsSource:
+    def snapshot_for(self, principal: Principal) -> RiskSnapshot:
+        # The risk service enforces risk.view (owner, admin).
+        report = risk_service().report(principal)
+        return RiskSnapshot(
+            window_days=report.thresholds.window_days,
+            counts=report.counts,
+            signals=[
+                {"ref": s.ref, "kind": s.kind.value, "value": s.value, "threshold": s.threshold}
+                for s in report.signals
+            ],
+        )
 
 
 class OrganizationMemberDirectory:

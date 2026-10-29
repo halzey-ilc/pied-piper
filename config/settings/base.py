@@ -51,6 +51,7 @@ INSTALLED_APPS = [
     "modules.communications.infrastructure.apps.CommunicationsConfig",
     "modules.ai_insights.infrastructure.apps.AiInsightsConfig",
     "modules.operations.infrastructure.apps.OperationsConfig",
+    "modules.risk.infrastructure.apps.RiskConfig",
 ]
 
 MIDDLEWARE = [
@@ -166,6 +167,7 @@ TENANCY: dict[str, Any] = {
         "communications",
         "ai_insights",
         "operations",
+        "risk",
     },
     "SHARED_APPS": {"messaging", "audit"},
     "IGNORED_APPS": {"rest_framework", "corsheaders", "drf_spectacular"},
@@ -376,6 +378,8 @@ SPECTACULAR_SETTINGS: dict[str, Any] = {
     "ENUM_NAME_OVERRIDES": {
         "LeadStatusEnum": ["new", "qualified", "unqualified", "converted"],
         "DealStatusEnum": ["open", "won", "lost"],
+        "RiskSubjectTypeEnum": ["deal", "user"],
+        "SubjectTypeEnum": ["customer", "deal"],
         "MeetingStatusEnum": ["scheduled", "completed", "cancelled"],
         "InvoiceStatusEnum": ["draft", "issued", "paid", "void"],
         "CallStatusEnum": [

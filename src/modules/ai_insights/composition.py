@@ -20,6 +20,7 @@ from modules.ai_insights.infrastructure.report_repository import DjangoReportRep
 from modules.ai_insights.infrastructure.report_sources import (
     OperationsFindingsSource,
     OrganizationMemberDirectory,
+    RiskSignalsSource,
     SalesKpiSource,
 )
 from modules.ai_insights.infrastructure.repository import DjangoInsightRepository
@@ -57,6 +58,7 @@ def ai_report_service() -> AiReportService:
         repository=DjangoReportRepository(alias),
         findings=OperationsFindingsSource(),
         kpis=SalesKpiSource(),
+        risks=RiskSignalsSource(),
         members=OrganizationMemberDirectory(),
         client=ai_platform_client(),
         scheduler=CeleryReportScheduler(alias),

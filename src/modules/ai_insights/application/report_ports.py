@@ -30,6 +30,21 @@ class KpiSource(Protocol):
 
 
 @dataclass(frozen=True, slots=True)
+class RiskSnapshot:
+    """The company's current risk signals, as review input parts."""
+
+    window_days: int
+    counts: dict[str, int]
+    signals: list[dict[str, Any]]  # {"ref", "kind", "value", "threshold"}, newest first
+
+
+class RiskSource(Protocol):
+    def snapshot_for(self, principal: Principal) -> RiskSnapshot:
+        """Raises AccessDeniedError without risk.view."""
+        ...
+
+
+@dataclass(frozen=True, slots=True)
 class Member:
     user_id: UUID
     role: str

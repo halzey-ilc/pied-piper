@@ -201,6 +201,42 @@ class DealBriefView(_Scoped):
         return Response(brief_to_dict(brief))
 
 
+class RiskReviewView(_Scoped):
+    @extend_schema(
+        tags=_TAGS,
+        operation_id="ai_risk_review_request",
+        summary="Request a neutral AI explanation of risk signals (Risk & Anomaly)",
+        description=(
+            "Sends the company's current risk signals (refs, kinds, counts and thresholds "
+            "only) to the AI Platform, which explains them and suggests what to check. Texts "
+            "that state or imply wrongdoing are rejected: a signal is never evidence "
+            "(`is_evidence` is false). Returns 202; poll GET. Requires risk.view and ai.request "
+            "(owner, admin)."
+        ),
+        parameters=[_TENANT_HEADER],
+        request=DigestRequestSerializer,
+        responses={202: AiReportSerializer, 200: AiReportSerializer},
+    )
+    def post(self, request: Request) -> Response:
+        serializer = DigestRequestSerializer(data=request.data or {})
+        serializer.is_valid(raise_exception=True)
+        report, created = ai_report_service().request_risk_review(
+            self.principal(), language=serializer.validated_data.get("language")
+        )
+        return Response(report_to_dict(report), status=_accepted(created))
+
+    @extend_schema(
+        tags=_TAGS,
+        operation_id="ai_risk_review_latest",
+        summary="Your latest risk review",
+        parameters=[_TENANT_HEADER],
+        responses=AiReportSerializer,
+    )
+    def get(self, request: Request) -> Response:
+        report = ai_report_service().latest(self.principal(), ReportKind.RISK_REVIEW)
+        return Response(report_to_dict(report))
+
+
 class KpiExplanationView(_Scoped):
     @extend_schema(
         tags=_TAGS,

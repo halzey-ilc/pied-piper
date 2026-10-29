@@ -57,6 +57,9 @@ class Permission(StrEnum):
     AI_REQUEST = "ai.request"
     # Change the company's operations rules (e.g. when a lead counts as forgotten).
     OPERATIONS_MANAGE = "operations.manage"
+    # Risk signals concern employees' actions: owner and admin only (not in other roles).
+    RISK_VIEW = "risk.view"
+    RISK_MANAGE = "risk.manage"
 
 
 class Scope(IntEnum):

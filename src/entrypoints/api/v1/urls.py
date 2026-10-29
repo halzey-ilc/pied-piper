@@ -51,6 +51,7 @@ urlpatterns = [
     path("analytics/reports/", include("modules.reporting.presentation.urls")),
     path("ai/", include("modules.ai_insights.presentation.urls")),
     path("operations/", include("modules.operations.presentation.urls")),
+    path("risk/", include("modules.risk.presentation.urls")),
     path(
         "webhooks/<str:provider>/<slug:tenant_slug>/",
         WebhookView.as_view(),
