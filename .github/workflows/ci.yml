@@ -65,16 +65,8 @@ jobs:
         options: >-
           --health-cmd "redis-cli ping" --health-interval 5s
           --health-timeout 3s --health-retries 10
-      rabbitmq:
-        image: rabbitmq:4-management
-        env:
-          RABBITMQ_DEFAULT_USER: crm
-          RABBITMQ_DEFAULT_PASS: ci-rabbit-password
-          RABBITMQ_DEFAULT_VHOST: crm
-        ports: ["5672:5672"]
-        options: >-
-          --health-cmd "rabbitmq-diagnostics -q check_running" --health-interval 10s
-          --health-timeout 5s --health-retries 10
+      # RabbitMQ is started as a step (below), not a service: it needs the repo's
+      # rabbitmq.conf, which a service container cannot mount before checkout.
     env:
       DJANGO_SETTINGS_MODULE: config.settings.test
       DJANGO_ENV: test
@@ -90,6 +82,20 @@ jobs:
           version: ${{ env.UV_VERSION }}
           enable-cache: true
       - run: uv sync --locked --all-groups
+      - name: Start RabbitMQ with the same config as local development
+        # rabbitmq.conf re-permits transient non-exclusive queues, which RabbitMQ 4
+        # blocks by default and Celery's mingle/remote control (pidbox) needs.
+        run: |
+          docker run -d --name rabbitmq -p 5672:5672 \
+            -e RABBITMQ_DEFAULT_USER=crm -e RABBITMQ_DEFAULT_PASS=ci-rabbit-password \
+            -e RABBITMQ_DEFAULT_VHOST=crm \
+            -v "$PWD/infrastructure/rabbitmq/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro" \
+            rabbitmq:4-management
+          for i in $(seq 1 30); do
+            docker exec rabbitmq rabbitmq-diagnostics -q check_running && exit 0
+            sleep 2
+          done
+          docker logs rabbitmq | tail -40; exit 1
       - name: Grant CREATEDB for test tenant databases
         run: PGPASSWORD=ci-postgres-password psql -h localhost -U crm_app -d crm_control -c "ALTER ROLE crm_app CREATEDB;"
       - name: Unit, API, security, architecture tests
@@ -136,7 +142,13 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
       - name: Validate compose files
-        run: docker compose -f compose.yaml -f compose.test.yaml config -q
+        # compose.yaml requires these secrets to interpolate; CI uses throwaway values.
+        run: |
+          touch .env  # env_file must exist; the values come from the environment below
+          docker compose -f compose.yaml -f compose.test.yaml config -q
+        env:
+          DB_PASSWORD: ci-not-a-secret
+          RABBITMQ_PASSWORD: ci-not-a-secret
         # The production overlay requires real secrets/certs to interpolate and is
         # validated at deploy time, not in CI.
       - name: Scan image for OS/library vulnerabilities (Trivy)
