@@ -156,5 +156,6 @@ def call_insight_service() -> CallInsightService:
         audit=DjangoAuditLog(alias),
         tenant_slug=tenant.slug,
         enabled=cfg["ENABLED"],
+        default_language=cfg["DEFAULT_LANGUAGE"],
         deadline_seconds=cfg["DEADLINE_SECONDS"],
     )

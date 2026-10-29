@@ -131,6 +131,7 @@ def test_request_then_worker_stores_structured_result(
     sent = ai.submits[0]
     assert sent["tenant_slug"] == "acme" and sent["subject"] == f"user:{owner.id}"
     assert sent["payload"]["transcript"] == NOTES
+    assert sent["payload"]["language"] == "ru"  # the company language, not "unknown"
     assert sent["idempotency_key"] == f"crm-insight-{body['id']}"
 
     latest = client.get(_url(call)).json()

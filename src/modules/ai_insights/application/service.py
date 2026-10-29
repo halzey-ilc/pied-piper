@@ -55,10 +55,12 @@ class CallInsightService:
         *,
         tenant_slug: str,
         enabled: bool,
+        default_language: str = "ru",
         deadline_seconds: float = 900.0,
         policy: AccessPolicy | None = None,
     ) -> None:
         self._repo = repository
+        self._language = default_language
         self._calls = calls
         self._client = client
         self._scheduler = scheduler
@@ -129,7 +131,9 @@ class CallInsightService:
                 job_type=insight.job_type,
                 payload={
                     "transcript": text,
-                    "language": "unknown",
+                    # The company's working language (AI_PLATFORM_LANGUAGE): the summary is
+                    # written in it, and "not enough data" notices are not bilingual.
+                    "language": self._language,
                     "call_ref": str(insight.call_id),
                 },
                 # The insight id makes a redelivered submit return the same AI job.
