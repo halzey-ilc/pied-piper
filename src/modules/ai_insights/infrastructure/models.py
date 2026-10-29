@@ -156,3 +156,37 @@ class DealBriefRecord(models.Model):
 
     def __str__(self) -> str:
         return f"brief {self.deal_id} ({self.status})"
+
+
+class AgentRunRecord(models.Model):
+    """A request to the CRM assistant, its proposed actions and the user's decisions."""
+
+    id = models.UUIDField(primary_key=True, editable=False)
+    requested_by = models.UUIDField()
+    request = models.TextField()
+    # The job input: request, offered tools, referenced records (refs and deal titles).
+    payload = models.JSONField()
+    source_hash = models.CharField(max_length=64)
+    status = models.CharField(
+        max_length=12, choices=[(s.value, s.name.title()) for s in InsightStatus]
+    )
+    actions = models.JSONField(default=list)
+    summary = models.CharField(max_length=300, null=True, blank=True)  # noqa: DJ001
+    ai_job_id = models.CharField(max_length=64, null=True, blank=True)  # noqa: DJ001
+    provider = models.CharField(max_length=64, null=True, blank=True)  # noqa: DJ001
+    model = models.CharField(max_length=128, null=True, blank=True)  # noqa: DJ001
+    is_mock = models.BooleanField(default=False)
+    error_code = models.CharField(max_length=64, null=True, blank=True)  # noqa: DJ001
+    version = models.PositiveIntegerField(default=1)
+    created_at = models.DateTimeField()
+    finished_at = models.DateTimeField(null=True, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "ai_insights_agent_run"
+        indexes = [
+            models.Index(fields=["requested_by", "created_at"], name="agent_run_user_idx"),
+        ]
+
+    def __str__(self) -> str:
+        return f"agent run {self.id} ({self.status})"

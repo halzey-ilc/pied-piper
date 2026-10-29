@@ -9,6 +9,7 @@ from rest_framework.response import Response
 
 from modules.access_control.domain.rbac import Principal, Role
 from modules.ai_insights.composition import (
+    agent_service,
     ai_report_service,
     call_insight_service,
     deal_brief_service,
@@ -16,6 +17,9 @@ from modules.ai_insights.composition import (
 )
 from modules.ai_insights.domain.report import ReportKind
 from modules.ai_insights.presentation.serializers import (
+    AgentActionSerializer,
+    AgentRequestSerializer,
+    AgentRunSerializer,
     AiReportSerializer,
     CallInsightSerializer,
     DealBriefSerializer,
@@ -23,10 +27,12 @@ from modules.ai_insights.presentation.serializers import (
     KpiExplanationRequestSerializer,
     ReplyRequestSerializer,
     ReplySuggestionSerializer,
+    action_to_dict,
     brief_to_dict,
     insight_to_dict,
     reply_to_dict,
     report_to_dict,
+    run_to_dict,
 )
 from platform_core.presentation.tenancy import TenantScopedAPIView
 
@@ -235,6 +241,81 @@ class RiskReviewView(_Scoped):
     def get(self, request: Request) -> Response:
         report = ai_report_service().latest(self.principal(), ReportKind.RISK_REVIEW)
         return Response(report_to_dict(report))
+
+
+class AgentRunsView(_Scoped):
+    @extend_schema(
+        tags=_TAGS,
+        operation_id="ai_agent_run_request",
+        summary="Ask the CRM assistant to plan actions (Agent Runtime)",
+        description=(
+            "The AI Platform receives your request, the tools you may use (create_task, "
+            "log_note, request_deal_brief) and the records you name (deal title; a customer is "
+            "referred to by kind only). It proposes actions; **nothing runs** until you confirm "
+            "each one. Returns 202; poll GET. Requires ai.request."
+        ),
+        parameters=[_TENANT_HEADER],
+        request=AgentRequestSerializer,
+        responses={202: AgentRunSerializer},
+    )
+    def post(self, request: Request) -> Response:
+        serializer = AgentRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        run = agent_service().request_run(
+            self.principal(),
+            data["request"],
+            deal_id=data.get("deal_id"),
+            customer_id=data.get("customer_id"),
+            language=data.get("language"),
+        )
+        return Response(run_to_dict(run), status=status.HTTP_202_ACCEPTED)
+
+
+class AgentRunDetailView(_Scoped):
+    @extend_schema(
+        tags=_TAGS,
+        operation_id="ai_agent_run_get",
+        summary="An assistant run and its proposed actions",
+        description="Only the person who made the request can see it.",
+        parameters=[_TENANT_HEADER],
+        responses=AgentRunSerializer,
+    )
+    def get(self, request: Request, run_id: UUID) -> Response:
+        return Response(run_to_dict(agent_service().get(self.principal(), run_id)))
+
+
+class AgentActionConfirmView(_Scoped):
+    @extend_schema(
+        tags=_TAGS,
+        operation_id="ai_agent_action_confirm",
+        summary="Confirm and run one proposed action",
+        description=(
+            "Runs the action through the owning module with your own rights (e.g. the "
+            "activities module creates the task, checking your permissions). Confirming again "
+            "returns the earlier outcome; the action never runs twice. Audited."
+        ),
+        parameters=[_TENANT_HEADER],
+        request=None,
+        responses=AgentActionSerializer,
+    )
+    def post(self, request: Request, run_id: UUID, index: int) -> Response:
+        action = agent_service().confirm(self.principal(), run_id, index)
+        return Response(action_to_dict(action))
+
+
+class AgentActionRejectView(_Scoped):
+    @extend_schema(
+        tags=_TAGS,
+        operation_id="ai_agent_action_reject",
+        summary="Reject one proposed action",
+        parameters=[_TENANT_HEADER],
+        request=None,
+        responses=AgentActionSerializer,
+    )
+    def post(self, request: Request, run_id: UUID, index: int) -> Response:
+        action = agent_service().reject(self.principal(), run_id, index)
+        return Response(action_to_dict(action))
 
 
 class KpiExplanationView(_Scoped):

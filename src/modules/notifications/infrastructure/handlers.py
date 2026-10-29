@@ -114,7 +114,14 @@ def _on_deal_brief_completed(message: dict[str, Any]) -> None:
         _notify_ai(message, "requested_by", "AI deal brief", f"/api/v1/ai/deals/{deal_id}/brief/")
 
 
+def _on_agent_run_completed(message: dict[str, Any]) -> None:
+    run_id = _uuid(message["payload"], "run_id")
+    if run_id is not None:
+        _notify_ai(message, "requested_by", "AI assistant plan", f"/api/v1/ai/agent/runs/{run_id}/")
+
+
 _HANDLERS: dict[str, Callable[[dict[str, Any]], None]] = {
+    "ai_insights.agent_run_completed": _on_agent_run_completed,
     "ai_insights.deal_brief_completed": _on_deal_brief_completed,
     "meetings.meeting_scheduled": _on_meeting_scheduled,
     "sales.deal_created": _on_deal_created,

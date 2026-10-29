@@ -13,6 +13,7 @@ from uuid import UUID
 from celery import shared_task
 
 from modules.ai_insights.composition import (
+    agent_service,
     ai_report_service,
     call_insight_service,
     deal_brief_service,
@@ -70,6 +71,18 @@ def submit_brief(tenant_slug: str, brief_id: str) -> None:
 def poll_brief(tenant_slug: str, brief_id: str) -> None:
     with system_tenant_scope(tenant_slug):
         deal_brief_service().poll(UUID(brief_id))
+
+
+@shared_task(base=ResilientTask, name="integrations.ai_submit_agent_run", ignore_result=True)
+def submit_agent_run(tenant_slug: str, run_id: str) -> None:
+    with system_tenant_scope(tenant_slug):
+        agent_service().submit(UUID(run_id))
+
+
+@shared_task(base=ResilientTask, name="integrations.ai_poll_agent_run", ignore_result=True)
+def poll_agent_run(tenant_slug: str, run_id: str) -> None:
+    with system_tenant_scope(tenant_slug):
+        agent_service().poll(UUID(run_id))
 
 
 @shared_task(base=ResilientTask, name="integrations.ai_daily_digests", ignore_result=True)

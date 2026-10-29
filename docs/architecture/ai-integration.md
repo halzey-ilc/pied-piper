@@ -133,6 +133,28 @@ Signals contain ids and numbers only. A signal is a reason to check, **not
 evidence** (`is_evidence: false`). The AI Platform rejects explanations that
 accuse anyone, and the CRM takes no automatic action on a signal.
 
+## CRM assistant (AI Agent Runtime)
+
+```
+POST /api/v1/ai/agent/runs/ {"request", "deal_id"?, "customer_id"?, "language"?}  -> 202
+GET  /api/v1/ai/agent/runs/<id>/                                   -> plan (requester only)
+POST /api/v1/ai/agent/runs/<id>/actions/<n>/confirm/  |  .../reject/
+```
+
+The AI receives:
+- the request;
+- the tools **this** user may use: `create_task`, `log_note`, `request_deal_brief`;
+- the records the user named (deal title; a customer only as "customer").
+
+It returns proposed actions and executes nothing. The CRM:
+- drops any action whose tool or record was not offered;
+- runs an action only when the requester confirms it, exactly once, through the owning
+  module's service as that user. For example, the activities module creates the task and
+  checks the user's permissions, as if the user had done it by hand;
+- audits every decision (`agent_action.executed|failed|rejected`).
+
+The assistant has no SQL, shell or direct database access.
+
 ## Notifications
 
 Every finished AI result emits an event through the outbox:

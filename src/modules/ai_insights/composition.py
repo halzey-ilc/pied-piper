@@ -3,13 +3,18 @@
 from __future__ import annotations
 
 from functools import cache
+from uuid import UUID
 
 from django.conf import settings
 
+from modules.access_control.domain.rbac import Principal
+from modules.ai_insights.application.agent_service import AgentService
 from modules.ai_insights.application.deal_brief_service import DealBriefService
 from modules.ai_insights.application.reply_service import ReplySuggestionService
 from modules.ai_insights.application.report_service import AiReportService
 from modules.ai_insights.application.service import CallInsightService
+from modules.ai_insights.infrastructure.agent_repository import DjangoAgentRunRepository
+from modules.ai_insights.infrastructure.agent_tools import CrmSubjectReader, CrmToolExecutor
 from modules.ai_insights.infrastructure.calls import TelephonyCallReader
 from modules.ai_insights.infrastructure.client import HttpAiPlatformClient
 from modules.ai_insights.infrastructure.conversations import CommunicationsConversationReader
@@ -25,6 +30,7 @@ from modules.ai_insights.infrastructure.report_sources import (
 )
 from modules.ai_insights.infrastructure.repository import DjangoInsightRepository
 from modules.ai_insights.infrastructure.scheduler import (
+    CeleryAgentScheduler,
     CeleryDealBriefScheduler,
     CeleryInsightScheduler,
     CeleryReplyScheduler,
@@ -67,6 +73,31 @@ def ai_report_service() -> AiReportService:
         audit=DjangoAuditLog(alias),
         tenant_slug=tenant.slug,
         tenant_id=tenant.tenant_id,
+        enabled=cfg["ENABLED"],
+        default_language=cfg["DEFAULT_LANGUAGE"],
+        deadline_seconds=cfg["DEADLINE_SECONDS"],
+    )
+
+
+def _start_deal_brief(principal: Principal, deal_id: UUID) -> UUID:
+    brief, _ = deal_brief_service().request_brief(principal, deal_id)
+    return brief.id
+
+
+def agent_service() -> AgentService:
+    tenant = require_tenant()
+    alias = tenant.db_alias
+    cfg = settings.AI_PLATFORM
+    return AgentService(
+        repository=DjangoAgentRunRepository(alias),
+        subjects=CrmSubjectReader(),
+        executor=CrmToolExecutor(request_brief=_start_deal_brief),
+        client=ai_platform_client(),
+        scheduler=CeleryAgentScheduler(alias),
+        uow=DjangoUnitOfWork(alias),
+        outbox=DjangoEventOutbox(alias),
+        audit=DjangoAuditLog(alias),
+        tenant_slug=tenant.slug,
         enabled=cfg["ENABLED"],
         default_language=cfg["DEFAULT_LANGUAGE"],
         deadline_seconds=cfg["DEADLINE_SECONDS"],

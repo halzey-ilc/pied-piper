@@ -15,6 +15,8 @@ SUBMIT_REPLY_TASK = "integrations.ai_submit_reply"
 POLL_REPLY_TASK = "integrations.ai_poll_reply"
 SUBMIT_BRIEF_TASK = "integrations.ai_submit_brief"
 POLL_BRIEF_TASK = "integrations.ai_poll_brief"
+SUBMIT_AGENT_TASK = "integrations.ai_submit_agent_run"
+POLL_AGENT_TASK = "integrations.ai_poll_agent_run"
 # Outbound calls to an external service: the existing integrations queue.
 QUEUE = "integrations"
 
@@ -122,5 +124,25 @@ class CeleryDealBriefScheduler:
             self.using,
             POLL_BRIEF_TASK,
             {"tenant_slug": tenant_slug, "brief_id": str(brief_id)},
+            delay_seconds,
+        )
+
+
+class CeleryAgentScheduler:
+    """Enqueues assistant-run steps only after the run row has been committed."""
+
+    def __init__(self, using: str) -> None:
+        self.using = using
+
+    def schedule_submit(self, *, tenant_slug: str, run_id: UUID) -> None:
+        _send_on_commit(
+            self.using, SUBMIT_AGENT_TASK, {"tenant_slug": tenant_slug, "run_id": str(run_id)}, None
+        )
+
+    def schedule_poll(self, *, tenant_slug: str, run_id: UUID, delay_seconds: float) -> None:
+        _send_on_commit(
+            self.using,
+            POLL_AGENT_TASK,
+            {"tenant_slug": tenant_slug, "run_id": str(run_id)},
             delay_seconds,
         )

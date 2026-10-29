@@ -4,6 +4,7 @@ from typing import Any
 
 from rest_framework import serializers
 
+from modules.ai_insights.domain.agent import AgentAction, AgentRun
 from modules.ai_insights.domain.deal_brief import DealBrief
 from modules.ai_insights.domain.insight import CallInsight
 from modules.ai_insights.domain.kpi_payload import PERIODS
@@ -172,6 +173,83 @@ def brief_to_dict(brief: DealBrief) -> dict[str, Any]:
         "error_code": brief.error_code,
         "created_at": brief.created_at.isoformat(),
         "finished_at": brief.finished_at.isoformat() if brief.finished_at else None,
+    }
+
+
+class AgentRequestSerializer(serializers.Serializer[dict[str, Any]]):
+    request = serializers.CharField(max_length=1000, help_text="What you want the assistant to do.")
+    deal_id = serializers.UUIDField(required=False, help_text="A deal the request is about.")
+    customer_id = serializers.UUIDField(
+        required=False, help_text="A customer the request is about."
+    )
+    language = serializers.ChoiceField(choices=list(LANGUAGES), required=False)
+
+
+class AgentActionSerializer(serializers.Serializer[dict[str, Any]]):
+    index = serializers.IntegerField(read_only=True)
+    tool = serializers.CharField(
+        read_only=True, help_text="create_task | log_note | request_deal_brief"
+    )
+    subject_ref = serializers.CharField(read_only=True)
+    args = serializers.JSONField(read_only=True)
+    reason = serializers.CharField(read_only=True)
+    status = serializers.CharField(
+        read_only=True, help_text="proposed | executed | failed | rejected"
+    )
+    result_ref = serializers.CharField(read_only=True, allow_null=True)
+    error_code = serializers.CharField(read_only=True, allow_null=True)
+    decided_at = serializers.DateTimeField(read_only=True, allow_null=True)
+
+
+class AgentRunSerializer(serializers.Serializer[dict[str, Any]]):
+    id = serializers.UUIDField(read_only=True)
+    request = serializers.CharField(read_only=True)
+    status = serializers.CharField(
+        read_only=True, help_text="pending | submitted | succeeded | failed"
+    )
+    tools = serializers.ListField(child=serializers.CharField(), read_only=True)
+    summary = serializers.CharField(read_only=True, allow_null=True)
+    actions = AgentActionSerializer(many=True, read_only=True)
+    requires_confirmation = serializers.BooleanField(
+        read_only=True, help_text="Always true: nothing runs until you confirm an action."
+    )
+    is_mock = serializers.BooleanField(read_only=True)
+    provider = serializers.CharField(read_only=True, allow_null=True)
+    model = serializers.CharField(read_only=True, allow_null=True)
+    error_code = serializers.CharField(read_only=True, allow_null=True)
+    created_at = serializers.DateTimeField(read_only=True)
+    finished_at = serializers.DateTimeField(read_only=True, allow_null=True)
+
+
+def action_to_dict(a: AgentAction) -> dict[str, Any]:
+    return {
+        "index": a.index,
+        "tool": a.tool.value,
+        "subject_ref": a.subject_ref,
+        "args": a.args,
+        "reason": a.reason,
+        "status": a.status.value,
+        "result_ref": a.result_ref,
+        "error_code": a.error_code,
+        "decided_at": a.decided_at.isoformat() if a.decided_at else None,
+    }
+
+
+def run_to_dict(run: AgentRun) -> dict[str, Any]:
+    return {
+        "id": str(run.id),
+        "request": run.request,
+        "status": run.status.value,
+        "tools": run.payload.get("tools", []),
+        "summary": run.summary,
+        "actions": [action_to_dict(a) for a in run.actions],
+        "requires_confirmation": True,
+        "is_mock": run.is_mock,
+        "provider": run.provider,
+        "model": run.model,
+        "error_code": run.error_code,
+        "created_at": run.created_at.isoformat(),
+        "finished_at": run.finished_at.isoformat() if run.finished_at else None,
     }
 
 
