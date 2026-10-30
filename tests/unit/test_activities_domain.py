@@ -24,7 +24,8 @@ def _subject() -> SubjectRef:
 def test_log_task_is_open_and_emits_event() -> None:
     activity, event = Activity.log_task(
         subject=_subject(),
-        owner_user_id=uuid4(),
+        created_by=uuid4(),
+        assignee_user_id=uuid4(),
         title="  Call   back ",
         due_date=date(2026, 11, 5),
     )
@@ -37,7 +38,9 @@ def test_log_task_is_open_and_emits_event() -> None:
 
 def test_task_requires_title() -> None:
     with pytest.raises(DomainValidationError):
-        Activity.log_task(subject=_subject(), owner_user_id=uuid4(), title="   ")
+        Activity.log_task(
+            subject=_subject(), created_by=uuid4(), assignee_user_id=uuid4(), title="   "
+        )
 
 
 def test_log_call_validates_duration() -> None:
@@ -69,7 +72,9 @@ def test_log_note_requires_body() -> None:
 
 
 def test_task_complete_and_reopen() -> None:
-    activity, _ = Activity.log_task(subject=_subject(), owner_user_id=uuid4(), title="Do it")
+    activity, _ = Activity.log_task(
+        subject=_subject(), created_by=uuid4(), assignee_user_id=uuid4(), title="Do it"
+    )
     event = activity.complete()
     assert isinstance(event, TaskCompleted)
     assert activity.task_status is not None and activity.task_status.value == "completed"
@@ -90,7 +95,9 @@ def test_only_tasks_can_be_completed() -> None:
 
 
 def test_edit_rules_per_kind() -> None:
-    task, _ = Activity.log_task(subject=_subject(), owner_user_id=uuid4(), title="T")
+    task, _ = Activity.log_task(
+        subject=_subject(), created_by=uuid4(), assignee_user_id=uuid4(), title="T"
+    )
     assert task.edit(title="Renamed", due_date=date(2026, 12, 1), set_due_date=True) is True
     assert task.title == "Renamed"
     set_date = task.due_date  # local, so mypy does not narrow the attribute across edits
