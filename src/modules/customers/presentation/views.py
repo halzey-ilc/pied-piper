@@ -36,6 +36,12 @@ _LIMIT = OpenApiParameter(
 _OFFSET = OpenApiParameter(
     "offset", int, OpenApiParameter.QUERY, description="Rows to skip for paging (default 0)."
 )
+_SEARCH = OpenApiParameter(
+    "search",
+    str,
+    OpenApiParameter.QUERY,
+    description="Case-insensitive match on name or email, or by the digits of the phone.",
+)
 
 _CUSTOMER_EXAMPLE = OpenApiExample(
     "Customer",
@@ -75,7 +81,7 @@ class CustomerListCreateView(CustomerBaseView):
             "on your role: owners/admins and viewers see all, managers see their team, sales "
             "reps see only their own. Results are paged with `limit` and `offset`."
         ),
-        parameters=[_TENANT_HEADER, _LIMIT, _OFFSET],
+        parameters=[_TENANT_HEADER, _SEARCH, _LIMIT, _OFFSET],
         responses=CustomerListSerializer,
     )
     def get(self, request: Request) -> Response:
@@ -84,7 +90,10 @@ class CustomerListCreateView(CustomerBaseView):
             offset = max(int(request.query_params.get("offset", 0)), 0)
         except ValueError:
             limit, offset = 50, 0
-        page = customer_service().list_customers(self.principal(), limit=limit, offset=offset)
+        search = (request.query_params.get("search") or "").strip() or None
+        page = customer_service().list_customers(
+            self.principal(), limit=limit, offset=offset, search=search
+        )
         return Response({"count": page.total, "results": [customer_to_dict(c) for c in page.items]})
 
     @extend_schema(

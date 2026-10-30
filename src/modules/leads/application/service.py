@@ -3,6 +3,7 @@ every operation, independently of the HTTP layer."""
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from uuid import UUID
 
@@ -15,7 +16,13 @@ from modules.access_control.domain.rbac import (
 )
 from modules.audit.application.ports import AuditLog
 from modules.audit.domain.entry import AuditEntry
-from modules.leads.application.ports import CustomerCreation, LeadRepository, LeadVisibility
+from modules.leads.application.ports import (
+    CustomerCreation,
+    DuplicateCandidate,
+    DuplicateFinder,
+    LeadRepository,
+    LeadVisibility,
+)
 from modules.leads.domain.lead import Lead, LeadSource, LeadStatus
 from platform_core.application.ports import EventOutbox
 from shared.application.ports import UnitOfWork
@@ -66,6 +73,7 @@ class LeadService:
         outbox: EventOutbox,
         audit: AuditLog,
         customers: CustomerCreation,
+        duplicates: DuplicateFinder | None = None,
         policy: AccessPolicy | None = None,
     ) -> None:
         self._repo = repository
@@ -73,6 +81,7 @@ class LeadService:
         self._outbox = outbox
         self._audit = audit
         self._customers = customers
+        self._duplicates = duplicates
         self._policy = policy or AccessPolicy()
 
     # --- reads --------------------------------------------------------------
@@ -93,6 +102,20 @@ class LeadService:
         return LeadPage(
             items=self._repo.list_visible(visibility, status=status, limit=limit, offset=offset),
             total=self._repo.count(visibility, status=status),
+        )
+
+    def find_duplicates(self, principal: Principal, lead_id: UUID) -> list[DuplicateCandidate]:
+        """Candidate duplicates (other leads and existing customers) that share this
+        lead's e-mail or phone. No automatic merge; the caller decides."""
+        lead = self.get(principal, lead_id)  # 404 if not visible (LEADS_VIEW)
+        if self._duplicates is None:
+            return []
+        email = str(lead.email) if lead.email else None
+        phone_digits = re.sub(r"\D", "", str(lead.phone)) if lead.phone else None
+        if not email and not phone_digits:
+            return []
+        return self._duplicates.find(
+            exclude_lead_id=lead_id, email=email, phone_digits=phone_digits
         )
 
     def _visibility(self, principal: Principal, scope: Scope) -> LeadVisibility:

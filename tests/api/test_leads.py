@@ -138,6 +138,60 @@ def test_sales_rep_scope_and_roles(
     )
 
 
+def test_convert_with_create_deal(
+    make_user: Callable[..., Any],
+    tenants: dict[str, TenantFixture],
+    client_for: Callable[..., APIClient],
+) -> None:
+    client = client_for(make_user("owner", tenant=tenants["acme"]), "acme")
+    pipeline = client.post(
+        "/api/v1/sales/pipelines/",
+        {"name": "P", "is_default": True, "stages": [{"name": "New"}]},
+        format="json",
+    )
+    assert pipeline.status_code == 201, pipeline.content
+
+    lead_id = _capture(client, name="Deal Lead", email="deal@example.test")["id"]
+    client.post(f"/api/v1/leads/{lead_id}/qualify/", {}, format="json")
+    response = client.post(
+        f"/api/v1/leads/{lead_id}/convert/",
+        {"create_deal": {"title": "Big deal", "amount": "5000.00"}},
+        format="json",
+    )
+    assert response.status_code == 200, response.content
+    body = response.json()
+    assert body["deal_id"] is not None
+
+    deal = client.get(f"/api/v1/sales/deals/{body['deal_id']}/").json()
+    assert deal["customer_id"] == body["customer_id"]
+    assert deal["amount"] == "5000.00"
+
+
+def test_lead_duplicates_across_leads_and_customers(
+    make_user: Callable[..., Any],
+    tenants: dict[str, TenantFixture],
+    client_for: Callable[..., APIClient],
+) -> None:
+    client = client_for(make_user("owner", tenant=tenants["acme"]), "acme")
+    base = _capture(client, name="Dup Base", email="dup@example.test", phone="+77011234567")["id"]
+    # Another lead sharing the phone but with a different e-mail.
+    _capture(client, name="Same Phone", email="other@example.test", phone="+77011234567")
+    # A customer sharing the e-mail.
+    created = client.post(
+        "/api/v1/customers/", {"name": "Cust Dup", "email": "dup@example.test"}, format="json"
+    )
+    assert created.status_code == 201, created.content
+
+    dups = client.get(f"/api/v1/leads/{base}/duplicates/")
+    assert dups.status_code == 200, dups.content
+    results = dups.json()["results"]
+    kinds = {(r["kind"], r["name"]) for r in results}
+    assert ("lead", "Same Phone") in kinds
+    assert ("customer", "Cust Dup") in kinds
+    # The lead itself is never returned as its own duplicate.
+    assert all(r["id"] != base for r in results)
+
+
 def test_cross_tenant_isolation(
     make_user: Callable[..., Any],
     tenants: dict[str, TenantFixture],

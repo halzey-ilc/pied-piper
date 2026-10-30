@@ -6,6 +6,7 @@ ORM row. Every query goes through an explicit tenant alias.
 
 from __future__ import annotations
 
+import re
 from uuid import UUID
 
 from django.db import IntegrityError, transaction
@@ -47,6 +48,16 @@ class DjangoCustomerRepository:
             condition |= Q(team_id__in=visibility.team_ids)
         return qs.filter(condition)
 
+    @staticmethod
+    def _search(qs: QuerySet[CustomerRecord], search: str | None) -> QuerySet[CustomerRecord]:
+        if not search:
+            return qs
+        condition = Q(name__icontains=search) | Q(email__icontains=search)
+        digits = re.sub(r"\D", "", search)
+        if digits:
+            condition |= Q(phone__icontains=digits)
+        return qs.filter(condition)
+
     def add(self, customer: Customer) -> None:
         try:
             with transaction.atomic(using=self.using):
@@ -86,10 +97,11 @@ class DjangoCustomerRepository:
             raise ConflictError("Customer was modified by someone else; reload and retry.")
 
     def list_visible(
-        self, visibility: CustomerVisibility, limit: int, offset: int
+        self, visibility: CustomerVisibility, limit: int, offset: int, search: str | None = None
     ) -> list[Customer]:
-        rows = self._visible(visibility).order_by("-created_at", "id")[offset : offset + limit]
+        qs = self._search(self._visible(visibility), search)
+        rows = qs.order_by("-created_at", "id")[offset : offset + limit]
         return [_to_domain(row) for row in rows]
 
-    def count(self, visibility: CustomerVisibility) -> int:
-        return self._visible(visibility).count()
+    def count(self, visibility: CustomerVisibility, search: str | None = None) -> int:
+        return self._search(self._visible(visibility), search).count()

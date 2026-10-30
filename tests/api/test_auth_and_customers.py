@@ -16,6 +16,30 @@ from tests.conftest import ALL_DATABASES, PASSWORD, TenantFixture
 pytestmark = pytest.mark.django_db(databases=ALL_DATABASES)
 
 
+def test_customer_search_by_name_email_and_phone(
+    make_user: Callable[..., Any],
+    tenants: dict[str, TenantFixture],
+    client_for: Callable[..., APIClient],
+) -> None:
+    client = client_for(make_user("owner", tenant=tenants["acme"]), "acme")
+    client.post(
+        "/api/v1/customers/",
+        {"name": "Acme Holdings", "email": "ops@acme.test", "phone": "+77011234567"},
+        format="json",
+    )
+    client.post("/api/v1/customers/", {"name": "Beta Corp", "email": "hi@beta.test"}, format="json")
+
+    by_name = client.get("/api/v1/customers/?search=acme").json()
+    assert {c["name"] for c in by_name["results"]} == {"Acme Holdings"}
+
+    by_email = client.get("/api/v1/customers/?search=beta.test").json()
+    assert {c["name"] for c in by_email["results"]} == {"Beta Corp"}
+
+    # Phone search matches by digits, ignoring formatting.
+    by_phone = client.get("/api/v1/customers/?search=7011 234").json()
+    assert {c["name"] for c in by_phone["results"]} == {"Acme Holdings"}
+
+
 def test_passwords_are_hashed_with_argon2(make_user: Callable[..., Any]) -> None:
     user = make_user("alice")
     assert user.password.startswith("argon2$")

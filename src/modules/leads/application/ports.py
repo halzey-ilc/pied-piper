@@ -37,6 +37,27 @@ class LeadRepository(Protocol):
     def count(self, visibility: LeadVisibility, *, status: LeadStatus | None) -> int: ...
 
 
+@dataclass(frozen=True, slots=True)
+class DuplicateCandidate:
+    """A possible duplicate of a lead: another lead or an existing customer that
+    shares its e-mail or phone (by digits)."""
+
+    kind: str  # "lead" or "customer"
+    id: UUID
+    name: str
+    email: str | None
+    phone: str | None
+    status: str | None = None  # lead status, when kind == "lead"
+
+
+class DuplicateFinder(Protocol):
+    """Finds leads and customers in the tenant that match a lead's e-mail or phone."""
+
+    def find(
+        self, *, exclude_lead_id: UUID, email: str | None, phone_digits: str | None
+    ) -> list[DuplicateCandidate]: ...
+
+
 class CustomerCreation(Protocol):
     """Port to the customers context, used when a lead is converted.
 

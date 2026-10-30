@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from decimal import Decimal
 from typing import Any
 
 from rest_framework import serializers
 
+from modules.leads.application.ports import DuplicateCandidate
 from modules.leads.domain.lead import MAX_NAME_LENGTH, Lead, LeadSource
 
 
@@ -49,10 +51,49 @@ class LeadListSerializer(serializers.Serializer[dict[str, Any]]):
     results = LeadReadSerializer(many=True, read_only=True)
 
 
+class ConvertDealSerializer(serializers.Serializer[dict[str, Any]]):
+    title = serializers.CharField(max_length=200)
+    amount = serializers.DecimalField(max_digits=16, decimal_places=2, min_value=Decimal(0))
+    currency = serializers.CharField(required=False, max_length=3)
+    pipeline_id = serializers.UUIDField(required=False)
+
+
+class LeadConvertSerializer(serializers.Serializer[dict[str, Any]]):
+    # Optionally open a deal for the new customer as part of the conversion.
+    create_deal = ConvertDealSerializer(required=False)
+
+
 class ConversionResultSerializer(serializers.Serializer[dict[str, Any]]):
     lead = LeadReadSerializer(read_only=True)
     customer_id = serializers.UUIDField(read_only=True)
     already_converted = serializers.BooleanField(read_only=True)
+    # Present only when create_deal was requested.
+    deal_id = serializers.UUIDField(read_only=True, allow_null=True)
+
+
+class DuplicateCandidateSerializer(serializers.Serializer[dict[str, Any]]):
+    kind = serializers.CharField(read_only=True)
+    id = serializers.UUIDField(read_only=True)
+    name = serializers.CharField(read_only=True)
+    email = serializers.EmailField(read_only=True, allow_null=True)
+    phone = serializers.CharField(read_only=True, allow_null=True)
+    status = serializers.CharField(read_only=True, allow_null=True)
+
+
+class DuplicatesListSerializer(serializers.Serializer[dict[str, Any]]):
+    count = serializers.IntegerField(read_only=True)
+    results = DuplicateCandidateSerializer(many=True, read_only=True)
+
+
+def duplicate_to_dict(candidate: DuplicateCandidate) -> dict[str, Any]:
+    return {
+        "kind": candidate.kind,
+        "id": str(candidate.id),
+        "name": candidate.name,
+        "email": candidate.email,
+        "phone": candidate.phone,
+        "status": candidate.status,
+    }
 
 
 def lead_to_dict(lead: Lead) -> dict[str, Any]:
