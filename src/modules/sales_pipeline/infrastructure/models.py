@@ -4,6 +4,7 @@ from django.db import models
 from django.db.models import Q
 
 from modules.sales_pipeline.domain.deal import DealStatus
+from modules.sales_pipeline.domain.pipeline import StageKind
 
 
 class PipelineRecord(models.Model):
@@ -33,6 +34,12 @@ class StageRecord(models.Model):
     name = models.CharField(max_length=100)
     position = models.PositiveSmallIntegerField()
     probability = models.PositiveSmallIntegerField(default=0)
+    kind = models.CharField(
+        max_length=4,
+        choices=[(k.value, k.name.title()) for k in StageKind],
+        default=StageKind.OPEN.value,
+    )
+    is_active = models.BooleanField(default=True)
 
     class Meta:
         db_table = "sales_stage"

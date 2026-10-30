@@ -26,7 +26,7 @@ from modules.sales_pipeline.application.ports import (
     PipelineRepository,
 )
 from modules.sales_pipeline.domain.deal import Deal
-from modules.sales_pipeline.domain.pipeline import Pipeline
+from modules.sales_pipeline.domain.pipeline import Pipeline, StageKind
 from platform_core.application.ports import EventOutbox
 from shared.application.ports import UnitOfWork
 from shared.domain.errors import ConflictError, DomainValidationError, NotFoundError
@@ -163,18 +163,35 @@ class DealService:
                 self._record(principal, "deal.updated", deal)
         return deal
 
-    def move_stage(self, principal: Principal, deal_id: UUID, stage_id: UUID) -> Deal:
+    def move_stage(
+        self, principal: Principal, deal_id: UUID, stage_id: UUID, *, reason: str | None = None
+    ) -> Deal:
+        """Transition a deal to a stage. A won/lost-kind stage closes the deal
+        (a lost stage needs ``reason``); an open-kind stage just moves it."""
         with self._uow:
             deal = self._load_for_write(principal, deal_id)
             pipeline = self._pipelines.get(deal.pipeline_id)
-            if pipeline is None or not pipeline.has_stage(stage_id):
+            if pipeline is None:
                 raise NotFoundError("Stage does not belong to the deal's pipeline.")
+            stage = pipeline.stage(stage_id)  # 404 if not in this pipeline
+            if not stage.is_active:
+                raise DomainValidationError("That stage is no longer active.")
             version = deal.version
-            event = deal.move_to(stage_id)
+            if stage.kind is StageKind.WON:
+                event: DomainEvent | None = deal.win(stage_id=stage_id)
+                audit_action = "deal.won"
+            elif stage.kind is StageKind.LOST:
+                if reason is None or not reason.strip():
+                    raise DomainValidationError("A loss reason is required to lose a deal.")
+                event = deal.lose(reason, stage_id=stage_id)
+                audit_action = "deal.lost"
+            else:
+                event = deal.move_to(stage_id)
+                audit_action = "deal.stage_changed"
             if event is not None:
                 self._deals.save(deal, expected_version=version)
                 self._emit(event, deal)
-                self._record(principal, "deal.stage_changed", deal)
+                self._record(principal, audit_action, deal)
         return deal
 
     def win(self, principal: Principal, deal_id: UUID) -> Deal:

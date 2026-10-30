@@ -216,3 +216,111 @@ def test_cross_tenant_isolation(
     assert client_for(alice, "acme").get(f"/api/v1/sales/deals/{bob_deal}/").status_code == 404
     assert DealRecord.objects.using("tenant_globex").get().title == "Globex deal"
     assert DealRecord.objects.using("tenant_acme").count() == 0
+
+
+# --- stage kinds (open/won/lost) and transitions ---------------------------
+
+_KIND_STAGES = [
+    {"name": "New", "probability": 10},  # defaults to kind=open
+    {"name": "Closed won", "probability": 100, "kind": "won"},
+    {"name": "Closed lost", "probability": 0, "kind": "lost"},
+]
+
+
+def _kind_pipeline(client: APIClient, *, name: str = "Kinds") -> dict[str, Any]:
+    response = client.post(
+        "/api/v1/sales/pipelines/",
+        {"name": name, "is_default": True, "stages": _KIND_STAGES},
+        format="json",
+    )
+    assert response.status_code == 201, response.content
+    data: dict[str, Any] = response.json()
+    return data
+
+
+def test_stage_read_exposes_kind_and_active_defaults(
+    make_user: Callable[..., Any],
+    tenants: dict[str, TenantFixture],
+    client_for: Callable[..., APIClient],
+) -> None:
+    client = client_for(make_user("owner", tenant=tenants["acme"]), "acme")
+    pipeline = _pipeline(client)  # plain _STAGES, no explicit kind
+    for stage in pipeline["stages"]:
+        assert stage["kind"] == "open"
+        assert stage["is_active"] is True
+
+
+def test_pipeline_requires_at_least_one_open_stage(
+    make_user: Callable[..., Any],
+    tenants: dict[str, TenantFixture],
+    client_for: Callable[..., APIClient],
+) -> None:
+    client = client_for(make_user("owner", tenant=tenants["acme"]), "acme")
+    response = client.post(
+        "/api/v1/sales/pipelines/",
+        {
+            "name": "No open",
+            "is_default": True,
+            "stages": [
+                {"name": "Won", "kind": "won"},
+                {"name": "Lost", "kind": "lost"},
+            ],
+        },
+        format="json",
+    )
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "validation_error"
+
+
+def test_transition_to_won_stage_closes_deal_as_won(
+    make_user: Callable[..., Any],
+    tenants: dict[str, TenantFixture],
+    client_for: Callable[..., APIClient],
+) -> None:
+    client = client_for(make_user("owner", tenant=tenants["acme"]), "acme")
+    pipeline = _kind_pipeline(client)
+    won_stage = next(s for s in pipeline["stages"] if s["kind"] == "won")
+    deal_id = _deal(client, amount="4000.00")["id"]
+
+    response = client.post(
+        f"/api/v1/sales/deals/{deal_id}/stage/",
+        {"stage_id": won_stage["id"]},
+        format="json",
+    )
+    assert response.status_code == 200, response.content
+    body = response.json()
+    assert body["status"] == "won"
+    assert body["stage_id"] == won_stage["id"]
+    assert body["closed_at"] is not None
+
+    events = set(OutboxMessage.objects.using("tenant_acme").values_list("event_type", flat=True))
+    assert "sales.deal_won" in events
+
+
+def test_transition_to_lost_stage_requires_reason(
+    make_user: Callable[..., Any],
+    tenants: dict[str, TenantFixture],
+    client_for: Callable[..., APIClient],
+) -> None:
+    client = client_for(make_user("owner", tenant=tenants["acme"]), "acme")
+    pipeline = _kind_pipeline(client)
+    lost_stage = next(s for s in pipeline["stages"] if s["kind"] == "lost")
+    deal_id = _deal(client)["id"]
+
+    without_reason = client.post(
+        f"/api/v1/sales/deals/{deal_id}/stage/",
+        {"stage_id": lost_stage["id"]},
+        format="json",
+    )
+    assert without_reason.status_code == 400
+
+    with_reason = client.post(
+        f"/api/v1/sales/deals/{deal_id}/stage/",
+        {"stage_id": lost_stage["id"], "reason": "budget cut"},
+        format="json",
+    )
+    assert with_reason.status_code == 200, with_reason.content
+    body = with_reason.json()
+    assert body["status"] == "lost"
+    assert body["stage_id"] == lost_stage["id"]
+    assert body["lost_reason"] == "budget cut"

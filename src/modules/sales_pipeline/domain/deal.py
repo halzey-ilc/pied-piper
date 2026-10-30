@@ -188,20 +188,26 @@ class Deal:
         self.version += 1
         return event
 
-    def win(self) -> DealWon:
+    def win(self, *, stage_id: UUID | None = None) -> DealWon:
+        """Close the deal as won. ``stage_id`` relocates it to the won stage."""
         self._require_open("won")
         self.status = DealStatus.WON
+        if stage_id is not None:
+            self.stage_id = stage_id
         self.closed_at = datetime.now(UTC)
         self.lost_reason = None
         self.version += 1
         return DealWon(deal_id=self.id, amount=str(self.value.amount), currency=self.value.currency)
 
-    def lose(self, reason: str) -> DealLost:
+    def lose(self, reason: str, *, stage_id: UUID | None = None) -> DealLost:
+        """Close the deal as lost. ``stage_id`` relocates it to the lost stage."""
         self._require_open("lost")
         cleaned = " ".join(reason.split())
         if not cleaned:
             raise DomainValidationError("A loss reason is required.")
         self.status = DealStatus.LOST
+        if stage_id is not None:
+            self.stage_id = stage_id
         self.closed_at = datetime.now(UTC)
         self.lost_reason = cleaned[:MAX_REASON_LENGTH]
         self.version += 1

@@ -8,7 +8,7 @@ from typing import Any
 from rest_framework import serializers
 
 from modules.sales_pipeline.domain.deal import MAX_TITLE_LENGTH, Deal
-from modules.sales_pipeline.domain.pipeline import MAX_STAGES, Pipeline
+from modules.sales_pipeline.domain.pipeline import MAX_STAGES, Pipeline, StageKind
 
 # --- pipelines --------------------------------------------------------------
 
@@ -16,6 +16,9 @@ from modules.sales_pipeline.domain.pipeline import MAX_STAGES, Pipeline
 class StageDefinitionSerializer(serializers.Serializer[dict[str, Any]]):
     name = serializers.CharField(max_length=100)
     probability = serializers.IntegerField(min_value=0, max_value=100, default=0)
+    kind = serializers.ChoiceField(
+        choices=[k.value for k in StageKind], default=StageKind.OPEN.value
+    )
 
 
 class PipelineCreateSerializer(serializers.Serializer[dict[str, Any]]):
@@ -32,6 +35,8 @@ class StageReadSerializer(serializers.Serializer[dict[str, Any]]):
     name = serializers.CharField(read_only=True)
     position = serializers.IntegerField(read_only=True)
     probability = serializers.IntegerField(read_only=True)
+    kind = serializers.CharField(read_only=True)
+    is_active = serializers.BooleanField(read_only=True)
 
 
 class PipelineReadSerializer(serializers.Serializer[dict[str, Any]]):
@@ -69,6 +74,8 @@ class DealUpdateSerializer(serializers.Serializer[dict[str, Any]]):
 
 class DealMoveSerializer(serializers.Serializer[dict[str, Any]]):
     stage_id = serializers.UUIDField()
+    # Required only when the target stage is a lost-kind stage.
+    reason = serializers.CharField(required=False, max_length=500, allow_blank=False)
 
 
 class DealLoseSerializer(serializers.Serializer[dict[str, Any]]):
@@ -108,6 +115,8 @@ def pipeline_to_dict(pipeline: Pipeline) -> dict[str, Any]:
                 "name": stage.name,
                 "position": stage.position,
                 "probability": stage.probability,
+                "kind": stage.kind.value,
+                "is_active": stage.is_active,
             }
             for stage in sorted(pipeline.stages, key=lambda s: s.position)
         ],

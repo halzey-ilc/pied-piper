@@ -14,7 +14,7 @@ from modules.sales_pipeline.application.pipeline_service import CreatePipeline
 from modules.sales_pipeline.application.ports import DealFilter
 from modules.sales_pipeline.composition import deal_service, pipeline_service
 from modules.sales_pipeline.domain.deal import DealStatus
-from modules.sales_pipeline.domain.pipeline import StageDefinition
+from modules.sales_pipeline.domain.pipeline import StageDefinition, StageKind
 from modules.sales_pipeline.presentation.serializers import (
     DealCreateSerializer,
     DealListSerializer,
@@ -125,7 +125,11 @@ class PipelineListCreateView(_Scoped):
                 name=data["name"],
                 is_default=data["is_default"],
                 stages=[
-                    StageDefinition(name=s["name"], probability=s["probability"])
+                    StageDefinition(
+                        name=s["name"],
+                        probability=s["probability"],
+                        kind=StageKind(s["kind"]),
+                    )
                     for s in data["stages"]
                 ],
             ),
@@ -268,7 +272,11 @@ class DealMoveView(_Scoped):
         tags=_DEAL_TAGS,
         operation_id="deals_move_stage",
         summary="Move a deal to another stage",
-        description="Moves an open deal to a stage of its own pipeline.",
+        description=(
+            "Transitions an open deal to a stage of its own pipeline. Moving into a "
+            "`won`-kind stage closes the deal as won; a `lost`-kind stage closes it as lost "
+            "and requires `reason`. An `open`-kind stage just moves the deal."
+        ),
         parameters=[_TENANT_HEADER],
         request=DealMoveSerializer,
         responses=DealReadSerializer,
@@ -277,7 +285,10 @@ class DealMoveView(_Scoped):
         serializer = DealMoveSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         deal = deal_service().move_stage(
-            self.principal(), deal_id, serializer.validated_data["stage_id"]
+            self.principal(),
+            deal_id,
+            serializer.validated_data["stage_id"],
+            reason=serializer.validated_data.get("reason"),
         )
         return Response(deal_to_dict(deal))
 

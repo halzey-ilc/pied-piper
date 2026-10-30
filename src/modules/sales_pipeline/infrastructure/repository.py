@@ -7,7 +7,7 @@ from django.db.models import F, Q, QuerySet
 
 from modules.sales_pipeline.application.ports import DealFilter, DealVisibility
 from modules.sales_pipeline.domain.deal import Deal, DealStatus
-from modules.sales_pipeline.domain.pipeline import Pipeline, Stage
+from modules.sales_pipeline.domain.pipeline import Pipeline, Stage, StageKind
 from modules.sales_pipeline.infrastructure.models import DealRecord, PipelineRecord, StageRecord
 from shared.domain.errors import ConflictError
 from shared.domain.value_objects import Money
@@ -15,7 +15,14 @@ from shared.domain.value_objects import Money
 
 def _pipeline_to_domain(row: PipelineRecord) -> Pipeline:
     stages = tuple(
-        Stage(id=s.id, name=s.name, position=s.position, probability=s.probability)
+        Stage(
+            id=s.id,
+            name=s.name,
+            position=s.position,
+            probability=s.probability,
+            kind=StageKind(s.kind),
+            is_active=s.is_active,
+        )
         for s in row.stages.all()
     )
     return Pipeline(
@@ -65,6 +72,8 @@ class DjangoPipelineRepository:
                     name=stage.name,
                     position=stage.position,
                     probability=stage.probability,
+                    kind=stage.kind.value,
+                    is_active=stage.is_active,
                 )
                 for stage in pipeline.stages
             )
