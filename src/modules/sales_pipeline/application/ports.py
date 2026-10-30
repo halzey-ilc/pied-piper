@@ -5,6 +5,7 @@ from decimal import Decimal
 from typing import Protocol
 from uuid import UUID
 
+from modules.sales_pipeline.domain.custom_field import CustomFieldDefinition
 from modules.sales_pipeline.domain.deal import Deal, DealStatus
 from modules.sales_pipeline.domain.loss_reason import LossReason
 from modules.sales_pipeline.domain.pipeline import Pipeline
@@ -87,3 +88,15 @@ class StageChangeRepository(Protocol):
     def add(self, change: StageChange) -> None: ...
 
     def list_for_deal(self, deal_id: UUID) -> list[StageChange]: ...
+
+
+class CustomFieldRepository(Protocol):
+    def add(self, definition: CustomFieldDefinition) -> None: ...
+
+    def get(self, definition_id: UUID) -> CustomFieldDefinition | None: ...
+
+    def list_all(self, *, active_only: bool = False) -> list[CustomFieldDefinition]: ...
+
+    def save(self, definition: CustomFieldDefinition) -> None: ...
+
+    def exists_by_key(self, key: str) -> bool: ...

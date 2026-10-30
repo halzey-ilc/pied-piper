@@ -1,6 +1,8 @@
 from django.urls import path
 
 from modules.sales_pipeline.presentation.views import (
+    CustomFieldDetailView,
+    CustomFieldListCreateView,
     DealDetailView,
     DealListCreateView,
     DealLoseView,
@@ -22,6 +24,12 @@ urlpatterns = [
         "loss-reasons/<uuid:loss_reason_id>/",
         LossReasonDetailView.as_view(),
         name="loss-reason-detail",
+    ),
+    path("custom-fields/", CustomFieldListCreateView.as_view(), name="custom-field-list"),
+    path(
+        "custom-fields/<uuid:field_id>/",
+        CustomFieldDetailView.as_view(),
+        name="custom-field-detail",
     ),
     path("deals/", DealListCreateView.as_view(), name="deal-list"),
     path("deals/<uuid:deal_id>/", DealDetailView.as_view(), name="deal-detail"),

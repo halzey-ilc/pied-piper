@@ -3,6 +3,7 @@ from __future__ import annotations
 from django.db import models
 from django.db.models import Q
 
+from modules.sales_pipeline.domain.custom_field import CustomFieldType
 from modules.sales_pipeline.domain.deal import DealStatus
 from modules.sales_pipeline.domain.pipeline import StageKind
 
@@ -70,6 +71,29 @@ class LossReasonRecord(models.Model):
         return self.name
 
 
+class CustomFieldDefinitionRecord(models.Model):
+    id = models.UUIDField(primary_key=True, editable=False)
+    key = models.CharField(max_length=50)
+    label = models.CharField(max_length=100)
+    field_type = models.CharField(
+        max_length=16, choices=[(t.value, t.name.title()) for t in CustomFieldType]
+    )
+    options = models.JSONField(default=list)
+    required = models.BooleanField(default=False)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField()
+
+    class Meta:
+        db_table = "sales_custom_field"
+        constraints = [
+            models.UniqueConstraint(fields=["key"], name="sales_custom_field_key"),
+        ]
+        ordering = ["created_at"]
+
+    def __str__(self) -> str:
+        return f"{self.label} ({self.key})"
+
+
 class DealRecord(models.Model):
     id = models.UUIDField(primary_key=True, editable=False)
     title = models.CharField(max_length=200)
@@ -87,6 +111,7 @@ class DealRecord(models.Model):
     team_id = models.UUIDField(null=True, blank=True)
     source = models.CharField(max_length=100, null=True, blank=True)  # noqa: DJ001
     next_step = models.CharField(max_length=500, null=True, blank=True)  # noqa: DJ001
+    custom_fields = models.JSONField(default=dict)
     expected_close_date = models.DateField(null=True, blank=True)
     closed_at = models.DateTimeField(null=True, blank=True)
     lost_reason = models.CharField(max_length=500, null=True, blank=True)  # noqa: DJ001

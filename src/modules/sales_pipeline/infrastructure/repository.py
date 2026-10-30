@@ -6,11 +6,13 @@ from django.db import transaction
 from django.db.models import F, Q, QuerySet
 
 from modules.sales_pipeline.application.ports import DealFilter, DealVisibility
+from modules.sales_pipeline.domain.custom_field import CustomFieldDefinition, CustomFieldType
 from modules.sales_pipeline.domain.deal import Deal, DealStatus
 from modules.sales_pipeline.domain.loss_reason import LossReason
 from modules.sales_pipeline.domain.pipeline import Pipeline, Stage, StageKind
 from modules.sales_pipeline.domain.stage_change import StageChange
 from modules.sales_pipeline.infrastructure.models import (
+    CustomFieldDefinitionRecord,
     DealRecord,
     DealStageChangeRecord,
     LossReasonRecord,
@@ -55,6 +57,7 @@ def _deal_to_domain(row: DealRecord) -> Deal:
         team_id=row.team_id,
         source=row.source,
         next_step=row.next_step,
+        custom_fields=dict(row.custom_fields or {}),
         expected_close_date=row.expected_close_date,
         closed_at=row.closed_at,
         lost_reason=row.lost_reason,
@@ -159,6 +162,7 @@ class DjangoDealRepository:
             team_id=deal.team_id,
             source=deal.source,
             next_step=deal.next_step,
+            custom_fields=deal.custom_fields,
             expected_close_date=deal.expected_close_date,
             closed_at=deal.closed_at,
             lost_reason=deal.lost_reason,
@@ -184,6 +188,7 @@ class DjangoDealRepository:
                 customer_id=deal.customer_id,
                 source=deal.source,
                 next_step=deal.next_step,
+                custom_fields=deal.custom_fields,
                 expected_close_date=deal.expected_close_date,
                 closed_at=deal.closed_at,
                 lost_reason=deal.lost_reason,
@@ -278,3 +283,54 @@ class DjangoStageChangeRepository:
             .order_by("created_at", "id")
         )
         return [_stage_change_to_domain(row) for row in rows]
+
+
+def _custom_field_to_domain(row: CustomFieldDefinitionRecord) -> CustomFieldDefinition:
+    return CustomFieldDefinition(
+        id=row.id,
+        key=row.key,
+        label=row.label,
+        field_type=CustomFieldType(row.field_type),
+        options=tuple(row.options or ()),
+        required=row.required,
+        is_active=row.is_active,
+        created_at=row.created_at,
+    )
+
+
+class DjangoCustomFieldRepository:
+    def __init__(self, using: str) -> None:
+        self.using = using
+
+    def add(self, definition: CustomFieldDefinition) -> None:
+        CustomFieldDefinitionRecord.objects.using(self.using).create(
+            id=definition.id,
+            key=definition.key,
+            label=definition.label,
+            field_type=definition.field_type.value,
+            options=list(definition.options),
+            required=definition.required,
+            is_active=definition.is_active,
+            created_at=definition.created_at,
+        )
+
+    def get(self, definition_id: UUID) -> CustomFieldDefinition | None:
+        row = CustomFieldDefinitionRecord.objects.using(self.using).filter(id=definition_id).first()
+        return None if row is None else _custom_field_to_domain(row)
+
+    def list_all(self, *, active_only: bool = False) -> list[CustomFieldDefinition]:
+        qs = CustomFieldDefinitionRecord.objects.using(self.using)
+        if active_only:
+            qs = qs.filter(is_active=True)
+        return [_custom_field_to_domain(row) for row in qs.order_by("created_at")]
+
+    def save(self, definition: CustomFieldDefinition) -> None:
+        CustomFieldDefinitionRecord.objects.using(self.using).filter(id=definition.id).update(
+            label=definition.label,
+            options=list(definition.options),
+            required=definition.required,
+            is_active=definition.is_active,
+        )
+
+    def exists_by_key(self, key: str) -> bool:
+        return CustomFieldDefinitionRecord.objects.using(self.using).filter(key=key).exists()

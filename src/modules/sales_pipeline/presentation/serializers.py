@@ -7,6 +7,7 @@ from typing import Any
 
 from rest_framework import serializers
 
+from modules.sales_pipeline.domain.custom_field import CustomFieldDefinition, CustomFieldType
 from modules.sales_pipeline.domain.deal import MAX_TITLE_LENGTH, Deal
 from modules.sales_pipeline.domain.loss_reason import LossReason
 from modules.sales_pipeline.domain.pipeline import MAX_STAGES, Pipeline, StageKind
@@ -66,6 +67,7 @@ class DealCreateSerializer(serializers.Serializer[dict[str, Any]]):
     next_step = serializers.CharField(
         required=False, allow_null=True, allow_blank=True, max_length=500
     )
+    custom_fields = serializers.DictField(required=False)
     expected_close_date = serializers.DateField(required=False, allow_null=True)
 
 
@@ -82,6 +84,7 @@ class DealUpdateSerializer(serializers.Serializer[dict[str, Any]]):
     next_step = serializers.CharField(
         required=False, allow_null=True, allow_blank=True, max_length=500
     )
+    custom_fields = serializers.DictField(required=False)
     expected_close_date = serializers.DateField(required=False, allow_null=True)
     version = serializers.IntegerField(required=False, min_value=1)
 
@@ -153,6 +156,7 @@ class DealReadSerializer(serializers.Serializer[dict[str, Any]]):
     owner_user_id = serializers.UUIDField(read_only=True)
     source = serializers.CharField(read_only=True, allow_null=True)  # type: ignore[assignment]
     next_step = serializers.CharField(read_only=True, allow_null=True)
+    custom_fields = serializers.DictField(read_only=True)
     expected_close_date = serializers.DateField(read_only=True, allow_null=True)
     closed_at = serializers.DateTimeField(read_only=True, allow_null=True)
     lost_reason = serializers.CharField(read_only=True, allow_null=True)
@@ -199,6 +203,7 @@ def deal_to_dict(deal: Deal) -> dict[str, Any]:
         "owner_user_id": str(deal.owner_user_id),
         "source": deal.source,
         "next_step": deal.next_step,
+        "custom_fields": deal.custom_fields,
         "expected_close_date": (
             deal.expected_close_date.isoformat() if deal.expected_close_date else None
         ),
@@ -229,4 +234,51 @@ def stage_change_to_dict(change: StageChange) -> dict[str, Any]:
         "reason": change.reason,
         "loss_reason_id": str(change.loss_reason_id) if change.loss_reason_id else None,
         "created_at": change.created_at.isoformat(),
+    }
+
+
+# --- custom field definitions -----------------------------------------------
+
+
+class CustomFieldCreateSerializer(serializers.Serializer[dict[str, Any]]):
+    key = serializers.CharField(max_length=50)
+    label = serializers.CharField(max_length=100)  # type: ignore[assignment]  # DRF Field.label
+    field_type = serializers.ChoiceField(choices=[t.value for t in CustomFieldType])
+    options = serializers.ListField(child=serializers.CharField(max_length=100), required=False)
+    required = serializers.BooleanField(default=False)  # type: ignore[assignment]
+
+
+class CustomFieldUpdateSerializer(serializers.Serializer[dict[str, Any]]):
+    label = serializers.CharField(required=False, max_length=100)  # type: ignore[assignment]
+    options = serializers.ListField(child=serializers.CharField(max_length=100), required=False)
+    required = serializers.BooleanField(required=False)  # type: ignore[assignment]
+    is_active = serializers.BooleanField(required=False)
+
+
+class CustomFieldReadSerializer(serializers.Serializer[dict[str, Any]]):
+    id = serializers.UUIDField(read_only=True)
+    key = serializers.CharField(read_only=True)
+    label = serializers.CharField(read_only=True)  # type: ignore[assignment]  # DRF Field.label
+    field_type = serializers.CharField(read_only=True)
+    options = serializers.ListField(child=serializers.CharField(), read_only=True)
+    required = serializers.BooleanField(read_only=True)  # type: ignore[assignment]
+    is_active = serializers.BooleanField(read_only=True)
+    created_at = serializers.DateTimeField(read_only=True)
+
+
+class CustomFieldListSerializer(serializers.Serializer[dict[str, Any]]):
+    count = serializers.IntegerField(read_only=True)
+    results = CustomFieldReadSerializer(many=True, read_only=True)
+
+
+def custom_field_to_dict(definition: CustomFieldDefinition) -> dict[str, Any]:
+    return {
+        "id": str(definition.id),
+        "key": definition.key,
+        "label": definition.label,
+        "field_type": definition.field_type.value,
+        "options": list(definition.options),
+        "required": definition.required,
+        "is_active": definition.is_active,
+        "created_at": definition.created_at.isoformat(),
     }

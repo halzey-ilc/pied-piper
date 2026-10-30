@@ -400,6 +400,88 @@ def test_lose_via_catalog_reason(
     assert bad.status_code == 400
 
 
+def test_custom_fields_definition_validation_and_values(
+    make_user: Callable[..., Any],
+    tenants: dict[str, TenantFixture],
+    client_for: Callable[..., APIClient],
+) -> None:
+    owner = client_for(make_user("owner", tenant=tenants["acme"]), "acme")
+    rep = client_for(make_user("rep", tenant=tenants["acme"], role=Role.SALES_REP), "acme")
+    _pipeline(owner)
+
+    # Managers cannot define custom fields.
+    assert (
+        rep.post(
+            "/api/v1/sales/custom-fields/",
+            {"key": "x", "label": "X", "field_type": "text"},
+            format="json",
+        ).status_code
+        == 403
+    )
+
+    segment = owner.post(
+        "/api/v1/sales/custom-fields/",
+        {
+            "key": "segment",
+            "label": "Segment",
+            "field_type": "single_select",
+            "options": ["smb", "enterprise"],
+            "required": True,
+        },
+        format="json",
+    )
+    assert segment.status_code == 201, segment.content
+    assert (
+        owner.post(
+            "/api/v1/sales/custom-fields/",
+            {"key": "seats", "label": "Seats", "field_type": "number"},
+            format="json",
+        ).status_code
+        == 201
+    )
+
+    # Missing a required field, a bad select value, and an unknown key are all rejected.
+    assert (
+        owner.post(
+            "/api/v1/sales/deals/",
+            {"title": "x", "amount": "1", "custom_fields": {"seats": 5}},
+            format="json",
+        ).status_code
+        == 400
+    )
+    assert (
+        owner.post(
+            "/api/v1/sales/deals/",
+            {"title": "x", "amount": "1", "custom_fields": {"segment": "nope"}},
+            format="json",
+        ).status_code
+        == 400
+    )
+    assert (
+        owner.post(
+            "/api/v1/sales/deals/",
+            {"title": "x", "amount": "1", "custom_fields": {"segment": "smb", "ghost": 1}},
+            format="json",
+        ).status_code
+        == 400
+    )
+
+    # A valid custom-field map is stored and returned.
+    deal = _deal(owner, custom_fields={"segment": "smb", "seats": 5})
+    assert deal["custom_fields"] == {"segment": "smb", "seats": 5}
+
+    # Deactivating the required field relaxes it (and its key becomes unknown).
+    field_id = segment.json()["id"]
+    assert (
+        owner.patch(
+            f"/api/v1/sales/custom-fields/{field_id}/", {"is_active": False}, format="json"
+        ).status_code
+        == 200
+    )
+    deal2 = _deal(owner, title="Later", custom_fields={"seats": 3})
+    assert deal2["custom_fields"] == {"seats": 3}
+
+
 def test_deal_source_and_next_step(
     make_user: Callable[..., Any],
     tenants: dict[str, TenantFixture],

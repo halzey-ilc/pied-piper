@@ -7,6 +7,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
+from typing import Any
 from uuid import UUID
 
 from modules.access_control.domain.rbac import (
@@ -20,6 +21,7 @@ from modules.audit.application.ports import AuditLog
 from modules.audit.domain.entry import AuditEntry
 from modules.sales_pipeline.application.ports import (
     CustomerLookup,
+    CustomFieldRepository,
     DealFilter,
     DealRepository,
     DealVisibility,
@@ -27,6 +29,7 @@ from modules.sales_pipeline.application.ports import (
     PipelineRepository,
     StageChangeRepository,
 )
+from modules.sales_pipeline.domain.custom_field import validate_custom_fields
 from modules.sales_pipeline.domain.deal import Deal, DealStatus
 from modules.sales_pipeline.domain.pipeline import Pipeline, StageKind
 from modules.sales_pipeline.domain.stage_change import StageChange
@@ -48,6 +51,7 @@ class OpenDeal:
     customer_id: UUID | None = None
     source: str | None = None
     next_step: str | None = None
+    custom_fields: dict[str, Any] | None = None
     expected_close_date: date | None = None
 
 
@@ -64,6 +68,8 @@ class EditDeal:
     set_source: bool = False
     next_step: str | None = None
     set_next_step: bool = False
+    custom_fields: dict[str, Any] | None = None
+    set_custom_fields: bool = False
     expected_close_date: date | None = None
     set_expected_close: bool = False
 
@@ -89,6 +95,7 @@ class DealService:
         audit: AuditLog,
         loss_reasons: LossReasonRepository | None = None,
         stage_changes: StageChangeRepository | None = None,
+        custom_fields: CustomFieldRepository | None = None,
         policy: AccessPolicy | None = None,
     ) -> None:
         self._deals = deals
@@ -99,6 +106,7 @@ class DealService:
         self._audit = audit
         self._loss_reasons = loss_reasons
         self._stage_changes = stage_changes
+        self._custom_fields = custom_fields
         self._policy = policy or AccessPolicy()
 
     # --- reads --------------------------------------------------------------
@@ -142,6 +150,7 @@ class DealService:
             pipeline = self._resolve_pipeline(command.pipeline_id)
             if command.customer_id is not None and not self._customers.exists(command.customer_id):
                 raise NotFoundError("Linked customer not found.")
+            custom_fields = self._validated_custom_fields(command.custom_fields, require_all=True)
             deal, event = Deal.open(
                 title=command.title,
                 pipeline_id=pipeline.id,
@@ -152,6 +161,7 @@ class DealService:
                 customer_id=command.customer_id,
                 source=command.source,
                 next_step=command.next_step,
+                custom_fields=custom_fields,
                 expected_close_date=command.expected_close_date,
             )
             self._deals.add(deal)
@@ -170,6 +180,11 @@ class DealService:
             ):
                 raise NotFoundError("Linked customer not found.")
             value = self._money_update(deal, command)
+            custom_fields = (
+                self._validated_custom_fields(command.custom_fields, require_all=True)
+                if command.set_custom_fields
+                else None
+            )
             version = deal.version
             changed = deal.update_details(
                 title=command.title,
@@ -180,6 +195,8 @@ class DealService:
                 set_source=command.set_source,
                 next_step=command.next_step,
                 set_next_step=command.set_next_step,
+                custom_fields=custom_fields,
+                set_custom_fields=command.set_custom_fields,
                 expected_close_date=command.expected_close_date,
                 set_expected_close=command.set_expected_close,
             )
@@ -280,6 +297,14 @@ class DealService:
             self._emit(event, deal)
             self._record(principal, audit_action, deal)
         return deal
+
+    def _validated_custom_fields(
+        self, values: dict[str, Any] | None, *, require_all: bool
+    ) -> dict[str, Any] | None:
+        if values is None:
+            return None
+        definitions = self._custom_fields.list_all(active_only=True) if self._custom_fields else []
+        return validate_custom_fields(definitions, values, require_all=require_all)
 
     def _resolve_pipeline(self, pipeline_id: UUID | None) -> Pipeline:
         pipeline = (

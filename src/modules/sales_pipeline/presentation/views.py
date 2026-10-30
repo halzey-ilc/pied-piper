@@ -9,14 +9,28 @@ from rest_framework.response import Response
 
 from modules.access_control.domain.rbac import Principal, Role
 from modules.organizations.composition import company_settings
+from modules.sales_pipeline.application.custom_field_service import (
+    CreateCustomField,
+    UpdateCustomField,
+)
 from modules.sales_pipeline.application.deal_service import EditDeal, OpenDeal
 from modules.sales_pipeline.application.loss_reason_service import UpdateLossReason
 from modules.sales_pipeline.application.pipeline_service import CreatePipeline
 from modules.sales_pipeline.application.ports import DealFilter
-from modules.sales_pipeline.composition import deal_service, loss_reason_service, pipeline_service
+from modules.sales_pipeline.composition import (
+    custom_field_service,
+    deal_service,
+    loss_reason_service,
+    pipeline_service,
+)
+from modules.sales_pipeline.domain.custom_field import CustomFieldType
 from modules.sales_pipeline.domain.deal import DealStatus
 from modules.sales_pipeline.domain.pipeline import StageDefinition, StageKind
 from modules.sales_pipeline.presentation.serializers import (
+    CustomFieldCreateSerializer,
+    CustomFieldListSerializer,
+    CustomFieldReadSerializer,
+    CustomFieldUpdateSerializer,
     DealCreateSerializer,
     DealListSerializer,
     DealLoseSerializer,
@@ -30,6 +44,7 @@ from modules.sales_pipeline.presentation.serializers import (
     PipelineCreateSerializer,
     PipelineReadSerializer,
     StageChangeListSerializer,
+    custom_field_to_dict,
     deal_to_dict,
     loss_reason_to_dict,
     pipeline_to_dict,
@@ -224,6 +239,7 @@ class DealListCreateView(_Scoped):
                 customer_id=data.get("customer_id"),
                 source=data.get("source"),
                 next_step=data.get("next_step"),
+                custom_fields=data.get("custom_fields"),
                 expected_close_date=data.get("expected_close_date"),
             ),
         )
@@ -274,6 +290,8 @@ class DealDetailView(_Scoped):
                 set_source="source" in request.data,
                 next_step=data.get("next_step"),
                 set_next_step="next_step" in request.data,
+                custom_fields=data.get("custom_fields"),
+                set_custom_fields="custom_fields" in request.data,
                 expected_close_date=data.get("expected_close_date"),
                 set_expected_close="expected_close_date" in request.data,
             ),
@@ -437,6 +455,88 @@ class LossReasonDetailView(_Scoped):
             ),
         )
         return Response(loss_reason_to_dict(reason))
+
+
+# --- custom fields ----------------------------------------------------------
+
+
+class CustomFieldListCreateView(_Scoped):
+    @extend_schema(
+        tags=_PIPELINE_TAGS,
+        operation_id="custom_fields_list",
+        summary="List custom field definitions",
+        description=(
+            "The company's custom deal-field definitions. Pass `active=true` for only the "
+            "active ones (those validated when a deal is created or edited)."
+        ),
+        parameters=[_TENANT_HEADER],
+        responses=CustomFieldListSerializer,
+    )
+    def get(self, request: Request) -> Response:
+        active_only = request.query_params.get("active") in {"1", "true", "True"}
+        fields = custom_field_service().list_fields(self.principal(), active_only=active_only)
+        return Response(
+            {"count": len(fields), "results": [custom_field_to_dict(f) for f in fields]}
+        )
+
+    @extend_schema(
+        tags=_PIPELINE_TAGS,
+        operation_id="custom_fields_create",
+        summary="Define a custom field",
+        description=(
+            "Defines a typed custom field on deals. `field_type` is one of text, number, "
+            "date, datetime, boolean, single_select, multi_select, money, url; select types "
+            "need `options`. Requires the pipelines.manage permission."
+        ),
+        parameters=[_TENANT_HEADER],
+        request=CustomFieldCreateSerializer,
+        responses={201: CustomFieldReadSerializer},
+    )
+    def post(self, request: Request) -> Response:
+        serializer = CustomFieldCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        definition = custom_field_service().create(
+            self.principal(),
+            CreateCustomField(
+                key=data["key"],
+                label=data["label"],
+                field_type=CustomFieldType(data["field_type"]),
+                options=data.get("options", []),
+                required=data["required"],
+            ),
+        )
+        return Response(custom_field_to_dict(definition), status=status.HTTP_201_CREATED)
+
+
+class CustomFieldDetailView(_Scoped):
+    @extend_schema(
+        tags=_PIPELINE_TAGS,
+        operation_id="custom_fields_update",
+        summary="Update a custom field",
+        description=(
+            "Relabels a custom field, changes its options, toggles required or deactivates "
+            "it. Fields are deactivated, never deleted. Requires pipelines.manage."
+        ),
+        parameters=[_TENANT_HEADER],
+        request=CustomFieldUpdateSerializer,
+        responses=CustomFieldReadSerializer,
+    )
+    def patch(self, request: Request, field_id: UUID) -> Response:
+        serializer = CustomFieldUpdateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        definition = custom_field_service().update(
+            self.principal(),
+            UpdateCustomField(
+                definition_id=field_id,
+                label=data.get("label"),
+                options=data.get("options"),
+                required=data.get("required"),
+                is_active=data.get("is_active"),
+            ),
+        )
+        return Response(custom_field_to_dict(definition))
 
 
 def _as_uuid(value: str | None) -> UUID | None:

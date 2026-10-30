@@ -130,6 +130,7 @@ class Deal:
     team_id: UUID | None = None
     source: str | None = None
     next_step: str | None = None
+    custom_fields: dict[str, Any] = field(default_factory=dict)
     expected_close_date: date | None = None
     closed_at: datetime | None = None
     lost_reason: str | None = None
@@ -150,6 +151,7 @@ class Deal:
         team_id: UUID | None = None,
         source: str | None = None,
         next_step: str | None = None,
+        custom_fields: dict[str, Any] | None = None,
         expected_close_date: date | None = None,
     ) -> tuple[Deal, DealCreated]:
         deal = cls(
@@ -163,6 +165,7 @@ class Deal:
             team_id=team_id,
             source=_clean_optional(source, MAX_SOURCE_LENGTH),
             next_step=_clean_optional(next_step, MAX_NEXT_STEP_LENGTH),
+            custom_fields=dict(custom_fields) if custom_fields else {},
             expected_close_date=expected_close_date,
         )
         return deal, DealCreated(
@@ -184,6 +187,8 @@ class Deal:
         set_source: bool = False,
         next_step: str | None = None,
         set_next_step: bool = False,
+        custom_fields: dict[str, Any] | None = None,
+        set_custom_fields: bool = False,
         expected_close_date: date | None = None,
         set_expected_close: bool = False,
     ) -> bool:
@@ -202,6 +207,10 @@ class Deal:
             new_next = _clean_optional(next_step, MAX_NEXT_STEP_LENGTH)
             if new_next != self.next_step:
                 self.next_step, changed = new_next, True
+        if set_custom_fields:
+            new_fields = dict(custom_fields) if custom_fields else {}
+            if new_fields != self.custom_fields:
+                self.custom_fields, changed = new_fields, True
         if set_expected_close and expected_close_date != self.expected_close_date:
             self.expected_close_date, changed = expected_close_date, True
         if changed:
