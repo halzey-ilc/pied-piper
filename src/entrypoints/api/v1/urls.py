@@ -53,6 +53,7 @@ urlpatterns = [
     path("analytics/kpis/", include("modules.sales_kpi.presentation.urls")),
     path("analytics/reports/", include("modules.reporting.presentation.urls")),
     path("", include("modules.planning.presentation.urls")),
+    path("team/", include("modules.team_cabinet.presentation.urls")),
     path("ai/", include("modules.ai_insights.presentation.urls")),
     path("operations/", include("modules.operations.presentation.urls")),
     path("risk/", include("modules.risk.presentation.urls")),

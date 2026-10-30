@@ -317,6 +317,23 @@ OIDC: dict[str, Any] = {
     "AUTO_PROVISION": ENV.OIDC_AUTO_PROVISION,
 }
 
+# Head-of-sales cabinet (modules.team_cabinet). Thresholds are configurable; the
+# RED conditions below are the ones approved in the spec. YELLOW/GREEN rules and
+# the 0-100 day score are NOT finalised by the owner, so YELLOW is off by default
+# (status is RED or GREEN only) until approved — see docs/architecture/security-model
+# and the audit. Do not hardcode unapproved rules.
+TEAM_CABINET: dict[str, Any] = {
+    # RED: a meeting that started more than this many minutes ago with no outcome.
+    "MEETING_OUTCOME_MINUTES": 45,
+    # RED: by this hour, at least this share of the morning meetings must be confirmed.
+    "MORNING_CONFIRM_DEADLINE_HOUR": 10,
+    "MORNING_CUTOFF_HOUR": 12,  # meetings starting before this count as "morning"
+    "MORNING_CONFIRM_RATIO": 0.40,
+    # Proposed, not approved: when enabled, overdue tasks or date-less reschedules
+    # make a manager YELLOW. Left off until the owner confirms the YELLOW/GREEN rules.
+    "YELLOW_RULES_ENABLED": False,
+}
+
 # --- Email / password reset -------------------------------------------------
 EMAIL_BACKEND = ENV.EMAIL_BACKEND
 EMAIL_HOST = ENV.EMAIL_HOST
