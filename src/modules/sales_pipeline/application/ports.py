@@ -6,6 +6,7 @@ from typing import Protocol
 from uuid import UUID
 
 from modules.sales_pipeline.domain.deal import Deal, DealStatus
+from modules.sales_pipeline.domain.loss_reason import LossReason
 from modules.sales_pipeline.domain.pipeline import Pipeline
 
 
@@ -67,3 +68,15 @@ class CustomerLookup(Protocol):
     """Port to the customers context to verify a linked customer exists in this tenant."""
 
     def exists(self, customer_id: UUID) -> bool: ...
+
+
+class LossReasonRepository(Protocol):
+    def add(self, reason: LossReason) -> None: ...
+
+    def get(self, reason_id: UUID) -> LossReason | None: ...
+
+    def list_all(self, *, active_only: bool = False) -> list[LossReason]: ...
+
+    def save(self, reason: LossReason) -> None: ...
+
+    def exists_by_name(self, name: str) -> bool: ...

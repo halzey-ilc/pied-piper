@@ -324,3 +324,77 @@ def test_transition_to_lost_stage_requires_reason(
     assert body["status"] == "lost"
     assert body["stage_id"] == lost_stage["id"]
     assert body["lost_reason"] == "budget cut"
+
+
+# --- loss reason catalog ----------------------------------------------------
+
+
+def test_loss_reason_catalog_crud_and_permissions(
+    make_user: Callable[..., Any],
+    tenants: dict[str, TenantFixture],
+    client_for: Callable[..., APIClient],
+) -> None:
+    owner = client_for(make_user("owner", tenant=tenants["acme"]), "acme")
+    rep = client_for(make_user("rep", tenant=tenants["acme"], role=Role.SALES_REP), "acme")
+
+    created = owner.post("/api/v1/sales/loss-reasons/", {"name": "Too expensive"}, format="json")
+    assert created.status_code == 201, created.content
+    reason_id = created.json()["id"]
+    assert created.json()["is_active"] is True
+
+    # Duplicate name is rejected.
+    assert (
+        owner.post("/api/v1/sales/loss-reasons/", {"name": "Too expensive"}, format="json")
+    ).status_code == 409
+
+    # Managers may read the catalog but not manage it.
+    assert rep.get("/api/v1/sales/loss-reasons/").status_code == 200
+    assert (
+        rep.post("/api/v1/sales/loss-reasons/", {"name": "Nope"}, format="json").status_code == 403
+    )
+
+    # Deactivate: it disappears from the active-only list but stays in the full list.
+    patched = owner.patch(
+        f"/api/v1/sales/loss-reasons/{reason_id}/", {"is_active": False}, format="json"
+    )
+    assert patched.status_code == 200 and patched.json()["is_active"] is False
+    assert owner.get("/api/v1/sales/loss-reasons/?active=true").json()["count"] == 0
+    assert owner.get("/api/v1/sales/loss-reasons/").json()["count"] == 1
+
+
+def test_lose_via_catalog_reason(
+    make_user: Callable[..., Any],
+    tenants: dict[str, TenantFixture],
+    client_for: Callable[..., APIClient],
+) -> None:
+    client = client_for(make_user("owner", tenant=tenants["acme"]), "acme")
+    pipeline = _kind_pipeline(client)
+    lost_stage = next(s for s in pipeline["stages"] if s["kind"] == "lost")
+    reason_id = client.post(
+        "/api/v1/sales/loss-reasons/", {"name": "Chose competitor"}, format="json"
+    ).json()["id"]
+
+    deal_id = _deal(client)["id"]
+    response = client.post(
+        f"/api/v1/sales/deals/{deal_id}/stage/",
+        {"stage_id": lost_stage["id"], "loss_reason_id": reason_id},
+        format="json",
+    )
+    assert response.status_code == 200, response.content
+    body = response.json()
+    assert body["status"] == "lost"
+    assert body["loss_reason_id"] == reason_id
+    # The catalog name is stored as the free-text note when no explicit reason is given.
+    assert body["lost_reason"] == "Chose competitor"
+
+    # An unknown loss reason is rejected.
+    other_deal = _deal(client, title="Other")["id"]
+    bad = client.post(
+        f"/api/v1/sales/deals/{other_deal}/stage/",
+        {
+            "stage_id": lost_stage["id"],
+            "loss_reason_id": "00000000-0000-0000-0000-000000000000",
+        },
+        format="json",
+    )
+    assert bad.status_code == 400

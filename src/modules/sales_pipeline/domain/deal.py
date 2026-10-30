@@ -119,6 +119,7 @@ class Deal:
     expected_close_date: date | None = None
     closed_at: datetime | None = None
     lost_reason: str | None = None
+    loss_reason_id: UUID | None = None
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     version: int = 1
 
@@ -196,11 +197,15 @@ class Deal:
             self.stage_id = stage_id
         self.closed_at = datetime.now(UTC)
         self.lost_reason = None
+        self.loss_reason_id = None
         self.version += 1
         return DealWon(deal_id=self.id, amount=str(self.value.amount), currency=self.value.currency)
 
-    def lose(self, reason: str, *, stage_id: UUID | None = None) -> DealLost:
-        """Close the deal as lost. ``stage_id`` relocates it to the lost stage."""
+    def lose(
+        self, reason: str, *, stage_id: UUID | None = None, loss_reason_id: UUID | None = None
+    ) -> DealLost:
+        """Close the deal as lost. ``stage_id`` relocates it to the lost stage;
+        ``loss_reason_id`` links a catalog reason alongside the free-text note."""
         self._require_open("lost")
         cleaned = " ".join(reason.split())
         if not cleaned:
@@ -210,6 +215,7 @@ class Deal:
             self.stage_id = stage_id
         self.closed_at = datetime.now(UTC)
         self.lost_reason = cleaned[:MAX_REASON_LENGTH]
+        self.loss_reason_id = loss_reason_id
         self.version += 1
         return DealLost(deal_id=self.id)
 
@@ -220,5 +226,6 @@ class Deal:
         self.stage_id = stage_id
         self.closed_at = None
         self.lost_reason = None
+        self.loss_reason_id = None
         self.version += 1
         return DealReopened(deal_id=self.id)

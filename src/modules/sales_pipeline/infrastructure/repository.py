@@ -7,8 +7,14 @@ from django.db.models import F, Q, QuerySet
 
 from modules.sales_pipeline.application.ports import DealFilter, DealVisibility
 from modules.sales_pipeline.domain.deal import Deal, DealStatus
+from modules.sales_pipeline.domain.loss_reason import LossReason
 from modules.sales_pipeline.domain.pipeline import Pipeline, Stage, StageKind
-from modules.sales_pipeline.infrastructure.models import DealRecord, PipelineRecord, StageRecord
+from modules.sales_pipeline.infrastructure.models import (
+    DealRecord,
+    LossReasonRecord,
+    PipelineRecord,
+    StageRecord,
+)
 from shared.domain.errors import ConflictError
 from shared.domain.value_objects import Money
 
@@ -48,9 +54,14 @@ def _deal_to_domain(row: DealRecord) -> Deal:
         expected_close_date=row.expected_close_date,
         closed_at=row.closed_at,
         lost_reason=row.lost_reason,
+        loss_reason_id=row.loss_reason_id,
         created_at=row.created_at,
         version=row.version,
     )
+
+
+def _loss_reason_to_domain(row: LossReasonRecord) -> LossReason:
+    return LossReason(id=row.id, name=row.name, is_active=row.is_active, created_at=row.created_at)
 
 
 class DjangoPipelineRepository:
@@ -145,6 +156,7 @@ class DjangoDealRepository:
             expected_close_date=deal.expected_close_date,
             closed_at=deal.closed_at,
             lost_reason=deal.lost_reason,
+            loss_reason_id=deal.loss_reason_id,
             version=deal.version,
             created_at=deal.created_at,
         )
@@ -167,6 +179,7 @@ class DjangoDealRepository:
                 expected_close_date=deal.expected_close_date,
                 closed_at=deal.closed_at,
                 lost_reason=deal.lost_reason,
+                loss_reason_id=deal.loss_reason_id,
                 version=F("version") + 1,
             )
         )
@@ -186,3 +199,34 @@ class DjangoDealRepository:
 
     def has_open_deals_in_pipeline(self, pipeline_id: UUID) -> bool:
         return self._qs().filter(pipeline_id=pipeline_id, status=DealStatus.OPEN.value).exists()
+
+
+class DjangoLossReasonRepository:
+    def __init__(self, using: str) -> None:
+        self.using = using
+
+    def add(self, reason: LossReason) -> None:
+        LossReasonRecord.objects.using(self.using).create(
+            id=reason.id,
+            name=reason.name,
+            is_active=reason.is_active,
+            created_at=reason.created_at,
+        )
+
+    def get(self, reason_id: UUID) -> LossReason | None:
+        row = LossReasonRecord.objects.using(self.using).filter(id=reason_id).first()
+        return None if row is None else _loss_reason_to_domain(row)
+
+    def list_all(self, *, active_only: bool = False) -> list[LossReason]:
+        qs = LossReasonRecord.objects.using(self.using)
+        if active_only:
+            qs = qs.filter(is_active=True)
+        return [_loss_reason_to_domain(row) for row in qs.order_by("name")]
+
+    def save(self, reason: LossReason) -> None:
+        LossReasonRecord.objects.using(self.using).filter(id=reason.id).update(
+            name=reason.name, is_active=reason.is_active
+        )
+
+    def exists_by_name(self, name: str) -> bool:
+        return LossReasonRecord.objects.using(self.using).filter(name=name).exists()

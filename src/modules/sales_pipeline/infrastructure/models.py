@@ -53,6 +53,23 @@ class StageRecord(models.Model):
         return f"{self.name} (#{self.position})"
 
 
+class LossReasonRecord(models.Model):
+    id = models.UUIDField(primary_key=True, editable=False)
+    name = models.CharField(max_length=100)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField()
+
+    class Meta:
+        db_table = "sales_loss_reason"
+        constraints = [
+            models.UniqueConstraint(fields=["name"], name="sales_loss_reason_name"),
+        ]
+        ordering = ["name"]
+
+    def __str__(self) -> str:
+        return self.name
+
+
 class DealRecord(models.Model):
     id = models.UUIDField(primary_key=True, editable=False)
     title = models.CharField(max_length=200)
@@ -71,6 +88,13 @@ class DealRecord(models.Model):
     expected_close_date = models.DateField(null=True, blank=True)
     closed_at = models.DateTimeField(null=True, blank=True)
     lost_reason = models.CharField(max_length=500, null=True, blank=True)  # noqa: DJ001
+    loss_reason = models.ForeignKey(
+        LossReasonRecord,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="deals",
+    )
     version = models.PositiveIntegerField(default=1)
     created_at = models.DateTimeField()
     updated_at = models.DateTimeField(auto_now=True)

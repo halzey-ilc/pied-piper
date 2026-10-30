@@ -10,9 +10,10 @@ from rest_framework.response import Response
 from modules.access_control.domain.rbac import Principal, Role
 from modules.organizations.composition import company_settings
 from modules.sales_pipeline.application.deal_service import EditDeal, OpenDeal
+from modules.sales_pipeline.application.loss_reason_service import UpdateLossReason
 from modules.sales_pipeline.application.pipeline_service import CreatePipeline
 from modules.sales_pipeline.application.ports import DealFilter
-from modules.sales_pipeline.composition import deal_service, pipeline_service
+from modules.sales_pipeline.composition import deal_service, loss_reason_service, pipeline_service
 from modules.sales_pipeline.domain.deal import DealStatus
 from modules.sales_pipeline.domain.pipeline import StageDefinition, StageKind
 from modules.sales_pipeline.presentation.serializers import (
@@ -22,9 +23,14 @@ from modules.sales_pipeline.presentation.serializers import (
     DealMoveSerializer,
     DealReadSerializer,
     DealUpdateSerializer,
+    LossReasonCreateSerializer,
+    LossReasonListSerializer,
+    LossReasonReadSerializer,
+    LossReasonUpdateSerializer,
     PipelineCreateSerializer,
     PipelineReadSerializer,
     deal_to_dict,
+    loss_reason_to_dict,
     pipeline_to_dict,
 )
 from platform_core.presentation.tenancy import TenantScopedAPIView
@@ -289,6 +295,7 @@ class DealMoveView(_Scoped):
             deal_id,
             serializer.validated_data["stage_id"],
             reason=serializer.validated_data.get("reason"),
+            loss_reason_id=serializer.validated_data.get("loss_reason_id"),
         )
         return Response(deal_to_dict(deal))
 
@@ -336,6 +343,72 @@ class DealReopenView(_Scoped):
     )
     def post(self, request: Request, deal_id: UUID) -> Response:
         return Response(deal_to_dict(deal_service().reopen(self.principal(), deal_id)))
+
+
+# --- loss reasons -----------------------------------------------------------
+
+
+class LossReasonListCreateView(_Scoped):
+    @extend_schema(
+        tags=_PIPELINE_TAGS,
+        operation_id="loss_reasons_list",
+        summary="List loss reasons",
+        description=(
+            "The company's loss-reason catalog. Pass `active=true` to list only active "
+            "reasons (the ones selectable when losing a deal)."
+        ),
+        parameters=[_TENANT_HEADER],
+        responses=LossReasonListSerializer,
+    )
+    def get(self, request: Request) -> Response:
+        active_only = request.query_params.get("active") in {"1", "true", "True"}
+        reasons = loss_reason_service().list_reasons(self.principal(), active_only=active_only)
+        return Response(
+            {"count": len(reasons), "results": [loss_reason_to_dict(r) for r in reasons]}
+        )
+
+    @extend_schema(
+        tags=_PIPELINE_TAGS,
+        operation_id="loss_reasons_create",
+        summary="Add a loss reason",
+        description="Adds a loss reason to the catalog. Requires the pipelines.manage permission.",
+        parameters=[_TENANT_HEADER],
+        request=LossReasonCreateSerializer,
+        responses={201: LossReasonReadSerializer},
+    )
+    def post(self, request: Request) -> Response:
+        serializer = LossReasonCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        reason = loss_reason_service().create(self.principal(), serializer.validated_data["name"])
+        return Response(loss_reason_to_dict(reason), status=status.HTTP_201_CREATED)
+
+
+class LossReasonDetailView(_Scoped):
+    @extend_schema(
+        tags=_PIPELINE_TAGS,
+        operation_id="loss_reasons_update",
+        summary="Rename or (de)activate a loss reason",
+        description=(
+            "Renames a loss reason or toggles `is_active`. Reasons are deactivated, never "
+            "deleted, so historical deals keep their reason. Requires pipelines.manage."
+        ),
+        parameters=[_TENANT_HEADER],
+        request=LossReasonUpdateSerializer,
+        responses=LossReasonReadSerializer,
+    )
+    def patch(self, request: Request, loss_reason_id: UUID) -> Response:
+        serializer = LossReasonUpdateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        reason = loss_reason_service().update(
+            self.principal(),
+            UpdateLossReason(
+                reason_id=loss_reason_id,
+                name=data.get("name"),
+                is_active=data.get("is_active"),
+            ),
+        )
+        return Response(loss_reason_to_dict(reason))
 
 
 def _as_uuid(value: str | None) -> UUID | None:

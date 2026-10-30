@@ -8,6 +8,7 @@ from typing import Any
 from rest_framework import serializers
 
 from modules.sales_pipeline.domain.deal import MAX_TITLE_LENGTH, Deal
+from modules.sales_pipeline.domain.loss_reason import LossReason
 from modules.sales_pipeline.domain.pipeline import MAX_STAGES, Pipeline, StageKind
 
 # --- pipelines --------------------------------------------------------------
@@ -74,12 +75,38 @@ class DealUpdateSerializer(serializers.Serializer[dict[str, Any]]):
 
 class DealMoveSerializer(serializers.Serializer[dict[str, Any]]):
     stage_id = serializers.UUIDField()
-    # Required only when the target stage is a lost-kind stage.
+    # Required only when the target stage is a lost-kind stage: a catalog
+    # loss_reason_id and/or a free-text reason.
     reason = serializers.CharField(required=False, max_length=500, allow_blank=False)
+    loss_reason_id = serializers.UUIDField(required=False, allow_null=True)
 
 
 class DealLoseSerializer(serializers.Serializer[dict[str, Any]]):
     reason = serializers.CharField(max_length=500)
+
+
+# --- loss reasons -----------------------------------------------------------
+
+
+class LossReasonCreateSerializer(serializers.Serializer[dict[str, Any]]):
+    name = serializers.CharField(max_length=100)
+
+
+class LossReasonUpdateSerializer(serializers.Serializer[dict[str, Any]]):
+    name = serializers.CharField(required=False, max_length=100)
+    is_active = serializers.BooleanField(required=False)
+
+
+class LossReasonReadSerializer(serializers.Serializer[dict[str, Any]]):
+    id = serializers.UUIDField(read_only=True)
+    name = serializers.CharField(read_only=True)
+    is_active = serializers.BooleanField(read_only=True)
+    created_at = serializers.DateTimeField(read_only=True)
+
+
+class LossReasonListSerializer(serializers.Serializer[dict[str, Any]]):
+    count = serializers.IntegerField(read_only=True)
+    results = LossReasonReadSerializer(many=True, read_only=True)
 
 
 class DealReadSerializer(serializers.Serializer[dict[str, Any]]):
@@ -95,6 +122,7 @@ class DealReadSerializer(serializers.Serializer[dict[str, Any]]):
     expected_close_date = serializers.DateField(read_only=True, allow_null=True)
     closed_at = serializers.DateTimeField(read_only=True, allow_null=True)
     lost_reason = serializers.CharField(read_only=True, allow_null=True)
+    loss_reason_id = serializers.UUIDField(read_only=True, allow_null=True)
     version = serializers.IntegerField(read_only=True)
     created_at = serializers.DateTimeField(read_only=True)
 
@@ -140,6 +168,16 @@ def deal_to_dict(deal: Deal) -> dict[str, Any]:
         ),
         "closed_at": deal.closed_at.isoformat() if deal.closed_at else None,
         "lost_reason": deal.lost_reason,
+        "loss_reason_id": str(deal.loss_reason_id) if deal.loss_reason_id else None,
         "version": deal.version,
         "created_at": deal.created_at.isoformat(),
+    }
+
+
+def loss_reason_to_dict(reason: LossReason) -> dict[str, Any]:
+    return {
+        "id": str(reason.id),
+        "name": reason.name,
+        "is_active": reason.is_active,
+        "created_at": reason.created_at.isoformat(),
     }

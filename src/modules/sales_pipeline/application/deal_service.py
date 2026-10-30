@@ -23,6 +23,7 @@ from modules.sales_pipeline.application.ports import (
     DealFilter,
     DealRepository,
     DealVisibility,
+    LossReasonRepository,
     PipelineRepository,
 )
 from modules.sales_pipeline.domain.deal import Deal
@@ -78,6 +79,7 @@ class DealService:
         uow: UnitOfWork,
         outbox: EventOutbox,
         audit: AuditLog,
+        loss_reasons: LossReasonRepository | None = None,
         policy: AccessPolicy | None = None,
     ) -> None:
         self._deals = deals
@@ -86,6 +88,7 @@ class DealService:
         self._uow = uow
         self._outbox = outbox
         self._audit = audit
+        self._loss_reasons = loss_reasons
         self._policy = policy or AccessPolicy()
 
     # --- reads --------------------------------------------------------------
@@ -164,10 +167,17 @@ class DealService:
         return deal
 
     def move_stage(
-        self, principal: Principal, deal_id: UUID, stage_id: UUID, *, reason: str | None = None
+        self,
+        principal: Principal,
+        deal_id: UUID,
+        stage_id: UUID,
+        *,
+        reason: str | None = None,
+        loss_reason_id: UUID | None = None,
     ) -> Deal:
         """Transition a deal to a stage. A won/lost-kind stage closes the deal
-        (a lost stage needs ``reason``); an open-kind stage just moves it."""
+        (a lost stage needs a reason: a catalog ``loss_reason_id`` and/or free-text
+        ``reason``); an open-kind stage just moves it."""
         with self._uow:
             deal = self._load_for_write(principal, deal_id)
             pipeline = self._pipelines.get(deal.pipeline_id)
@@ -181,9 +191,8 @@ class DealService:
                 event: DomainEvent | None = deal.win(stage_id=stage_id)
                 audit_action = "deal.won"
             elif stage.kind is StageKind.LOST:
-                if reason is None or not reason.strip():
-                    raise DomainValidationError("A loss reason is required to lose a deal.")
-                event = deal.lose(reason, stage_id=stage_id)
+                text = self._resolve_loss_reason(reason, loss_reason_id)
+                event = deal.lose(text, stage_id=stage_id, loss_reason_id=loss_reason_id)
                 audit_action = "deal.lost"
             else:
                 event = deal.move_to(stage_id)
@@ -193,6 +202,22 @@ class DealService:
                 self._emit(event, deal)
                 self._record(principal, audit_action, deal)
         return deal
+
+    def _resolve_loss_reason(self, reason: str | None, loss_reason_id: UUID | None) -> str:
+        """Validate a catalog loss reason (if given) and return the free-text note
+        to store: the explicit ``reason`` when provided, else the catalog name."""
+        catalog_name: str | None = None
+        if loss_reason_id is not None:
+            if self._loss_reasons is None:
+                raise DomainValidationError("Loss reasons are not available.")
+            catalog = self._loss_reasons.get(loss_reason_id)
+            if catalog is None or not catalog.is_active:
+                raise DomainValidationError("Unknown or inactive loss reason.")
+            catalog_name = catalog.name
+        text = (reason or catalog_name or "").strip()
+        if not text:
+            raise DomainValidationError("A loss reason is required to lose a deal.")
+        return text
 
     def win(self, principal: Principal, deal_id: UUID) -> Deal:
         return self._close(principal, deal_id, lambda deal: deal.win(), "deal.won")

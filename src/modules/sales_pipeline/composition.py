@@ -4,10 +4,12 @@ from __future__ import annotations
 
 from modules.audit.infrastructure.audit_log import DjangoAuditLog
 from modules.sales_pipeline.application.deal_service import DealService
+from modules.sales_pipeline.application.loss_reason_service import LossReasonService
 from modules.sales_pipeline.application.pipeline_service import PipelineService
 from modules.sales_pipeline.infrastructure.customer_lookup import DjangoCustomerLookup
 from modules.sales_pipeline.infrastructure.repository import (
     DjangoDealRepository,
+    DjangoLossReasonRepository,
     DjangoPipelineRepository,
 )
 from platform_core.application.context import require_tenant
@@ -32,5 +34,15 @@ def deal_service() -> DealService:
         customers=DjangoCustomerLookup(alias),
         uow=DjangoUnitOfWork(alias),
         outbox=DjangoEventOutbox(alias),
+        audit=DjangoAuditLog(alias),
+        loss_reasons=DjangoLossReasonRepository(alias),
+    )
+
+
+def loss_reason_service() -> LossReasonService:
+    alias = require_tenant().db_alias
+    return LossReasonService(
+        repository=DjangoLossReasonRepository(alias),
+        uow=DjangoUnitOfWork(alias),
         audit=DjangoAuditLog(alias),
     )
