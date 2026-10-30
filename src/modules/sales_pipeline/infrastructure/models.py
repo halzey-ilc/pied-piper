@@ -85,6 +85,8 @@ class DealRecord(models.Model):
     customer_id = models.UUIDField(null=True, blank=True)
     owner_user_id = models.UUIDField()
     team_id = models.UUIDField(null=True, blank=True)
+    source = models.CharField(max_length=100, null=True, blank=True)  # noqa: DJ001
+    next_step = models.CharField(max_length=500, null=True, blank=True)  # noqa: DJ001
     expected_close_date = models.DateField(null=True, blank=True)
     closed_at = models.DateTimeField(null=True, blank=True)
     lost_reason = models.CharField(max_length=500, null=True, blank=True)  # noqa: DJ001

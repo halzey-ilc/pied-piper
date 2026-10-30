@@ -60,6 +60,12 @@ class DealCreateSerializer(serializers.Serializer[dict[str, Any]]):
     )
     pipeline_id = serializers.UUIDField(required=False)
     customer_id = serializers.UUIDField(required=False, allow_null=True)
+    source = serializers.CharField(  # type: ignore[assignment]  # DRF field named "source"
+        required=False, allow_null=True, allow_blank=True, max_length=100
+    )
+    next_step = serializers.CharField(
+        required=False, allow_null=True, allow_blank=True, max_length=500
+    )
     expected_close_date = serializers.DateField(required=False, allow_null=True)
 
 
@@ -70,6 +76,12 @@ class DealUpdateSerializer(serializers.Serializer[dict[str, Any]]):
     )
     currency = serializers.CharField(required=False, max_length=3)
     customer_id = serializers.UUIDField(required=False, allow_null=True)
+    source = serializers.CharField(  # type: ignore[assignment]  # DRF field named "source"
+        required=False, allow_null=True, allow_blank=True, max_length=100
+    )
+    next_step = serializers.CharField(
+        required=False, allow_null=True, allow_blank=True, max_length=500
+    )
     expected_close_date = serializers.DateField(required=False, allow_null=True)
     version = serializers.IntegerField(required=False, min_value=1)
 
@@ -139,6 +151,8 @@ class DealReadSerializer(serializers.Serializer[dict[str, Any]]):
     stage_id = serializers.UUIDField(read_only=True)
     customer_id = serializers.UUIDField(read_only=True, allow_null=True)
     owner_user_id = serializers.UUIDField(read_only=True)
+    source = serializers.CharField(read_only=True, allow_null=True)  # type: ignore[assignment]
+    next_step = serializers.CharField(read_only=True, allow_null=True)
     expected_close_date = serializers.DateField(read_only=True, allow_null=True)
     closed_at = serializers.DateTimeField(read_only=True, allow_null=True)
     lost_reason = serializers.CharField(read_only=True, allow_null=True)
@@ -183,6 +197,8 @@ def deal_to_dict(deal: Deal) -> dict[str, Any]:
         "stage_id": str(deal.stage_id),
         "customer_id": str(deal.customer_id) if deal.customer_id else None,
         "owner_user_id": str(deal.owner_user_id),
+        "source": deal.source,
+        "next_step": deal.next_step,
         "expected_close_date": (
             deal.expected_close_date.isoformat() if deal.expected_close_date else None
         ),

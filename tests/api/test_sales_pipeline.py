@@ -400,6 +400,29 @@ def test_lose_via_catalog_reason(
     assert bad.status_code == 400
 
 
+def test_deal_source_and_next_step(
+    make_user: Callable[..., Any],
+    tenants: dict[str, TenantFixture],
+    client_for: Callable[..., APIClient],
+) -> None:
+    client = client_for(make_user("owner", tenant=tenants["acme"]), "acme")
+    _pipeline(client)
+    deal = _deal(client, source="Instagram", next_step="Call back Monday")
+    assert deal["source"] == "Instagram"
+    assert deal["next_step"] == "Call back Monday"
+
+    deal_id = deal["id"]
+    patched = client.patch(
+        f"/api/v1/sales/deals/{deal_id}/",
+        {"source": "", "next_step": "Send quote"},
+        format="json",
+    )
+    assert patched.status_code == 200, patched.content
+    body = patched.json()
+    assert body["source"] is None  # an empty string clears the field
+    assert body["next_step"] == "Send quote"
+
+
 # --- stage history ----------------------------------------------------------
 
 

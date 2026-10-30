@@ -46,6 +46,8 @@ class OpenDeal:
     currency: str = "USD"
     pipeline_id: UUID | None = None  # default pipeline when omitted
     customer_id: UUID | None = None
+    source: str | None = None
+    next_step: str | None = None
     expected_close_date: date | None = None
 
 
@@ -58,6 +60,10 @@ class EditDeal:
     currency: str | None = None
     customer_id: UUID | None = None
     set_customer: bool = False
+    source: str | None = None
+    set_source: bool = False
+    next_step: str | None = None
+    set_next_step: bool = False
     expected_close_date: date | None = None
     set_expected_close: bool = False
 
@@ -144,6 +150,8 @@ class DealService:
                 owner_user_id=principal.user_id,
                 team_id=principal.department_id,
                 customer_id=command.customer_id,
+                source=command.source,
+                next_step=command.next_step,
                 expected_close_date=command.expected_close_date,
             )
             self._deals.add(deal)
@@ -168,6 +176,10 @@ class DealService:
                 value=value,
                 customer_id=command.customer_id,
                 set_customer=command.set_customer,
+                source=command.source,
+                set_source=command.set_source,
+                next_step=command.next_step,
+                set_next_step=command.set_next_step,
                 expected_close_date=command.expected_close_date,
                 set_expected_close=command.set_expected_close,
             )
