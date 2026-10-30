@@ -7,7 +7,9 @@ from django.db.models import F, Q, QuerySet
 
 from modules.meetings.application.ports import MeetingFilter, MeetingVisibility
 from modules.meetings.domain.meeting import (
+    ConfirmationSource,
     Meeting,
+    MeetingFormat,
     MeetingLink,
     MeetingStatus,
     Participant,
@@ -59,6 +61,14 @@ def _to_domain(row: MeetingRecord) -> Meeting:
         location=row.location,
         link=link,
         team_id=row.team_id,
+        format=MeetingFormat(row.format),
+        host_user_id=row.host_user_id,
+        booked_by_user_id=row.booked_by_user_id,
+        confirmed_at=row.confirmed_at,
+        confirmed_by_user_id=row.confirmed_by_user_id,
+        confirmation_source=(
+            ConfirmationSource(row.confirmation_source) if row.confirmation_source else None
+        ),
         participants=_participants_from_json(row.participants),
         reminders=tuple(row.reminders),
         outcome=row.outcome,
@@ -133,6 +143,14 @@ class DjangoMeetingRepository:
             "scheduled_end": meeting.scheduled_end,
             "owner_user_id": meeting.owner_user_id,
             "team_id": meeting.team_id,
+            "format": meeting.format.value,
+            "host_user_id": meeting.host_user_id,
+            "booked_by_user_id": meeting.booked_by_user_id,
+            "confirmed_at": meeting.confirmed_at,
+            "confirmed_by_user_id": meeting.confirmed_by_user_id,
+            "confirmation_source": (
+                meeting.confirmation_source.value if meeting.confirmation_source else None
+            ),
             "participants": _participants_to_json(meeting.participants),
             "reminders": list(meeting.reminders),
             "outcome": meeting.outcome,

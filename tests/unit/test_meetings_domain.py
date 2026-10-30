@@ -105,7 +105,7 @@ def test_response_for_unknown_participant_rejected() -> None:
 def test_lifecycle_complete_and_cancel_are_terminal() -> None:
     meeting = _schedule()
     meeting.complete("went well")
-    assert meeting.status.value == "completed" and meeting.outcome == "went well"
+    assert meeting.status.value == "held" and meeting.outcome == "went well"
     with pytest.raises(MeetingStateError):
         meeting.reschedule(START, END)
     with pytest.raises(MeetingStateError):
