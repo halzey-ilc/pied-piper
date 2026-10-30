@@ -5,7 +5,7 @@ from uuid import UUID
 from django.db import transaction
 from django.db.models import F, Q, QuerySet
 
-from modules.sales_pipeline.application.ports import DealFilter, DealVisibility
+from modules.sales_pipeline.application.ports import ORDERING_FIELDS, DealFilter, DealVisibility
 from modules.sales_pipeline.domain.custom_field import CustomFieldDefinition, CustomFieldType
 from modules.sales_pipeline.domain.deal import Deal, DealStatus
 from modules.sales_pipeline.domain.loss_reason import LossReason
@@ -146,7 +146,38 @@ class DjangoDealRepository:
             qs = qs.filter(pipeline_id=filters.pipeline_id)
         if filters.stage_id is not None:
             qs = qs.filter(stage_id=filters.stage_id)
+        if filters.owner_user_id is not None:
+            qs = qs.filter(owner_user_id=filters.owner_user_id)
+        if filters.customer_id is not None:
+            qs = qs.filter(customer_id=filters.customer_id)
+        if filters.search:
+            qs = qs.filter(Q(title__icontains=filters.search) | Q(source__icontains=filters.search))
+        if filters.created_from is not None:
+            qs = qs.filter(created_at__date__gte=filters.created_from)
+        if filters.created_to is not None:
+            qs = qs.filter(created_at__date__lte=filters.created_to)
+        return self._with_attention(qs, filters)
+
+    @staticmethod
+    def _with_attention(qs: QuerySet[DealRecord], filters: DealFilter) -> QuerySet[DealRecord]:
+        if filters.attention == "overdue":
+            qs = qs.filter(status=DealStatus.OPEN.value, expected_close_date__isnull=False)
+            if filters.today is not None:
+                qs = qs.filter(expected_close_date__lt=filters.today)
+        elif filters.attention == "no_next_step":
+            qs = qs.filter(status=DealStatus.OPEN.value).filter(
+                Q(next_step__isnull=True) | Q(next_step="")
+            )
         return qs
+
+    def _order_by(self, ordering: str | None) -> list[str]:
+        default = ["-created_at", "id"]
+        if not ordering:
+            return default
+        field = ordering.removeprefix("-")
+        if field not in ORDERING_FIELDS:
+            return default
+        return [ordering, "id"]
 
     def add(self, deal: Deal) -> None:
         self._qs().create(
@@ -202,7 +233,7 @@ class DjangoDealRepository:
     def list_visible(
         self, visibility: DealVisibility, filters: DealFilter, *, limit: int, offset: int
     ) -> list[Deal]:
-        rows = self._visible(visibility, filters).order_by("-created_at", "id")[
+        rows = self._visible(visibility, filters).order_by(*self._order_by(filters.ordering))[
             offset : offset + limit
         ]
         return [_deal_to_domain(row) for row in rows]

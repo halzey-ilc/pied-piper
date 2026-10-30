@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import date
 from decimal import Decimal
 from typing import Protocol
 from uuid import UUID
@@ -25,6 +26,20 @@ class DealFilter:
     status: DealStatus | None = None
     pipeline_id: UUID | None = None
     stage_id: UUID | None = None
+    search: str | None = None
+    owner_user_id: UUID | None = None  # the "manager" of the deal
+    customer_id: UUID | None = None
+    created_from: date | None = None
+    created_to: date | None = None
+    # "overdue" (past expected close, still open) or "no_next_step" (open, no next step).
+    attention: str | None = None
+    # Company-timezone "today", supplied by the caller for the overdue cutoff.
+    today: date | None = None
+    # One of ORDERING_FIELDS (optionally prefixed with "-"); defaults to newest first.
+    ordering: str | None = None
+
+
+ORDERING_FIELDS = frozenset({"created_at", "updated_at", "amount", "title"})
 
 
 @dataclass(frozen=True, slots=True)

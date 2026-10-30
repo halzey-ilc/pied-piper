@@ -505,6 +505,50 @@ def test_deal_source_and_next_step(
     assert body["next_step"] == "Send quote"
 
 
+def test_deal_list_search_sorting_and_attention(
+    make_user: Callable[..., Any],
+    tenants: dict[str, TenantFixture],
+    client_for: Callable[..., APIClient],
+) -> None:
+    owner = client_for(make_user("owner", tenant=tenants["acme"]), "acme")
+    rep = client_for(make_user("rep", tenant=tenants["acme"], role=Role.SALES_REP), "acme")
+    _pipeline(owner)
+
+    _deal(owner, title="Alpha", amount="100.00", next_step="call back")
+    _deal(owner, title="Bravo", amount="300.00")  # no next step
+    _deal(owner, title="Charlie", amount="200.00", expected_close_date="2000-01-01")  # overdue
+    reps_deal = _deal(rep, title="Rep deal", amount="50.00")["id"]
+
+    # search matches title (case-insensitive)
+    found = owner.get("/api/v1/sales/deals/?search=brav").json()
+    assert found["count"] == 1 and found["results"][0]["title"] == "Bravo"
+
+    # ordering by amount ascending and descending
+    asc = [d["amount"] for d in owner.get("/api/v1/sales/deals/?ordering=amount").json()["results"]]
+    assert asc == ["50.00", "100.00", "200.00", "300.00"]
+    desc = [
+        d["amount"] for d in owner.get("/api/v1/sales/deals/?ordering=-amount").json()["results"]
+    ]
+    assert desc == ["300.00", "200.00", "100.00", "50.00"]
+
+    # attention=no_next_step: open deals with no next step (Bravo, Charlie, Rep deal)
+    no_step = owner.get("/api/v1/sales/deals/?attention=no_next_step").json()
+    assert {d["title"] for d in no_step["results"]} == {"Bravo", "Charlie", "Rep deal"}
+
+    # attention=overdue: past expected close and still open (Charlie only)
+    overdue = owner.get("/api/v1/sales/deals/?attention=overdue").json()
+    assert [d["title"] for d in overdue["results"]] == ["Charlie"]
+
+    # manager_id filters to one owner's deals
+    by_rep = owner.get(f"/api/v1/sales/deals/?manager_id={_rep_owner_id(reps_deal, owner)}").json()
+    assert {d["id"] for d in by_rep["results"]} == {reps_deal}
+
+
+def _rep_owner_id(deal_id: str, client: APIClient) -> str:
+    owner_id: str = client.get(f"/api/v1/sales/deals/{deal_id}/").json()["owner_user_id"]
+    return owner_id
+
+
 # --- stage history ----------------------------------------------------------
 
 

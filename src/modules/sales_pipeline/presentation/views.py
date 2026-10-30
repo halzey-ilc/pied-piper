@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from datetime import date, datetime
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
 from drf_spectacular.utils import OpenApiExample, OpenApiParameter, extend_schema
 from rest_framework import status
@@ -76,6 +78,40 @@ _LIMIT = OpenApiParameter(
 )
 _OFFSET = OpenApiParameter(
     "offset", int, OpenApiParameter.QUERY, description="Rows to skip (default 0)."
+)
+_SEARCH = OpenApiParameter(
+    "search", str, OpenApiParameter.QUERY, description="Case-insensitive match on title or source."
+)
+_MANAGER = OpenApiParameter(
+    "manager_id", str, OpenApiParameter.QUERY, description="Filter by the deal owner (manager)."
+)
+_CUSTOMER = OpenApiParameter(
+    "customer_id", str, OpenApiParameter.QUERY, description="Filter by linked customer."
+)
+_CREATED_FROM = OpenApiParameter(
+    "created_from",
+    str,
+    OpenApiParameter.QUERY,
+    description="Created on/after this date (YYYY-MM-DD).",
+)
+_CREATED_TO = OpenApiParameter(
+    "created_to",
+    str,
+    OpenApiParameter.QUERY,
+    description="Created on/before this date (YYYY-MM-DD).",
+)
+_ATTENTION = OpenApiParameter(
+    "attention",
+    str,
+    OpenApiParameter.QUERY,
+    description="Needs attention: 'overdue' (past expected close, open) or 'no_next_step'.",
+    enum=["overdue", "no_next_step"],
+)
+_ORDERING = OpenApiParameter(
+    "ordering",
+    str,
+    OpenApiParameter.QUERY,
+    description="Sort field, '-' for descending: created_at, updated_at, amount, title.",
 )
 
 MAX_PAGE_SIZE = 200
@@ -185,7 +221,21 @@ class DealListCreateView(_Scoped):
             "Returns deals visible to you (own / team / all by role), newest first. Filter "
             "by `status`, `pipeline_id`, `stage_id` and page with `limit`/`offset`."
         ),
-        parameters=[_TENANT_HEADER, _STATUS, _PIPELINE, _STAGE, _LIMIT, _OFFSET],
+        parameters=[
+            _TENANT_HEADER,
+            _STATUS,
+            _PIPELINE,
+            _STAGE,
+            _SEARCH,
+            _MANAGER,
+            _CUSTOMER,
+            _CREATED_FROM,
+            _CREATED_TO,
+            _ATTENTION,
+            _ORDERING,
+            _LIMIT,
+            _OFFSET,
+        ],
         responses=DealListSerializer,
     )
     def get(self, request: Request) -> Response:
@@ -194,15 +244,31 @@ class DealListCreateView(_Scoped):
             offset = max(int(request.query_params.get("offset", 0)), 0)
         except ValueError:
             limit, offset = 50, 0
-        status_value = request.query_params.get("status")
+        q = request.query_params
+        status_value = q.get("status")
         valid = {s.value for s in DealStatus}
+        attention = q.get("attention")
+        attention = attention if attention in {"overdue", "no_next_step"} else None
+        search = (q.get("search") or "").strip() or None
         filters = DealFilter(
             status=DealStatus(status_value) if status_value in valid else None,
-            pipeline_id=_as_uuid(request.query_params.get("pipeline_id")),
-            stage_id=_as_uuid(request.query_params.get("stage_id")),
+            pipeline_id=_as_uuid(q.get("pipeline_id")),
+            stage_id=_as_uuid(q.get("stage_id")),
+            search=search,
+            owner_user_id=_as_uuid(q.get("manager_id")),
+            customer_id=_as_uuid(q.get("customer_id")),
+            created_from=_as_date(q.get("created_from")),
+            created_to=_as_date(q.get("created_to")),
+            attention=attention,
+            today=self._company_today(),
+            ordering=q.get("ordering"),
         )
         page = deal_service().list_deals(self.principal(), filters, limit=limit, offset=offset)
         return Response({"count": page.total, "results": [deal_to_dict(d) for d in page.items]})
+
+    def _company_today(self) -> date:
+        tz = ZoneInfo(str(company_settings(self.tenant.tenant_id)["timezone"]))
+        return datetime.now(tz).date()
 
     @extend_schema(
         tags=_DEAL_TAGS,
@@ -544,5 +610,14 @@ def _as_uuid(value: str | None) -> UUID | None:
         return None
     try:
         return UUID(value)
+    except ValueError:
+        return None
+
+
+def _as_date(value: str | None) -> date | None:
+    if not value:
+        return None
+    try:
+        return date.fromisoformat(value)
     except ValueError:
         return None
