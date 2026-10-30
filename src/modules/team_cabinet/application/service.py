@@ -7,8 +7,10 @@ their own department; a director (ALL) sees any department or the whole company.
 
 from __future__ import annotations
 
+import calendar
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
+from decimal import Decimal
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
@@ -22,6 +24,7 @@ from modules.team_cabinet.domain.board import (
     TrafficThresholds,
     evaluate_traffic_light,
 )
+from modules.team_cabinet.domain.plan_fact import PlanFact, PlanFactRow
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,6 +101,57 @@ class TeamCabinetService:
         )
         silent = [m for m in board.managers if "no_activity" in m.red_reasons]
         return TodayBoard(as_of=board.as_of, managers=silent, totals=DepartmentTotals.of(silent))
+
+    def plan_fact(
+        self,
+        principal: Principal,
+        *,
+        month: str,
+        timezone_name: str,
+        department_id: UUID | None = None,
+    ) -> PlanFact:
+        scope = self._policy.require(principal, Permission.TEAM_CABINET_VIEW)
+        if scope is not Scope.ALL:
+            department_id = principal.department_id
+
+        year, mon = int(month[:4]), int(month[5:7])
+        days_in_month = calendar.monthrange(year, mon)[1]
+        month_start = date(year, mon, 1)
+        month_end = date(year, mon, days_in_month)
+        today = datetime.now(ZoneInfo(timezone_name)).date()
+        if today < month_start:
+            elapsed = 0
+        elif today > month_end:
+            elapsed = days_in_month
+        else:
+            elapsed = today.day
+
+        members = self._roster.members(principal.tenant_id, department_id)
+        user_ids = [m.user_id for m in members]
+        targets = self._reader.monthly_sales_targets(user_ids, month)
+        received = self._reader.monthly_received(user_ids, month_start, month_end)
+        counts = self._reader.monthly_sales_counts(user_ids, month_start, month_end)
+
+        rows = [
+            PlanFactRow(
+                user_id=m.user_id,
+                username=m.username,
+                department_id=m.department_id,
+                product_role=m.product_role,
+                plan_sales=targets.get(m.user_id, Decimal(0)),
+                sales_actual=counts.get(m.user_id, 0),
+                received_actual=received.get(m.user_id, Decimal(0)),
+                working_days_total=days_in_month,
+                working_days_elapsed=elapsed,
+            )
+            for m in members
+        ]
+        return PlanFact(
+            month=month,
+            working_days_total=days_in_month,
+            working_days_elapsed=elapsed,
+            rows=rows,
+        )
 
     @staticmethod
     def _score(day: ManagerDay, now_hour: int, thresholds: TrafficThresholds) -> ManagerDay:

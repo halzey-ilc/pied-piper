@@ -6,6 +6,7 @@ from rest_framework import serializers
 
 from modules.team_cabinet.application.service import TodayBoard
 from modules.team_cabinet.domain.board import DepartmentTotals, ManagerDay
+from modules.team_cabinet.domain.plan_fact import PlanFact, PlanFactRow
 
 
 class ManagerDaySerializer(serializers.Serializer[dict[str, Any]]):
@@ -87,6 +88,60 @@ def totals_to_dict(totals: DepartmentTotals) -> dict[str, Any]:
         "red": totals.red,
         "yellow": totals.yellow,
         "green": totals.green,
+    }
+
+
+class PlanFactRowSerializer(serializers.Serializer[dict[str, Any]]):
+    user_id = serializers.UUIDField(read_only=True)
+    username = serializers.CharField(read_only=True)
+    department_id = serializers.UUIDField(read_only=True, allow_null=True)
+    product_role = serializers.CharField(read_only=True)
+    plan_sales = serializers.DecimalField(max_digits=16, decimal_places=2, read_only=True)
+    sales_actual = serializers.IntegerField(read_only=True)
+    received_actual = serializers.DecimalField(max_digits=18, decimal_places=2, read_only=True)
+    remaining_sales = serializers.DecimalField(max_digits=16, decimal_places=2, read_only=True)
+    forecast_sales = serializers.DecimalField(max_digits=16, decimal_places=2, read_only=True)
+    working_days_total = serializers.IntegerField(read_only=True)
+    working_days_elapsed = serializers.IntegerField(read_only=True)
+
+
+class PlanFactSerializer(serializers.Serializer[dict[str, Any]]):
+    month = serializers.CharField(read_only=True)
+    working_days_total = serializers.IntegerField(read_only=True)
+    working_days_elapsed = serializers.IntegerField(read_only=True)
+    plan_sales_total = serializers.DecimalField(max_digits=18, decimal_places=2, read_only=True)
+    sales_actual_total = serializers.IntegerField(read_only=True)
+    received_total = serializers.DecimalField(max_digits=18, decimal_places=2, read_only=True)
+    forecast_sales_total = serializers.DecimalField(max_digits=18, decimal_places=2, read_only=True)
+    rows = PlanFactRowSerializer(many=True, read_only=True)
+
+
+def plan_fact_row_to_dict(row: PlanFactRow) -> dict[str, Any]:
+    return {
+        "user_id": str(row.user_id),
+        "username": row.username,
+        "department_id": str(row.department_id) if row.department_id else None,
+        "product_role": row.product_role,
+        "plan_sales": str(row.plan_sales),
+        "sales_actual": row.sales_actual,
+        "received_actual": str(row.received_actual),
+        "remaining_sales": str(row.remaining_sales),
+        "forecast_sales": str(row.forecast_sales),
+        "working_days_total": row.working_days_total,
+        "working_days_elapsed": row.working_days_elapsed,
+    }
+
+
+def plan_fact_to_dict(plan_fact: PlanFact) -> dict[str, Any]:
+    return {
+        "month": plan_fact.month,
+        "working_days_total": plan_fact.working_days_total,
+        "working_days_elapsed": plan_fact.working_days_elapsed,
+        "plan_sales_total": str(plan_fact.plan_sales_total),
+        "sales_actual_total": plan_fact.sales_actual_total,
+        "received_total": str(plan_fact.received_total),
+        "forecast_sales_total": str(plan_fact.forecast_sales_total),
+        "rows": [plan_fact_row_to_dict(r) for r in plan_fact.rows],
     }
 
 

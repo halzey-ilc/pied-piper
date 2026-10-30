@@ -87,3 +87,55 @@ def test_absence_suppresses_no_activity_red(
     # On absence today: not flagged red for "no activity".
     assert rows["away"]["on_absence"] is True
     assert "no_activity" not in rows["away"]["red_reasons"]
+
+
+def test_plan_fact_plan_versus_actual(
+    make_user: Callable[..., Any],
+    tenants: dict[str, TenantFixture],
+    client_for: Callable[..., APIClient],
+) -> None:
+    director = client_for(make_user("owner", tenant=tenants["acme"]), "acme")
+    rep_user = make_user("rep", tenant=tenants["acme"], role=Role.SALES_REP)
+    rep = client_for(rep_user, "acme")
+
+    # An explicit month keeps the test independent of the company-timezone boundary.
+    today = datetime.now(UTC).date()
+    month = f"{today.year:04d}-{today.month:02d}"
+
+    # Director sets the rep's monthly sales plan.
+    plan = director.put(
+        "/api/v1/plans/",
+        {
+            "scope": "user",
+            "scope_id": str(rep_user.id),
+            "metric": "monthly_sales",
+            "period": month,
+            "target": "5",
+        },
+        format="json",
+    )
+    assert plan.status_code == 200, plan.content
+
+    # The rep takes the first payment on a deal this month.
+    director.post(
+        "/api/v1/sales/pipelines/",
+        {"name": "P", "is_default": True, "stages": [{"name": "New"}]},
+        format="json",
+    )
+    deal_id = director.post(
+        "/api/v1/sales/deals/", {"title": "D", "amount": "3000"}, format="json"
+    ).json()["id"]
+    paid = rep.post(
+        "/api/v1/payments/",
+        {"deal_id": deal_id, "amount": "1000.00", "kind": "prepayment", "paid_on": f"{month}-15"},
+        format="json",
+    )
+    assert paid.status_code == 201, paid.content
+
+    pf = director.get(f"/api/v1/team/plan-fact/?month={month}").json()
+    row = next(r for r in pf["rows"] if r["username"] == "rep")
+    assert row["plan_sales"] == "5.00"
+    assert row["sales_actual"] == 1
+    assert row["received_actual"] == "1000.00"
+    assert row["remaining_sales"] == "4.00"
+    assert pf["sales_actual_total"] >= 1

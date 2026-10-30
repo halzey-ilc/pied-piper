@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import re
+from datetime import datetime
 from typing import Any
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
 from django.conf import settings
 from drf_spectacular.utils import OpenApiExample, OpenApiParameter, extend_schema
@@ -12,8 +15,15 @@ from modules.access_control.domain.rbac import Principal, Role
 from modules.organizations.composition import company_settings
 from modules.team_cabinet.composition import team_cabinet_service
 from modules.team_cabinet.domain.board import TrafficThresholds
-from modules.team_cabinet.presentation.serializers import TodayBoardSerializer, board_to_dict
+from modules.team_cabinet.presentation.serializers import (
+    PlanFactSerializer,
+    TodayBoardSerializer,
+    board_to_dict,
+    plan_fact_to_dict,
+)
 from platform_core.presentation.tenancy import TenantScopedAPIView
+
+_MONTH_RE = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
 
 _TENANT_HEADER = OpenApiParameter(
     "X-Tenant",
@@ -114,3 +124,38 @@ class TeamInactivityView(_Scoped):
             department_id=self._department(request),
         )
         return Response(board_to_dict(board))
+
+
+_MONTH = OpenApiParameter(
+    "month", str, OpenApiParameter.QUERY, description="Month YYYY-MM (default: current month)."
+)
+
+
+class TeamPlanFactView(_Scoped):
+    @extend_schema(
+        tags=_TAGS,
+        operation_id="team_plan_fact",
+        summary="Plan vs fact for a month",
+        description=(
+            "Per manager for the month: the monthly_sales plan target, actual sales (deals "
+            "whose first payment they took), money received, remaining to plan, working days "
+            "(calendar days for now) and a linear pace forecast — plus department totals. "
+            "Sales count and received money are kept as separate figures. Needs "
+            "team_cabinet.view."
+        ),
+        parameters=[_TENANT_HEADER, _MONTH, _DEPARTMENT],
+        responses=PlanFactSerializer,
+    )
+    def get(self, request: Request) -> Response:
+        timezone_name = self._timezone()
+        month = request.query_params.get("month") or ""
+        if not _MONTH_RE.match(month):
+            today = datetime.now(ZoneInfo(timezone_name)).date()
+            month = f"{today.year:04d}-{today.month:02d}"
+        plan_fact = team_cabinet_service().plan_fact(
+            self.principal(),
+            month=month,
+            timezone_name=timezone_name,
+            department_id=self._department(request),
+        )
+        return Response(plan_fact_to_dict(plan_fact))

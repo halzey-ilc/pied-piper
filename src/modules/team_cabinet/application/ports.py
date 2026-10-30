@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
+from decimal import Decimal
 from typing import Protocol
 from uuid import UUID
 
@@ -30,3 +31,20 @@ class CabinetReader(Protocol):
     ) -> dict[UUID, RawDay]: ...
 
     def absent_user_ids(self, user_ids: list[UUID], day: date) -> set[UUID]: ...
+
+    def monthly_sales_targets(self, user_ids: list[UUID], month: str) -> dict[UUID, Decimal]:
+        """Each manager's monthly_sales plan target for the period (user-scope plans)."""
+        ...
+
+    def monthly_received(
+        self, user_ids: list[UUID], month_start: date, month_end: date
+    ) -> dict[UUID, Decimal]:
+        """Signed received money per seller in the month (refunds subtracted)."""
+        ...
+
+    def monthly_sales_counts(
+        self, user_ids: list[UUID], month_start: date, month_end: date
+    ) -> dict[UUID, int]:
+        """Per seller: deals whose first non-refund payment fell in the month and was
+        taken by that seller (a sale is credited to the first payment's seller)."""
+        ...

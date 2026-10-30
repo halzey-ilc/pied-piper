@@ -8,14 +8,23 @@ from decimal import Decimal
 from uuid import UUID
 
 from django.contrib.auth import get_user_model
-from django.db.models import Count, Q, Sum
+from django.db.models import (
+    Case,
+    Count,
+    DecimalField,
+    F,
+    Min,
+    Q,
+    Sum,
+    When,
+)
 
 from modules.access_control.domain.rbac import Role, product_role
 from modules.activities.infrastructure.models import ActivityRecord
 from modules.meetings.infrastructure.models import MeetingRecord
 from modules.organizations.infrastructure.models import Membership
 from modules.payments.infrastructure.models import PaymentRecord
-from modules.planning.infrastructure.models import AbsenceRecord
+from modules.planning.infrastructure.models import AbsenceRecord, PlanRecord
 from modules.team_cabinet.domain.board import Member, RawDay
 
 
@@ -165,3 +174,74 @@ class DjangoCabinetReader:
             .values_list("user_id", flat=True)
         )
         return set(rows)
+
+    def monthly_sales_targets(self, user_ids: list[UUID], month: str) -> dict[UUID, Decimal]:
+        if not user_ids:
+            return {}
+        rows = (
+            PlanRecord.objects.using(self.using)
+            .filter(
+                scope="user",
+                metric="monthly_sales",
+                period=month,
+                scope_id__in=user_ids,
+            )
+            .values_list("scope_id", "target")
+        )
+        return {row[0]: row[1] for row in rows if row[0] is not None}
+
+    def monthly_received(
+        self, user_ids: list[UUID], month_start: date, month_end: date
+    ) -> dict[UUID, Decimal]:
+        if not user_ids:
+            return {}
+        signed = Case(
+            When(is_refund=True, then=-F("amount")),
+            default=F("amount"),
+            output_field=DecimalField(max_digits=18, decimal_places=2),
+        )
+        rows = (
+            PaymentRecord.objects.using(self.using)
+            .filter(
+                seller_user_id__in=user_ids,
+                paid_on__gte=month_start,
+                paid_on__lte=month_end,
+            )
+            .values("seller_user_id")
+            .annotate(total=Sum(signed))
+        )
+        return {row["seller_user_id"]: row["total"] or Decimal(0) for row in rows}
+
+    def monthly_sales_counts(
+        self, user_ids: list[UUID], month_start: date, month_end: date
+    ) -> dict[UUID, int]:
+        if not user_ids:
+            return {}
+        # Deals whose first non-refund payment fell within the month.
+        first_in_month = (
+            PaymentRecord.objects.using(self.using)
+            .filter(is_refund=False, deal_id__isnull=False)
+            .values("deal_id")
+            .annotate(first=Min("paid_on"))
+            .filter(first__gte=month_start, first__lte=month_end)
+        )
+        deal_ids = [row["deal_id"] for row in first_in_month]
+        counts: dict[UUID, int] = {}
+        seen: set[UUID] = set()
+        user_set = set(user_ids)
+        # The seller of each deal's earliest non-refund payment gets the sale.
+        rows = (
+            PaymentRecord.objects.using(self.using)
+            .filter(deal_id__in=deal_ids, is_refund=False)
+            .order_by("deal_id", "paid_on", "created_at")
+            .values("deal_id", "seller_user_id")
+        )
+        for row in rows:
+            deal_id = row["deal_id"]
+            if deal_id is None or deal_id in seen:
+                continue
+            seen.add(deal_id)
+            seller = row["seller_user_id"]
+            if seller in user_set:
+                counts[seller] = counts.get(seller, 0) + 1
+        return counts
