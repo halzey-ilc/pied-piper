@@ -10,6 +10,7 @@ from rest_framework import serializers
 from modules.sales_pipeline.domain.deal import MAX_TITLE_LENGTH, Deal
 from modules.sales_pipeline.domain.loss_reason import LossReason
 from modules.sales_pipeline.domain.pipeline import MAX_STAGES, Pipeline, StageKind
+from modules.sales_pipeline.domain.stage_change import StageChange
 
 # --- pipelines --------------------------------------------------------------
 
@@ -109,6 +110,25 @@ class LossReasonListSerializer(serializers.Serializer[dict[str, Any]]):
     results = LossReasonReadSerializer(many=True, read_only=True)
 
 
+# --- stage history ----------------------------------------------------------
+
+
+class StageChangeReadSerializer(serializers.Serializer[dict[str, Any]]):
+    id = serializers.UUIDField(read_only=True)
+    from_stage_id = serializers.UUIDField(read_only=True, allow_null=True)
+    to_stage_id = serializers.UUIDField(read_only=True)
+    author_user_id = serializers.UUIDField(read_only=True)
+    deal_version = serializers.IntegerField(read_only=True)
+    reason = serializers.CharField(read_only=True, allow_null=True)
+    loss_reason_id = serializers.UUIDField(read_only=True, allow_null=True)
+    created_at = serializers.DateTimeField(read_only=True)
+
+
+class StageChangeListSerializer(serializers.Serializer[dict[str, Any]]):
+    count = serializers.IntegerField(read_only=True)
+    results = StageChangeReadSerializer(many=True, read_only=True)
+
+
 class DealReadSerializer(serializers.Serializer[dict[str, Any]]):
     id = serializers.UUIDField(read_only=True)
     title = serializers.CharField(read_only=True)
@@ -180,4 +200,17 @@ def loss_reason_to_dict(reason: LossReason) -> dict[str, Any]:
         "name": reason.name,
         "is_active": reason.is_active,
         "created_at": reason.created_at.isoformat(),
+    }
+
+
+def stage_change_to_dict(change: StageChange) -> dict[str, Any]:
+    return {
+        "id": str(change.id),
+        "from_stage_id": str(change.from_stage_id) if change.from_stage_id else None,
+        "to_stage_id": str(change.to_stage_id),
+        "author_user_id": str(change.author_user_id),
+        "deal_version": change.deal_version,
+        "reason": change.reason,
+        "loss_reason_id": str(change.loss_reason_id) if change.loss_reason_id else None,
+        "created_at": change.created_at.isoformat(),
     }

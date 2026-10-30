@@ -8,6 +8,7 @@ from uuid import UUID
 from modules.sales_pipeline.domain.deal import Deal, DealStatus
 from modules.sales_pipeline.domain.loss_reason import LossReason
 from modules.sales_pipeline.domain.pipeline import Pipeline
+from modules.sales_pipeline.domain.stage_change import StageChange
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,3 +81,9 @@ class LossReasonRepository(Protocol):
     def save(self, reason: LossReason) -> None: ...
 
     def exists_by_name(self, name: str) -> bool: ...
+
+
+class StageChangeRepository(Protocol):
+    def add(self, change: StageChange) -> None: ...
+
+    def list_for_deal(self, deal_id: UUID) -> list[StageChange]: ...

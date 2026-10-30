@@ -398,3 +398,56 @@ def test_lose_via_catalog_reason(
         format="json",
     )
     assert bad.status_code == 400
+
+
+# --- stage history ----------------------------------------------------------
+
+
+def test_stage_history_records_transitions_in_order(
+    make_user: Callable[..., Any],
+    tenants: dict[str, TenantFixture],
+    client_for: Callable[..., APIClient],
+) -> None:
+    client = client_for(make_user("owner", tenant=tenants["acme"]), "acme")
+    created = client.post(
+        "/api/v1/sales/pipelines/",
+        {
+            "name": "Full",
+            "is_default": True,
+            "stages": [
+                {"name": "New"},
+                {"name": "Qualify"},
+                {"name": "Won", "kind": "won"},
+            ],
+        },
+        format="json",
+    )
+    assert created.status_code == 201, created.content
+    stages = created.json()["stages"]
+    qualify = next(s for s in stages if s["name"] == "Qualify")
+    won = next(s for s in stages if s["kind"] == "won")
+
+    deal_id = _deal(client)["id"]
+    assert (
+        client.post(
+            f"/api/v1/sales/deals/{deal_id}/stage/", {"stage_id": qualify["id"]}, format="json"
+        ).status_code
+        == 200
+    )
+    assert (
+        client.post(
+            f"/api/v1/sales/deals/{deal_id}/stage/", {"stage_id": won["id"]}, format="json"
+        ).status_code
+        == 200
+    )
+
+    history = client.get(f"/api/v1/sales/deals/{deal_id}/stage-history/")
+    assert history.status_code == 200, history.content
+    body = history.json()
+    assert body["count"] == 2
+    first, second = body["results"]
+    assert first["to_stage_id"] == qualify["id"]
+    assert second["to_stage_id"] == won["id"]
+    # Versions are recorded and strictly increasing.
+    assert second["deal_version"] > first["deal_version"]
+    assert first["author_user_id"] is not None

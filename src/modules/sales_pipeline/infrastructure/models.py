@@ -112,3 +112,27 @@ class DealRecord(models.Model):
 
     def __str__(self) -> str:
         return f"{self.title} ({self.status})"
+
+
+class DealStageChangeRecord(models.Model):
+    """Append-only history of a deal's stage transitions."""
+
+    id = models.UUIDField(primary_key=True, editable=False)
+    deal = models.ForeignKey(DealRecord, on_delete=models.CASCADE, related_name="stage_changes")
+    from_stage_id = models.UUIDField(null=True, blank=True)
+    to_stage_id = models.UUIDField()
+    author_user_id = models.UUIDField()
+    deal_version = models.PositiveIntegerField()
+    reason = models.CharField(max_length=500, null=True, blank=True)  # noqa: DJ001
+    loss_reason_id = models.UUIDField(null=True, blank=True)
+    created_at = models.DateTimeField()
+
+    class Meta:
+        db_table = "sales_deal_stage_change"
+        indexes = [
+            models.Index(fields=["deal", "created_at"], name="deal_stage_change_idx"),
+        ]
+        ordering = ["created_at"]
+
+    def __str__(self) -> str:
+        return f"{self.deal_id}: -> {self.to_stage_id}"

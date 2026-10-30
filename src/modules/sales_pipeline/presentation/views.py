@@ -29,9 +29,11 @@ from modules.sales_pipeline.presentation.serializers import (
     LossReasonUpdateSerializer,
     PipelineCreateSerializer,
     PipelineReadSerializer,
+    StageChangeListSerializer,
     deal_to_dict,
     loss_reason_to_dict,
     pipeline_to_dict,
+    stage_change_to_dict,
 )
 from platform_core.presentation.tenancy import TenantScopedAPIView
 
@@ -298,6 +300,26 @@ class DealMoveView(_Scoped):
             loss_reason_id=serializer.validated_data.get("loss_reason_id"),
         )
         return Response(deal_to_dict(deal))
+
+
+class DealStageHistoryView(_Scoped):
+    @extend_schema(
+        tags=_DEAL_TAGS,
+        operation_id="deals_stage_history",
+        summary="Deal stage history",
+        description=(
+            "Append-only history of a deal's stage transitions (move, win, lost, reopen), "
+            "oldest first: where it went, who moved it, the deal version and, for a loss, "
+            "the reason. History starts at the P0-2 migration."
+        ),
+        parameters=[_TENANT_HEADER],
+        responses=StageChangeListSerializer,
+    )
+    def get(self, request: Request, deal_id: UUID) -> Response:
+        changes = deal_service().stage_history(self.principal(), deal_id)
+        return Response(
+            {"count": len(changes), "results": [stage_change_to_dict(c) for c in changes]}
+        )
 
 
 class DealWinView(_Scoped):

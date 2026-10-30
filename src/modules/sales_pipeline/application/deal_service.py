@@ -25,9 +25,11 @@ from modules.sales_pipeline.application.ports import (
     DealVisibility,
     LossReasonRepository,
     PipelineRepository,
+    StageChangeRepository,
 )
-from modules.sales_pipeline.domain.deal import Deal
+from modules.sales_pipeline.domain.deal import Deal, DealStatus
 from modules.sales_pipeline.domain.pipeline import Pipeline, StageKind
+from modules.sales_pipeline.domain.stage_change import StageChange
 from platform_core.application.ports import EventOutbox
 from shared.application.ports import UnitOfWork
 from shared.domain.errors import ConflictError, DomainValidationError, NotFoundError
@@ -80,6 +82,7 @@ class DealService:
         outbox: EventOutbox,
         audit: AuditLog,
         loss_reasons: LossReasonRepository | None = None,
+        stage_changes: StageChangeRepository | None = None,
         policy: AccessPolicy | None = None,
     ) -> None:
         self._deals = deals
@@ -89,6 +92,7 @@ class DealService:
         self._outbox = outbox
         self._audit = audit
         self._loss_reasons = loss_reasons
+        self._stage_changes = stage_changes
         self._policy = policy or AccessPolicy()
 
     # --- reads --------------------------------------------------------------
@@ -110,6 +114,12 @@ class DealService:
             items=self._deals.list_visible(visibility, filters, limit=limit, offset=offset),
             total=self._deals.count(visibility, filters),
         )
+
+    def stage_history(self, principal: Principal, deal_id: UUID) -> list[StageChange]:
+        self.get(principal, deal_id)  # 404 if the deal is not visible to the caller
+        if self._stage_changes is None:
+            return []
+        return self._stage_changes.list_for_deal(deal_id)
 
     def _visibility(self, principal: Principal, scope: Scope) -> DealVisibility:
         if scope is Scope.ALL:
@@ -187,6 +197,7 @@ class DealService:
             if not stage.is_active:
                 raise DomainValidationError("That stage is no longer active.")
             version = deal.version
+            from_stage = deal.stage_id
             if stage.kind is StageKind.WON:
                 event: DomainEvent | None = deal.win(stage_id=stage_id)
                 audit_action = "deal.won"
@@ -199,6 +210,7 @@ class DealService:
                 audit_action = "deal.stage_changed"
             if event is not None:
                 self._deals.save(deal, expected_version=version)
+                self._record_stage_change(principal, deal, from_stage)
                 self._emit(event, deal)
                 self._record(principal, audit_action, deal)
         return deal
@@ -229,8 +241,10 @@ class DealService:
         with self._uow:
             deal = self._load_for_write(principal, deal_id)
             version = deal.version
+            from_stage = deal.stage_id
             event = deal.reopen(deal.stage_id)
             self._deals.save(deal, expected_version=version)
+            self._record_stage_change(principal, deal, from_stage)
             self._emit(event, deal)
             self._record(principal, "deal.reopened", deal)
         return deal
@@ -247,8 +261,10 @@ class DealService:
         with self._uow:
             deal = self._load_for_write(principal, deal_id)
             version = deal.version
+            from_stage = deal.stage_id
             event = action(deal)
             self._deals.save(deal, expected_version=version)
+            self._record_stage_change(principal, deal, from_stage)
             self._emit(event, deal)
             self._record(principal, audit_action, deal)
         return deal
@@ -281,6 +297,24 @@ class DealService:
     def _check_version(self, deal: Deal, expected_version: int | None) -> None:
         if expected_version is not None and expected_version != deal.version:
             raise ConflictError("Deal was modified by someone else; reload and retry.")
+
+    def _record_stage_change(
+        self, principal: Principal, deal: Deal, from_stage_id: UUID | None
+    ) -> None:
+        if self._stage_changes is None:
+            return
+        is_lost = deal.status is DealStatus.LOST
+        self._stage_changes.add(
+            StageChange.record(
+                deal_id=deal.id,
+                from_stage_id=from_stage_id,
+                to_stage_id=deal.stage_id,
+                author_user_id=principal.user_id,
+                deal_version=deal.version,
+                reason=deal.lost_reason if is_lost else None,
+                loss_reason_id=deal.loss_reason_id if is_lost else None,
+            )
+        )
 
     def _emit(self, event: DomainEvent, deal: Deal) -> None:
         self._outbox.add(event, aggregate_type=AGGREGATE, aggregate_id=str(deal.id))

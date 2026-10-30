@@ -11,6 +11,7 @@ from modules.sales_pipeline.infrastructure.repository import (
     DjangoDealRepository,
     DjangoLossReasonRepository,
     DjangoPipelineRepository,
+    DjangoStageChangeRepository,
 )
 from platform_core.application.context import require_tenant
 from platform_core.infrastructure.messaging.stores import DjangoEventOutbox
@@ -36,6 +37,7 @@ def deal_service() -> DealService:
         outbox=DjangoEventOutbox(alias),
         audit=DjangoAuditLog(alias),
         loss_reasons=DjangoLossReasonRepository(alias),
+        stage_changes=DjangoStageChangeRepository(alias),
     )
 
 

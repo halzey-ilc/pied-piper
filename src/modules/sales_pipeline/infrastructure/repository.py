@@ -9,8 +9,10 @@ from modules.sales_pipeline.application.ports import DealFilter, DealVisibility
 from modules.sales_pipeline.domain.deal import Deal, DealStatus
 from modules.sales_pipeline.domain.loss_reason import LossReason
 from modules.sales_pipeline.domain.pipeline import Pipeline, Stage, StageKind
+from modules.sales_pipeline.domain.stage_change import StageChange
 from modules.sales_pipeline.infrastructure.models import (
     DealRecord,
+    DealStageChangeRecord,
     LossReasonRecord,
     PipelineRecord,
     StageRecord,
@@ -230,3 +232,43 @@ class DjangoLossReasonRepository:
 
     def exists_by_name(self, name: str) -> bool:
         return LossReasonRecord.objects.using(self.using).filter(name=name).exists()
+
+
+def _stage_change_to_domain(row: DealStageChangeRecord) -> StageChange:
+    return StageChange(
+        id=row.id,
+        deal_id=row.deal_id,
+        from_stage_id=row.from_stage_id,
+        to_stage_id=row.to_stage_id,
+        author_user_id=row.author_user_id,
+        deal_version=row.deal_version,
+        reason=row.reason,
+        loss_reason_id=row.loss_reason_id,
+        created_at=row.created_at,
+    )
+
+
+class DjangoStageChangeRepository:
+    def __init__(self, using: str) -> None:
+        self.using = using
+
+    def add(self, change: StageChange) -> None:
+        DealStageChangeRecord.objects.using(self.using).create(
+            id=change.id,
+            deal_id=change.deal_id,
+            from_stage_id=change.from_stage_id,
+            to_stage_id=change.to_stage_id,
+            author_user_id=change.author_user_id,
+            deal_version=change.deal_version,
+            reason=change.reason,
+            loss_reason_id=change.loss_reason_id,
+            created_at=change.created_at,
+        )
+
+    def list_for_deal(self, deal_id: UUID) -> list[StageChange]:
+        rows = (
+            DealStageChangeRecord.objects.using(self.using)
+            .filter(deal_id=deal_id)
+            .order_by("created_at", "id")
+        )
+        return [_stage_change_to_domain(row) for row in rows]
