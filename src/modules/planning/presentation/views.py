@@ -83,7 +83,7 @@ def _enum[E: StrEnum](enum_cls: type[E], value: str | None) -> E | None:
 class PlanListSetView(_Scoped):
     @extend_schema(
         tags=_TAGS,
-        operation_id="plans_list",
+        operation_id="planning_plans_list",
         summary="List plans",
         description=(
             "Sales plans (targets per metric and period) at the company, department or "
@@ -107,7 +107,7 @@ class PlanListSetView(_Scoped):
 
     @extend_schema(
         tags=_TAGS,
-        operation_id="plans_set",
+        operation_id="planning_plans_set",
         summary="Set a plan",
         description=(
             "Creates or updates the target for a (scope, scope_id, metric, period); company "
@@ -134,14 +134,11 @@ class PlanListSetView(_Scoped):
         )
         return Response(plan_to_dict(plan))
 
-    def post(self, request: Request) -> Response:
-        return self.put(request)
-
 
 class PlanHistoryView(_Scoped):
     @extend_schema(
         tags=_TAGS,
-        operation_id="plans_history",
+        operation_id="planning_plan_history",
         summary="Plan change history",
         description="Append-only history of a plan's target changes, oldest first.",
         parameters=[_TENANT_HEADER],
@@ -157,7 +154,7 @@ class PlanHistoryView(_Scoped):
 class AbsenceListCreateView(_Scoped):
     @extend_schema(
         tags=_TAGS,
-        operation_id="absences_list",
+        operation_id="planning_absences_list",
         summary="List absences",
         description=(
             "Staff absences. Filter by user, kind and an overlap window "
@@ -182,7 +179,7 @@ class AbsenceListCreateView(_Scoped):
 
     @extend_schema(
         tags=_TAGS,
-        operation_id="absences_create",
+        operation_id="planning_absences_create",
         summary="Record an absence",
         description=(
             "Records a staff absence (vacation/sick/day_off/business_trip/no_show). Requires "

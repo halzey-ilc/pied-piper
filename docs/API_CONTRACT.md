@@ -4,8 +4,10 @@
 - **Часть 1** — то, что реализовано и уже согласовано с frontend (его `docs/API_CONTRACT.md`, часть 1).
 - **Часть 2** — **предложение** для этапа P0 из [IMPLEMENTATION_AUDIT.md](IMPLEMENTATION_AUDIT.md).
 
-Ничего из части 2 ещё не реализовано. Пути и поля утверждаются вместе с frontend до начала
-кода. Точная схема реализованного API — OpenAPI (`/api/docs/`, `manage.py spectacular`).
+Часть 2 реализована в этапах P0-2…P0-4 (ветки `feature/p0-2-deals`, `feature/p0-3-ops`,
+`feature/p0-4-cabinet`) — полный перечень endpoints, миграций и открытых вопросов см.
+[P0_IMPLEMENTATION_REPORT.md](P0_IMPLEMENTATION_REPORT.md). Точная схема реализованного API —
+OpenAPI (`/api/docs/`, `manage.py spectacular`).
 
 ## Часть 1. Реализовано
 
