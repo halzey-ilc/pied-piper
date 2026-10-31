@@ -109,6 +109,7 @@ class LeadService:
         lead, event = Lead.capture(
             name=command.name,
             owner_user_id=principal.user_id,
+            team_id=principal.department_id,
             source=command.source,
             email=command.email,
             phone=command.phone,

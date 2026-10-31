@@ -8,6 +8,7 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 
 from modules.access_control.domain.rbac import Principal, Role
+from modules.organizations.composition import company_settings
 from modules.payments.application.ports import InvoiceFilter
 from modules.payments.application.service import CreateInvoice
 from modules.payments.composition import invoice_service
@@ -58,6 +59,7 @@ class _Scoped(TenantScopedAPIView):
             tenant_id=self.membership.tenant_id,
             role=Role(self.membership.role),
             team_ids=self.membership.team_ids,
+            department_id=self.membership.department_id,
         )
 
 
@@ -118,7 +120,8 @@ class InvoiceListCreateView(_Scoped):
             self.principal(),
             CreateInvoice(
                 amount=data["amount"],
-                currency=data["currency"],
+                currency=data.get("currency")
+                or company_settings(self.tenant.tenant_id)["currency"],
                 number=data.get("number"),
                 customer_id=data.get("customer_id"),
                 deal_id=data.get("deal_id"),

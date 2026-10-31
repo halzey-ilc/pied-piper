@@ -129,6 +129,7 @@ class DealService:
                 stage_id=pipeline.initial_stage.id,
                 value=Money(command.amount, command.currency),
                 owner_user_id=principal.user_id,
+                team_id=principal.department_id,
                 customer_id=command.customer_id,
                 expected_close_date=command.expected_close_date,
             )

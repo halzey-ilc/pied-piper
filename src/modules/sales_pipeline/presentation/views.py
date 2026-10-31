@@ -8,6 +8,7 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 
 from modules.access_control.domain.rbac import Principal, Role
+from modules.organizations.composition import company_settings
 from modules.sales_pipeline.application.deal_service import EditDeal, OpenDeal
 from modules.sales_pipeline.application.pipeline_service import CreatePipeline
 from modules.sales_pipeline.application.ports import DealFilter
@@ -66,6 +67,7 @@ class _Scoped(TenantScopedAPIView):
             tenant_id=self.membership.tenant_id,
             role=Role(self.membership.role),
             team_ids=self.membership.team_ids,
+            department_id=self.membership.department_id,
         )
 
 
@@ -204,7 +206,8 @@ class DealListCreateView(_Scoped):
             OpenDeal(
                 title=data["title"],
                 amount=data["amount"],
-                currency=data["currency"],
+                currency=data.get("currency")
+                or company_settings(self.tenant.tenant_id)["currency"],
                 pipeline_id=data.get("pipeline_id"),
                 customer_id=data.get("customer_id"),
                 expected_close_date=data.get("expected_close_date"),

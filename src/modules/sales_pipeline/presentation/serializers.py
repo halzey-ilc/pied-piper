@@ -48,7 +48,9 @@ class PipelineReadSerializer(serializers.Serializer[dict[str, Any]]):
 class DealCreateSerializer(serializers.Serializer[dict[str, Any]]):
     title = serializers.CharField(max_length=MAX_TITLE_LENGTH)
     amount = serializers.DecimalField(max_digits=16, decimal_places=2, min_value=Decimal(0))
-    currency = serializers.CharField(max_length=3, default="USD")
+    currency = serializers.CharField(
+        max_length=3, required=False, help_text="Default: the company currency"
+    )
     pipeline_id = serializers.UUIDField(required=False)
     customer_id = serializers.UUIDField(required=False, allow_null=True)
     expected_close_date = serializers.DateField(required=False, allow_null=True)

@@ -36,7 +36,7 @@ class PasswordResetService:
         """Issue and email a reset token. Silent when no active account matches."""
         user_model = get_user_model()
         user = user_model.objects.filter(email__iexact=email, is_active=True).first()
-        if user is None:
+        if user is None or not user.email:
             logger.info("password_reset_requested_unknown")  # no email echoed
             return
 

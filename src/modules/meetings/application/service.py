@@ -130,6 +130,7 @@ class MeetingService:
             meeting, event = Meeting.schedule(
                 title=command.title,
                 owner_user_id=principal.user_id,
+                team_id=principal.department_id,
                 scheduled_start=command.scheduled_start,
                 scheduled_end=command.scheduled_end,
                 description=command.description,

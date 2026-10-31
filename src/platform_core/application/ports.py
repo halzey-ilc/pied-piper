@@ -28,6 +28,7 @@ class TenantMembership:
     tenant_id: UUID
     role: str
     team_ids: frozenset[UUID] = frozenset()
+    department_id: UUID | None = None
 
 
 class MembershipProvider(Protocol):

@@ -135,6 +135,7 @@ class ActivityService:
             lambda: Activity.log_task(
                 subject=command.subject,
                 owner_user_id=principal.user_id,
+                team_id=principal.department_id,
                 title=command.title,
                 body=command.body,
                 due_date=command.due_date,
@@ -148,6 +149,7 @@ class ActivityService:
             lambda: Activity.log_call(
                 subject=command.subject,
                 owner_user_id=principal.user_id,
+                team_id=principal.department_id,
                 direction=command.direction,
                 occurred_at=command.occurred_at,
                 duration_seconds=command.duration_seconds,
@@ -163,6 +165,7 @@ class ActivityService:
             lambda: Activity.log_note(
                 subject=command.subject,
                 owner_user_id=principal.user_id,
+                team_id=principal.department_id,
                 body=command.body,
                 title=command.title,
             ),
