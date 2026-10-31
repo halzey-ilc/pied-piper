@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from datetime import date, datetime
 from typing import Any
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
 from drf_spectacular.utils import OpenApiExample, OpenApiParameter, extend_schema
 from rest_framework import status
@@ -23,15 +25,20 @@ from modules.activities.domain.activity import (
     CallDirection,
     SubjectRef,
     SubjectType,
+    TaskPriority,
     TaskStatus,
+    TaskType,
 )
 from modules.activities.presentation.serializers import (
     ActivityCreateSerializer,
     ActivityListSerializer,
     ActivityReadSerializer,
     ActivityUpdateSerializer,
+    TaskReassignSerializer,
+    TaskResultSerializer,
     activity_to_dict,
 )
+from modules.organizations.composition import company_settings
 from platform_core.presentation.tenancy import TenantScopedAPIView
 from shared.domain.errors import DomainValidationError
 
@@ -91,6 +98,10 @@ class _Scoped(TenantScopedAPIView):
             department_id=self.membership.department_id,
         )
 
+    def company_today(self) -> date:
+        tz = ZoneInfo(str(company_settings(self.tenant.tenant_id)["timezone"]))
+        return datetime.now(tz).date()
+
 
 def _subject(data: dict[str, Any]) -> SubjectRef:
     return SubjectRef(type=SubjectType(data["subject_type"]), id=data["subject_id"])
@@ -129,7 +140,10 @@ class ActivityListCreateView(_Scoped):
             task_status=_enum(TaskStatus, request.query_params.get("task_status")),
         )
         page = activity_service().timeline(self.principal(), filters, limit=limit, offset=offset)
-        return Response({"count": page.total, "results": [activity_to_dict(a) for a in page.items]})
+        today = self.company_today()
+        return Response(
+            {"count": page.total, "results": [activity_to_dict(a, today) for a in page.items]}
+        )
 
     @extend_schema(
         tags=_TAGS,
@@ -171,7 +185,9 @@ class ActivityListCreateView(_Scoped):
         serializer = ActivityCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         activity = self._dispatch_create(serializer.validated_data)
-        return Response(activity_to_dict(activity), status=status.HTTP_201_CREATED)
+        return Response(
+            activity_to_dict(activity, self.company_today()), status=status.HTTP_201_CREATED
+        )
 
     def _dispatch_create(self, data: dict[str, Any]) -> Any:
         service: ActivityService = activity_service()
@@ -186,6 +202,9 @@ class ActivityListCreateView(_Scoped):
                     title=data.get("title") or "",
                     body=data.get("body") or None,
                     due_date=data.get("due_date"),
+                    task_type=TaskType(data.get("task_type", TaskType.OTHER.value)),
+                    priority=TaskPriority(data.get("priority", TaskPriority.NORMAL.value)),
+                    assignee_user_id=data.get("assignee_user_id"),
                 ),
             )
         if kind is ActivityKind.CALL:
@@ -220,7 +239,8 @@ class ActivityDetailView(_Scoped):
         responses=ActivityReadSerializer,
     )
     def get(self, request: Request, activity_id: UUID) -> Response:
-        return Response(activity_to_dict(activity_service().get(self.principal(), activity_id)))
+        activity = activity_service().get(self.principal(), activity_id)
+        return Response(activity_to_dict(activity, self.company_today()))
 
     @extend_schema(
         tags=_TAGS,
@@ -247,9 +267,10 @@ class ActivityDetailView(_Scoped):
                 body=data.get("body"),
                 due_date=data.get("due_date"),
                 set_due_date="due_date" in request.data,
+                priority=TaskPriority(data["priority"]) if data.get("priority") else None,
             ),
         )
-        return Response(activity_to_dict(activity))
+        return Response(activity_to_dict(activity, self.company_today()))
 
 
 class ActivityCompleteView(_Scoped):
@@ -257,15 +278,59 @@ class ActivityCompleteView(_Scoped):
         tags=_TAGS,
         operation_id="activities_complete",
         summary="Complete a task",
-        description="Marks a task activity as completed. Only tasks can be completed.",
+        description="Marks a task completed, with an optional result note. Tasks only.",
         parameters=[_TENANT_HEADER],
-        request=None,
+        request=TaskResultSerializer,
         responses=ActivityReadSerializer,
     )
     def post(self, request: Request, activity_id: UUID) -> Response:
-        return Response(
-            activity_to_dict(activity_service().complete_task(self.principal(), activity_id))
+        serializer = TaskResultSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        activity = activity_service().complete_task(
+            self.principal(), activity_id, serializer.validated_data.get("result") or None
         )
+        return Response(activity_to_dict(activity, self.company_today()))
+
+
+class ActivityCancelView(_Scoped):
+    @extend_schema(
+        tags=_TAGS,
+        operation_id="activities_cancel",
+        summary="Cancel a task",
+        description="Cancels an open task, with an optional result note. Tasks only.",
+        parameters=[_TENANT_HEADER],
+        request=TaskResultSerializer,
+        responses=ActivityReadSerializer,
+    )
+    def post(self, request: Request, activity_id: UUID) -> Response:
+        serializer = TaskResultSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        activity = activity_service().cancel_task(
+            self.principal(), activity_id, serializer.validated_data.get("result") or None
+        )
+        return Response(activity_to_dict(activity, self.company_today()))
+
+
+class ActivityReassignView(_Scoped):
+    @extend_schema(
+        tags=_TAGS,
+        operation_id="activities_reassign",
+        summary="Reassign a task",
+        description=(
+            "Assigns an open task to another user. Needs team/all scope (a head of sales or "
+            "director); a manager can only keep tasks assigned to themselves."
+        ),
+        parameters=[_TENANT_HEADER],
+        request=TaskReassignSerializer,
+        responses=ActivityReadSerializer,
+    )
+    def post(self, request: Request, activity_id: UUID) -> Response:
+        serializer = TaskReassignSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        activity = activity_service().reassign_task(
+            self.principal(), activity_id, serializer.validated_data["assignee_user_id"]
+        )
+        return Response(activity_to_dict(activity, self.company_today()))
 
 
 class ActivityReopenView(_Scoped):
@@ -273,15 +338,14 @@ class ActivityReopenView(_Scoped):
         tags=_TAGS,
         operation_id="activities_reopen",
         summary="Reopen a task",
-        description="Reopens a completed task.",
+        description="Reopens a completed or cancelled task.",
         parameters=[_TENANT_HEADER],
         request=None,
         responses=ActivityReadSerializer,
     )
     def post(self, request: Request, activity_id: UUID) -> Response:
-        return Response(
-            activity_to_dict(activity_service().reopen_task(self.principal(), activity_id))
-        )
+        activity = activity_service().reopen_task(self.principal(), activity_id)
+        return Response(activity_to_dict(activity, self.company_today()))
 
 
 def _enum(enum_cls: Any, value: str | None) -> Any:

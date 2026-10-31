@@ -24,14 +24,16 @@ from modules.meetings.application.ports import (
     SubjectChecker,
 )
 from modules.meetings.domain.meeting import (
+    ConfirmationSource,
     Meeting,
+    MeetingFormat,
     MeetingLink,
     Participant,
     ParticipantResponse,
 )
 from platform_core.application.ports import EventOutbox
 from shared.application.ports import UnitOfWork
-from shared.domain.errors import ConflictError, NotFoundError
+from shared.domain.errors import ConflictError, DomainValidationError, NotFoundError
 from shared.domain.events import DomainEvent
 
 AGGREGATE = "meeting"
@@ -46,6 +48,9 @@ class ScheduleMeeting:
     description: str | None = None
     location: str | None = None
     link: MeetingLink | None = None
+    meeting_format: MeetingFormat = MeetingFormat.OFFICE
+    host_user_id: UUID | None = None
+    booked_by_user_id: UUID | None = None
     participants: tuple[Participant, ...] = ()
     reminders: tuple[int, ...] = ()
 
@@ -136,6 +141,9 @@ class MeetingService:
                 description=command.description,
                 location=command.location,
                 link=command.link,
+                meeting_format=command.meeting_format,
+                host_user_id=command.host_user_id,
+                booked_by_user_id=command.booked_by_user_id,
                 participants=command.participants,
                 reminders=command.reminders,
             )
@@ -175,6 +183,57 @@ class MeetingService:
 
     def cancel(self, principal: Principal, meeting_id: UUID, reason: str) -> Meeting:
         return self._mutate(principal, meeting_id, lambda m: m.cancel(reason), "meeting.cancelled")
+
+    def confirm(
+        self,
+        principal: Principal,
+        meeting_id: UUID,
+        source: ConfirmationSource = ConfirmationSource.MANUAL,
+    ) -> Meeting:
+        with self._uow:
+            meeting = self._load_for_write(principal, meeting_id)
+            version = meeting.version
+            meeting.confirm(by_user_id=principal.user_id, source=source)
+            self._repo.save(meeting, expected_version=version)
+            self._record(principal, "meeting.confirmed", meeting)
+        return meeting
+
+    def record_outcome(
+        self,
+        principal: Principal,
+        meeting_id: UUID,
+        outcome: str,
+        *,
+        new_start: datetime | None = None,
+        new_end: datetime | None = None,
+        comment: str | None = None,
+    ) -> Meeting:
+        """Record how a scheduled meeting turned out: held / no_show / rescheduled
+        (with or without a new date) / cancelled."""
+        with self._uow:
+            meeting = self._load_for_write(principal, meeting_id)
+            version = meeting.version
+            event: DomainEvent | None = None
+            if outcome == "held":
+                event = meeting.complete(comment)
+            elif outcome == "no_show":
+                event = meeting.mark_no_show(comment)
+            elif outcome == "cancelled":
+                event = meeting.cancel(comment or "Cancelled.")
+            elif outcome == "rescheduled":
+                if new_start is not None and new_end is not None:
+                    event = meeting.reschedule(new_start, new_end)
+                elif new_start is not None or new_end is not None:
+                    raise DomainValidationError("Provide both new_start and new_end, or neither.")
+                else:
+                    meeting.mark_rescheduled_pending(comment)
+            else:
+                raise DomainValidationError(f"Unknown outcome: {outcome}.")
+            self._repo.save(meeting, expected_version=version)
+            if event is not None:
+                self._emit(event, meeting)
+            self._record(principal, f"meeting.outcome_{outcome}", meeting)
+        return meeting
 
     def add_participant(
         self, principal: Principal, meeting_id: UUID, participant: Participant

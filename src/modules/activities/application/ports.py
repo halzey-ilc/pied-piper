@@ -43,6 +43,10 @@ class ActivityRepository(Protocol):
 
     def count(self, visibility: ActivityVisibility, filters: ActivityFilter) -> int: ...
 
+    def count_open_tasks_for_subject(self, subject: SubjectRef) -> int:
+        """Open tasks attached to one subject (used to cap open tasks per deal)."""
+        ...
+
 
 class SubjectChecker(Protocol):
     """Verifies the customer or deal an activity is attached to exists in this tenant."""

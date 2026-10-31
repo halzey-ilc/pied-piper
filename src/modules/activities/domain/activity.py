@@ -30,11 +30,27 @@ class ActivityKind(StrEnum):
 class SubjectType(StrEnum):
     CUSTOMER = "customer"
     DEAL = "deal"
+    LEAD = "lead"
 
 
 class TaskStatus(StrEnum):
     OPEN = "open"
     COMPLETED = "completed"
+    CANCELLED = "cancelled"
+
+
+class TaskType(StrEnum):
+    CALL = "call"
+    MEETING = "meeting"
+    FOLLOW_UP = "follow_up"
+    OTHER = "other"
+
+
+class TaskPriority(StrEnum):
+    LOW = "low"
+    NORMAL = "normal"
+    HIGH = "high"
+    URGENT = "urgent"
 
 
 class CallDirection(StrEnum):
@@ -103,6 +119,11 @@ class Activity:
     # task
     due_date: date | None = None
     task_status: TaskStatus | None = None
+    task_type: TaskType | None = None
+    priority: TaskPriority | None = None
+    assignee_user_id: UUID | None = None
+    created_by: UUID | None = None
+    result: str | None = None
     completed_at: datetime | None = None
     # call
     direction: CallDirection | None = None
@@ -119,21 +140,30 @@ class Activity:
         cls,
         *,
         subject: SubjectRef,
-        owner_user_id: UUID,
+        created_by: UUID,
+        assignee_user_id: UUID,
         title: str,
         body: str | None = None,
         due_date: date | None = None,
+        task_type: TaskType = TaskType.OTHER,
+        priority: TaskPriority = TaskPriority.NORMAL,
         team_id: UUID | None = None,
     ) -> tuple[Activity, ActivityLogged]:
+        # The assignee is the responsible owner (RBAC scope follows them); the
+        # creator is kept separately so author and assignee can differ.
         activity = cls(
             id=uuid4(),
             kind=ActivityKind.TASK,
             subject=subject,
-            owner_user_id=owner_user_id,
+            owner_user_id=assignee_user_id,
+            assignee_user_id=assignee_user_id,
+            created_by=created_by,
             title=_clean(title, label="Task title", max_length=MAX_TITLE_LENGTH, required=True),
             body=_clean(body or "", label="Body", max_length=MAX_BODY_LENGTH, required=False),
             due_date=due_date,
             task_status=TaskStatus.OPEN,
+            task_type=task_type,
+            priority=priority,
             team_id=team_id,
         )
         return activity, activity._logged()
@@ -208,9 +238,12 @@ class Activity:
         body: str | None = None,
         due_date: date | None = None,
         set_due_date: bool = False,
+        priority: TaskPriority | None = None,
     ) -> bool:
-        """Edit free-text fields and (for tasks) the due date. Returns True if changed."""
+        """Edit free-text fields and (for tasks) the due date and priority."""
         changed = False
+        if priority is not None and self.kind is ActivityKind.TASK and priority != self.priority:
+            self.priority, changed = priority, True
         if title is not None:
             new_title = _clean(title, label="Title", max_length=MAX_TITLE_LENGTH, required=False)
             if self.kind is ActivityKind.TASK and new_title is None:
@@ -229,14 +262,27 @@ class Activity:
             self.version += 1
         return changed
 
-    def complete(self) -> TaskCompleted:
+    def complete(self, result: str | None = None) -> TaskCompleted:
         self._require_task("completed")
-        if self.task_status is TaskStatus.COMPLETED:
-            raise ActivityStateError("The task is already completed.")
+        if self.task_status is not TaskStatus.OPEN:
+            raise ActivityStateError(f"A {self.task_status} task cannot be completed.")
         self.task_status = TaskStatus.COMPLETED
+        self.result = _clean(
+            result or "", label="Result", max_length=MAX_BODY_LENGTH, required=False
+        )
         self.completed_at = datetime.now(UTC)
         self.version += 1
         return TaskCompleted(activity_id=self.id)
+
+    def cancel(self, result: str | None = None) -> None:
+        self._require_task("cancelled")
+        if self.task_status is not TaskStatus.OPEN:
+            raise ActivityStateError(f"A {self.task_status} task cannot be cancelled.")
+        self.task_status = TaskStatus.CANCELLED
+        self.result = _clean(
+            result or "", label="Result", max_length=MAX_BODY_LENGTH, required=False
+        )
+        self.version += 1
 
     def reopen(self) -> None:
         self._require_task("reopened")
@@ -245,6 +291,21 @@ class Activity:
         self.task_status = TaskStatus.OPEN
         self.completed_at = None
         self.version += 1
+
+    def reassign(self, assignee_user_id: UUID, *, team_id: UUID | None, set_team: bool) -> bool:
+        self._require_task("reassigned")
+        if self.task_status is not TaskStatus.OPEN:
+            raise ActivityStateError("Only an open task can be reassigned.")
+        changed = False
+        if assignee_user_id != self.assignee_user_id:
+            self.assignee_user_id = assignee_user_id
+            self.owner_user_id = assignee_user_id
+            changed = True
+        if set_team and team_id != self.team_id:
+            self.team_id, changed = team_id, True
+        if changed:
+            self.version += 1
+        return changed
 
     def _require_task(self, action: str) -> None:
         if self.kind is not ActivityKind.TASK:

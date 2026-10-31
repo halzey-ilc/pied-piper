@@ -100,8 +100,8 @@ def test_lifecycle_reschedule_complete(
     completed = client.post(
         f"/api/v1/meetings/{meeting_id}/complete/", {"outcome": "agreed next steps"}, format="json"
     )
-    assert completed.status_code == 200 and completed.json()["status"] == "completed"
-    # A completed meeting is terminal.
+    assert completed.status_code == 200 and completed.json()["status"] == "held"
+    # A held meeting is terminal.
     assert (
         client.post(
             f"/api/v1/meetings/{meeting_id}/cancel/", {"reason": "x"}, format="json"
@@ -114,6 +114,67 @@ def test_lifecycle_reschedule_complete(
         "meetings.meeting_rescheduled",
         "meetings.meeting_completed",
     } <= events
+
+
+def test_format_host_and_confirmation(
+    make_user: Callable[..., Any],
+    tenants: dict[str, TenantFixture],
+    client_for: Callable[..., APIClient],
+) -> None:
+    client = client_for(make_user("owner", tenant=tenants["acme"]), "acme")
+    scheduled = _schedule(client, format="online")
+    assert scheduled.status_code == 201, scheduled.content
+    body = scheduled.json()
+    assert body["format"] == "online"
+    assert body["duration_minutes"] == 30
+    # host and booked_by default to the owner.
+    assert body["host_user_id"] == body["owner_user_id"]
+    assert body["booked_by_user_id"] == body["owner_user_id"]
+    assert body["confirmed_at"] is None
+
+    meeting_id = body["id"]
+    confirmed = client.post(
+        f"/api/v1/meetings/{meeting_id}/confirm/", {"source": "manual"}, format="json"
+    )
+    assert confirmed.status_code == 200, confirmed.content
+    cbody = confirmed.json()
+    assert cbody["confirmed_at"] is not None
+    assert cbody["confirmation_source"] == "manual"
+    assert cbody["confirmed_by_user_id"] == body["owner_user_id"]
+
+
+def test_outcome_no_show_held_and_reschedule(
+    make_user: Callable[..., Any],
+    tenants: dict[str, TenantFixture],
+    client_for: Callable[..., APIClient],
+) -> None:
+    client = client_for(make_user("owner", tenant=tenants["acme"]), "acme")
+
+    # no_show
+    m1 = _schedule(client).json()["id"]
+    r1 = client.post(
+        f"/api/v1/meetings/{m1}/outcome/",
+        {"outcome": "no_show", "comment": "did not come"},
+        format="json",
+    )
+    assert r1.status_code == 200 and r1.json()["status"] == "no_show"
+    assert r1.json()["outcome"] == "did not come"
+
+    # held
+    m2 = _schedule(client).json()["id"]
+    r2 = client.post(f"/api/v1/meetings/{m2}/outcome/", {"outcome": "held"}, format="json")
+    assert r2.status_code == 200 and r2.json()["status"] == "held"
+
+    # rescheduled without a date parks the meeting; then a new date reschedules it.
+    m3 = _schedule(client).json()["id"]
+    r3 = client.post(f"/api/v1/meetings/{m3}/outcome/", {"outcome": "rescheduled"}, format="json")
+    assert r3.status_code == 200 and r3.json()["status"] == "rescheduled"
+    r3b = client.post(
+        f"/api/v1/meetings/{m3}/reschedule/",
+        {"scheduled_start": "2026-12-01T09:00:00Z", "scheduled_end": "2026-12-01T09:30:00Z"},
+        format="json",
+    )
+    assert r3b.status_code == 200 and r3b.json()["status"] == "scheduled"
 
 
 def test_participants_add_and_respond(

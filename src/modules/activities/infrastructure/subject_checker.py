@@ -6,6 +6,7 @@ from uuid import UUID
 
 from modules.activities.domain.activity import SubjectType
 from modules.customers.infrastructure.models import CustomerRecord
+from modules.leads.infrastructure.models import LeadRecord
 from modules.sales_pipeline.infrastructure.models import DealRecord
 
 
@@ -16,4 +17,6 @@ class DjangoSubjectChecker:
     def exists(self, subject_type: SubjectType, subject_id: UUID) -> bool:
         if subject_type is SubjectType.CUSTOMER:
             return CustomerRecord.objects.using(self.using).filter(id=subject_id).exists()
+        if subject_type is SubjectType.LEAD:
+            return LeadRecord.objects.using(self.using).filter(id=subject_id).exists()
         return DealRecord.objects.using(self.using).filter(id=subject_id).exists()

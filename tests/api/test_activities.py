@@ -164,6 +164,120 @@ def test_rbac_scope_and_roles(
     )
 
 
+def _deal(client: APIClient) -> str:
+    client.post(
+        "/api/v1/sales/pipelines/",
+        {"name": "P", "is_default": True, "stages": [{"name": "New"}]},
+        format="json",
+    )
+    response = client.post(
+        "/api/v1/sales/deals/", {"title": "D", "amount": "100.00"}, format="json"
+    )
+    assert response.status_code == 201, response.content
+    deal_id: str = response.json()["id"]
+    return deal_id
+
+
+def test_task_fields_result_cancel_and_overdue(
+    make_user: Callable[..., Any],
+    tenants: dict[str, TenantFixture],
+    client_for: Callable[..., APIClient],
+) -> None:
+    client = client_for(make_user("owner", tenant=tenants["acme"]), "acme")
+    cid = _customer(client)
+    created = _log(
+        client,
+        kind="task",
+        subject_type="customer",
+        subject_id=cid,
+        title="Call",
+        task_type="call",
+        priority="high",
+        due_date="2000-01-01",
+    )
+    assert created.status_code == 201, created.content
+    body = created.json()
+    assert body["task_type"] == "call" and body["priority"] == "high"
+    assert body["is_overdue"] is True and body["due_group"] == "overdue"
+    assert body["created_by"] == body["assignee_user_id"] == body["owner_user_id"]
+
+    done = client.post(
+        f"/api/v1/activities/{body['id']}/complete/", {"result": "reached client"}, format="json"
+    )
+    assert done.status_code == 200 and done.json()["result"] == "reached client"
+
+    other = _log(client, kind="task", subject_type="customer", subject_id=cid, title="X").json()[
+        "id"
+    ]
+    cancelled = client.post(
+        f"/api/v1/activities/{other}/cancel/", {"result": "not needed"}, format="json"
+    )
+    assert cancelled.status_code == 200 and cancelled.json()["task_status"] == "cancelled"
+
+
+def test_at_most_two_open_tasks_per_deal(
+    make_user: Callable[..., Any],
+    tenants: dict[str, TenantFixture],
+    client_for: Callable[..., APIClient],
+) -> None:
+    client = client_for(make_user("owner", tenant=tenants["acme"]), "acme")
+    did = _deal(client)
+    t1 = _log(client, kind="task", subject_type="deal", subject_id=did, title="t1")
+    assert t1.status_code == 201
+    assert (
+        _log(client, kind="task", subject_type="deal", subject_id=did, title="t2").status_code
+        == 201
+    )
+    # The third open task on the same deal is rejected.
+    assert (
+        _log(client, kind="task", subject_type="deal", subject_id=did, title="t3").status_code
+        == 409
+    )
+    # Completing one frees a slot.
+    client.post(f"/api/v1/activities/{t1.json()['id']}/complete/", {}, format="json")
+    assert (
+        _log(client, kind="task", subject_type="deal", subject_id=did, title="t4").status_code
+        == 201
+    )
+
+
+def test_task_assignment_requires_management_scope(
+    make_user: Callable[..., Any],
+    tenants: dict[str, TenantFixture],
+    client_for: Callable[..., APIClient],
+) -> None:
+    owner_user = make_user("owner", tenant=tenants["acme"])
+    owner = client_for(owner_user, "acme")
+    rep_user = make_user("rep", tenant=tenants["acme"], role=Role.SALES_REP)
+    rep = client_for(rep_user, "acme")
+    cid = _customer(owner)
+
+    # Owner (ALL scope) can assign a task to the rep.
+    assigned = _log(
+        owner,
+        kind="task",
+        subject_type="customer",
+        subject_id=cid,
+        title="For the rep",
+        assignee_user_id=str(rep_user.id),
+    )
+    assert assigned.status_code == 201, assigned.content
+    assert assigned.json()["assignee_user_id"] == str(rep_user.id)
+    # The assigned task is now owned by the rep, so the rep can see it.
+    assert rep.get(f"/api/v1/activities/{assigned.json()['id']}/").status_code == 200
+
+    # A sales rep (OWN scope) cannot assign a task to someone else.
+    denied = _log(
+        rep,
+        kind="task",
+        subject_type="customer",
+        subject_id=cid,
+        title="Nope",
+        assignee_user_id=str(owner_user.id),
+    )
+    assert denied.status_code == 403
+
+
 def test_cross_tenant_isolation(
     make_user: Callable[..., Any],
     tenants: dict[str, TenantFixture],

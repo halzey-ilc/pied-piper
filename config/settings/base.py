@@ -52,6 +52,7 @@ INSTALLED_APPS = [
     "modules.ai_insights.infrastructure.apps.AiInsightsConfig",
     "modules.operations.infrastructure.apps.OperationsConfig",
     "modules.risk.infrastructure.apps.RiskConfig",
+    "modules.planning.infrastructure.apps.PlanningConfig",
 ]
 
 MIDDLEWARE = [
@@ -168,6 +169,7 @@ TENANCY: dict[str, Any] = {
         "ai_insights",
         "operations",
         "risk",
+        "planning",
     },
     "SHARED_APPS": {"messaging", "audit"},
     "IGNORED_APPS": {"rest_framework", "corsheaders", "drf_spectacular"},

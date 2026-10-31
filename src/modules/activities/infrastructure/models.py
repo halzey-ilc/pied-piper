@@ -6,7 +6,9 @@ from modules.activities.domain.activity import (
     ActivityKind,
     CallDirection,
     SubjectType,
+    TaskPriority,
     TaskStatus,
+    TaskType,
 )
 
 
@@ -35,6 +37,21 @@ class ActivityRecord(models.Model):
         blank=True,
         choices=[(s.value, s.name.title()) for s in TaskStatus],
     )
+    task_type = models.CharField(  # noqa: DJ001
+        max_length=10,
+        null=True,
+        blank=True,
+        choices=[(t.value, t.name.title()) for t in TaskType],
+    )
+    priority = models.CharField(  # noqa: DJ001
+        max_length=8,
+        null=True,
+        blank=True,
+        choices=[(p.value, p.name.title()) for p in TaskPriority],
+    )
+    assignee_user_id = models.UUIDField(null=True, blank=True)
+    created_by = models.UUIDField(null=True, blank=True)
+    result = models.CharField(max_length=5000, null=True, blank=True)  # noqa: DJ001
     completed_at = models.DateTimeField(null=True, blank=True)
     # call
     direction = models.CharField(  # noqa: DJ001
@@ -58,6 +75,7 @@ class ActivityRecord(models.Model):
             ),
             models.Index(fields=["kind"], name="act_kind_idx"),
             models.Index(fields=["owner_user_id"], name="act_owner_idx"),
+            models.Index(fields=["assignee_user_id"], name="act_assignee_idx"),
             models.Index(fields=["team_id"], name="act_team_idx"),
             models.Index(fields=["task_status"], name="act_task_status_idx"),
             models.Index(fields=["created_at"], name="act_created_idx"),

@@ -3,8 +3,10 @@ from django.urls import path
 from modules.meetings.presentation.views import (
     MeetingCancelView,
     MeetingCompleteView,
+    MeetingConfirmView,
     MeetingDetailView,
     MeetingListCreateView,
+    MeetingOutcomeView,
     MeetingParticipantsView,
     MeetingRescheduleView,
     MeetingRespondView,
@@ -18,6 +20,8 @@ urlpatterns = [
     ),
     path("<uuid:meeting_id>/complete/", MeetingCompleteView.as_view(), name="meeting-complete"),
     path("<uuid:meeting_id>/cancel/", MeetingCancelView.as_view(), name="meeting-cancel"),
+    path("<uuid:meeting_id>/confirm/", MeetingConfirmView.as_view(), name="meeting-confirm"),
+    path("<uuid:meeting_id>/outcome/", MeetingOutcomeView.as_view(), name="meeting-outcome"),
     path(
         "<uuid:meeting_id>/participants/",
         MeetingParticipantsView.as_view(),

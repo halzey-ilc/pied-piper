@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from django.db import models
+from django.db.models import Q
 
 from modules.payments.domain.invoice import InvoiceStatus
+from modules.payments.domain.payment import PaymentKind
 
 
 class InvoiceRecord(models.Model):
@@ -39,3 +41,44 @@ class InvoiceRecord(models.Model):
 
     def __str__(self) -> str:
         return f"{self.number} ({self.status})"
+
+
+class PaymentRecord(models.Model):
+    """One received or refunded payment. Stored individually to support prepayments,
+    instalments, full payments and refunds; never mutated into a running balance."""
+
+    id = models.UUIDField(primary_key=True, editable=False)
+    amount = models.DecimalField(max_digits=16, decimal_places=2)
+    currency = models.CharField(max_length=3)
+    kind = models.CharField(max_length=10, choices=[(k.value, k.name.title()) for k in PaymentKind])
+    paid_on = models.DateField()
+    seller_user_id = models.UUIDField()
+    deal_id = models.UUIDField(null=True, blank=True)
+    customer_id = models.UUIDField(null=True, blank=True)
+    is_refund = models.BooleanField(default=False)
+    reference = models.CharField(max_length=100, null=True, blank=True)  # noqa: DJ001
+    owner_user_id = models.UUIDField()
+    team_id = models.UUIDField(null=True, blank=True)
+    created_at = models.DateTimeField()
+
+    class Meta:
+        db_table = "payments_payment"
+        indexes = [
+            models.Index(fields=["deal_id", "paid_on"], name="payment_deal_idx"),
+            models.Index(fields=["customer_id"], name="payment_customer_idx"),
+            models.Index(fields=["seller_user_id"], name="payment_seller_idx"),
+            models.Index(fields=["owner_user_id"], name="payment_owner_idx"),
+            models.Index(fields=["team_id"], name="payment_team_idx"),
+            models.Index(fields=["paid_on"], name="payment_paid_on_idx"),
+        ]
+        constraints = [
+            # Idempotency: a reference, when present, is unique per tenant.
+            models.UniqueConstraint(
+                fields=["reference"],
+                condition=Q(reference__isnull=False),
+                name="payment_reference_unique",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.amount} {self.currency} ({self.kind})"

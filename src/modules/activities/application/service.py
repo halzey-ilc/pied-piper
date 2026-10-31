@@ -25,15 +25,20 @@ from modules.activities.domain.activity import (
     Activity,
     CallDirection,
     SubjectRef,
+    SubjectType,
+    TaskPriority,
+    TaskType,
 )
 from modules.audit.application.ports import AuditLog
 from modules.audit.domain.entry import AuditEntry
 from platform_core.application.ports import EventOutbox
 from shared.application.ports import UnitOfWork
-from shared.domain.errors import ConflictError, NotFoundError
+from shared.domain.errors import AccessDeniedError, ConflictError, NotFoundError
 from shared.domain.events import DomainEvent
 
 AGGREGATE = "activity"
+# A deal may carry at most this many open tasks at once (spec: operations hygiene).
+MAX_OPEN_TASKS_PER_DEAL = 2
 _Factory = Callable[[], tuple["Activity", "DomainEvent"]]
 
 
@@ -43,6 +48,9 @@ class LogTask:
     title: str
     body: str | None = None
     due_date: date | None = None
+    task_type: TaskType = TaskType.OTHER
+    priority: TaskPriority = TaskPriority.NORMAL
+    assignee_user_id: UUID | None = None  # defaults to the creator
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,6 +78,7 @@ class EditActivity:
     body: str | None = None
     due_date: date | None = None
     set_due_date: bool = False
+    priority: TaskPriority | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -129,18 +138,40 @@ class ActivityService:
     # --- writes -------------------------------------------------------------
 
     def log_task(self, principal: Principal, command: LogTask) -> Activity:
-        return self._log(
-            principal,
-            command.subject,
-            lambda: Activity.log_task(
+        scope = self._policy.require(principal, Permission.ACTIVITIES_CREATE)
+        assignee = command.assignee_user_id or principal.user_id
+        # A manager (OWN scope) may only assign tasks to themselves; a head of
+        # sales (TEAM) or director/admin (ALL) may assign them to others.
+        if assignee != principal.user_id and scope is Scope.OWN:
+            raise AccessDeniedError("You can only assign tasks to yourself.")
+        with self._uow:
+            if not self._subjects.exists(command.subject.type, command.subject.id):
+                raise NotFoundError(
+                    f"The {command.subject.type.value} this task refers to was not found."
+                )
+            if (
+                command.subject.type is SubjectType.DEAL
+                and self._repo.count_open_tasks_for_subject(command.subject)
+                >= MAX_OPEN_TASKS_PER_DEAL
+            ):
+                raise ConflictError(
+                    f"A deal can have at most {MAX_OPEN_TASKS_PER_DEAL} open tasks."
+                )
+            activity, event = Activity.log_task(
                 subject=command.subject,
-                owner_user_id=principal.user_id,
+                created_by=principal.user_id,
+                assignee_user_id=assignee,
                 team_id=principal.department_id,
                 title=command.title,
                 body=command.body,
                 due_date=command.due_date,
-            ),
-        )
+                task_type=command.task_type,
+                priority=command.priority,
+            )
+            self._repo.add(activity)
+            self._outbox.add(event, aggregate_type=AGGREGATE, aggregate_id=str(activity.id))
+            self._record(principal, "activity.logged", activity)
+        return activity
 
     def log_call(self, principal: Principal, command: LogCall) -> Activity:
         return self._log(
@@ -181,19 +212,50 @@ class ActivityService:
                 body=command.body,
                 due_date=command.due_date,
                 set_due_date=command.set_due_date,
+                priority=command.priority,
             ):
                 self._repo.save(activity, expected_version=version)
                 self._record(principal, "activity.updated", activity)
         return activity
 
-    def complete_task(self, principal: Principal, activity_id: UUID) -> Activity:
+    def complete_task(
+        self, principal: Principal, activity_id: UUID, result: str | None = None
+    ) -> Activity:
         with self._uow:
             activity = self._load_for_write(principal, activity_id)
             version = activity.version
-            event = activity.complete()
+            event = activity.complete(result)
             self._repo.save(activity, expected_version=version)
             self._outbox.add(event, aggregate_type=AGGREGATE, aggregate_id=str(activity.id))
             self._record(principal, "activity.task_completed", activity)
+        return activity
+
+    def cancel_task(
+        self, principal: Principal, activity_id: UUID, result: str | None = None
+    ) -> Activity:
+        with self._uow:
+            activity = self._load_for_write(principal, activity_id)
+            version = activity.version
+            activity.cancel(result)
+            self._repo.save(activity, expected_version=version)
+            self._record(principal, "activity.task_cancelled", activity)
+        return activity
+
+    def reassign_task(
+        self, principal: Principal, activity_id: UUID, assignee_user_id: UUID
+    ) -> Activity:
+        with self._uow:
+            activity = self._load_for_write(principal, activity_id)
+            # Reassigning to someone else needs management scope (not OWN).
+            scope = self._policy.require(
+                principal, Permission.ACTIVITIES_UPDATE, _ownership(activity)
+            )
+            if assignee_user_id != activity.assignee_user_id and scope is Scope.OWN:
+                raise AccessDeniedError("You cannot reassign tasks to another user.")
+            version = activity.version
+            if activity.reassign(assignee_user_id, team_id=principal.department_id, set_team=True):
+                self._repo.save(activity, expected_version=version)
+                self._record(principal, "activity.task_reassigned", activity)
         return activity
 
     def reopen_task(self, principal: Principal, activity_id: UUID) -> Activity:

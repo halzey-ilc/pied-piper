@@ -11,7 +11,9 @@ from modules.activities.domain.activity import (
     CallDirection,
     SubjectRef,
     SubjectType,
+    TaskPriority,
     TaskStatus,
+    TaskType,
 )
 from modules.activities.infrastructure.models import ActivityRecord
 from shared.domain.errors import ConflictError
@@ -28,6 +30,11 @@ def _to_domain(row: ActivityRecord) -> Activity:
         team_id=row.team_id,
         due_date=row.due_date,
         task_status=TaskStatus(row.task_status) if row.task_status else None,
+        task_type=TaskType(row.task_type) if row.task_type else None,
+        priority=TaskPriority(row.priority) if row.priority else None,
+        assignee_user_id=row.assignee_user_id,
+        created_by=row.created_by,
+        result=row.result,
         completed_at=row.completed_at,
         direction=CallDirection(row.direction) if row.direction else None,
         duration_seconds=row.duration_seconds,
@@ -74,6 +81,11 @@ class DjangoActivityRepository:
             body=activity.body,
             due_date=activity.due_date,
             task_status=activity.task_status.value if activity.task_status else None,
+            task_type=activity.task_type.value if activity.task_type else None,
+            priority=activity.priority.value if activity.priority else None,
+            assignee_user_id=activity.assignee_user_id,
+            created_by=activity.created_by,
+            result=activity.result,
             completed_at=activity.completed_at,
             direction=activity.direction.value if activity.direction else None,
             duration_seconds=activity.duration_seconds,
@@ -96,6 +108,11 @@ class DjangoActivityRepository:
                 body=activity.body,
                 due_date=activity.due_date,
                 task_status=activity.task_status.value if activity.task_status else None,
+                priority=activity.priority.value if activity.priority else None,
+                assignee_user_id=activity.assignee_user_id,
+                owner_user_id=activity.owner_user_id,
+                team_id=activity.team_id,
+                result=activity.result,
                 completed_at=activity.completed_at,
                 outcome=activity.outcome,
                 version=F("version") + 1,
@@ -103,6 +120,18 @@ class DjangoActivityRepository:
         )
         if updated != 1:
             raise ConflictError("Activity was modified by someone else; reload and retry.")
+
+    def count_open_tasks_for_subject(self, subject: SubjectRef) -> int:
+        return (
+            self._qs()
+            .filter(
+                kind=ActivityKind.TASK.value,
+                subject_type=subject.type.value,
+                subject_id=subject.id,
+                task_status=TaskStatus.OPEN.value,
+            )
+            .count()
+        )
 
     def list_visible(
         self, visibility: ActivityVisibility, filters: ActivityFilter, *, limit: int, offset: int

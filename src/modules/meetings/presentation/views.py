@@ -14,6 +14,8 @@ from modules.meetings.application.ports import MeetingFilter
 from modules.meetings.application.service import EditMeeting, MeetingService, ScheduleMeeting
 from modules.meetings.composition import meeting_service
 from modules.meetings.domain.meeting import (
+    ConfirmationSource,
+    MeetingFormat,
     MeetingLink,
     MeetingStatus,
     Participant,
@@ -23,8 +25,10 @@ from modules.meetings.domain.meeting import (
 from modules.meetings.presentation.serializers import (
     MeetingCancelSerializer,
     MeetingCompleteSerializer,
+    MeetingConfirmSerializer,
     MeetingCreateSerializer,
     MeetingListSerializer,
+    MeetingOutcomeSerializer,
     MeetingReadSerializer,
     MeetingRescheduleSerializer,
     MeetingUpdateSerializer,
@@ -191,6 +195,9 @@ class MeetingListCreateView(_Scoped):
                 description=data.get("description") or None,
                 location=data.get("location") or None,
                 link=_link(data),
+                meeting_format=MeetingFormat(data.get("format", MeetingFormat.OFFICE.value)),
+                host_user_id=data.get("host_user_id"),
+                booked_by_user_id=data.get("booked_by_user_id"),
                 participants=_participants(data.get("participants", [])),
                 reminders=tuple(data.get("reminders", [])),
             ),
@@ -307,6 +314,61 @@ class MeetingCancelView(_Scoped):
         serializer.is_valid(raise_exception=True)
         service, principal = _service(self)
         meeting = service.cancel(principal, meeting_id, serializer.validated_data["reason"])
+        return Response(meeting_to_dict(meeting))
+
+
+class MeetingConfirmView(_Scoped):
+    @extend_schema(
+        tags=_TAGS,
+        operation_id="meetings_confirm",
+        summary="Confirm a meeting",
+        description=(
+            "Records that a scheduled meeting is confirmed (manually by a staff member, or "
+            "because the client accepted). Confirmation is tracked separately from status."
+        ),
+        parameters=[_TENANT_HEADER],
+        request=MeetingConfirmSerializer,
+        responses=MeetingReadSerializer,
+    )
+    def post(self, request: Request, meeting_id: UUID) -> Response:
+        serializer = MeetingConfirmSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        service, principal = _service(self)
+        meeting = service.confirm(
+            principal,
+            meeting_id,
+            ConfirmationSource(serializer.validated_data["source"]),
+        )
+        return Response(meeting_to_dict(meeting))
+
+
+class MeetingOutcomeView(_Scoped):
+    @extend_schema(
+        tags=_TAGS,
+        operation_id="meetings_outcome",
+        summary="Record a meeting's outcome",
+        description=(
+            "Records how a scheduled meeting turned out: `held`, `no_show`, `rescheduled` "
+            "(with `new_start`/`new_end` for a new date, or neither to park it awaiting one) "
+            "or `cancelled`. `comment` is stored as the outcome note."
+        ),
+        parameters=[_TENANT_HEADER],
+        request=MeetingOutcomeSerializer,
+        responses=MeetingReadSerializer,
+    )
+    def post(self, request: Request, meeting_id: UUID) -> Response:
+        serializer = MeetingOutcomeSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        service, principal = _service(self)
+        meeting = service.record_outcome(
+            principal,
+            meeting_id,
+            data["outcome"],
+            new_start=data.get("new_start"),
+            new_end=data.get("new_end"),
+            comment=data.get("comment") or None,
+        )
         return Response(meeting_to_dict(meeting))
 
 
