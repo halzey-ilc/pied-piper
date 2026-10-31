@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
+from typing import Any
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
@@ -10,7 +11,8 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 
 from modules.access_control.domain.rbac import Principal, Role
-from modules.organizations.composition import company_settings
+from modules.customers.composition import customer_service
+from modules.organizations.composition import company_settings, member_display_name
 from modules.sales_pipeline.application.custom_field_service import (
     CreateCustomField,
     UpdateCustomField,
@@ -34,6 +36,7 @@ from modules.sales_pipeline.presentation.serializers import (
     CustomFieldReadSerializer,
     CustomFieldUpdateSerializer,
     DealCreateSerializer,
+    DealDetailSerializer,
     DealListSerializer,
     DealLoseSerializer,
     DealMoveSerializer,
@@ -53,6 +56,7 @@ from modules.sales_pipeline.presentation.serializers import (
     stage_change_to_dict,
 )
 from platform_core.presentation.tenancy import TenantScopedAPIView
+from shared.domain.errors import NotFoundError
 
 _TENANT_HEADER = OpenApiParameter(
     "X-Tenant",
@@ -312,17 +316,45 @@ class DealListCreateView(_Scoped):
         return Response(deal_to_dict(deal), status=status.HTTP_201_CREATED)
 
 
+def _visible_customer(principal: Principal, customer_id: UUID | None) -> dict[str, Any] | None:
+    """The linked customer under the customers module's own visibility rules."""
+    if customer_id is None:
+        return None
+    try:
+        customer = customer_service().get(principal, customer_id)
+    except NotFoundError:
+        return None
+    return {
+        "id": str(customer.id),
+        "name": customer.name,
+        "email": str(customer.email) if customer.email else None,
+        "phone": str(customer.phone) if customer.phone else None,
+    }
+
+
 class DealDetailView(_Scoped):
     @extend_schema(
         tags=_DEAL_TAGS,
         operation_id="deals_retrieve",
         summary="Get one deal",
-        description="Returns a deal by id, or 404 if it does not exist or is not visible to you.",
+        description=(
+            "Returns a deal by id, or 404 if it does not exist or is not visible to you. "
+            "Adds the linked `customer` (null when none is linked or you cannot view it) "
+            "and the `owner`'s display name."
+        ),
         parameters=[_TENANT_HEADER],
-        responses=DealReadSerializer,
+        responses=DealDetailSerializer,
     )
     def get(self, request: Request, deal_id: UUID) -> Response:
-        return Response(deal_to_dict(deal_service().get(self.principal(), deal_id)))
+        principal = self.principal()
+        deal = deal_service().get(principal, deal_id)
+        data = deal_to_dict(deal)
+        data["customer"] = _visible_customer(principal, deal.customer_id)
+        data["owner"] = {
+            "id": str(deal.owner_user_id),
+            "name": member_display_name(principal.tenant_id, deal.owner_user_id) or "",
+        }
+        return Response(data)
 
     @extend_schema(
         tags=_DEAL_TAGS,

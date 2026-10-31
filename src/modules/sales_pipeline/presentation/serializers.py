@@ -165,6 +165,28 @@ class DealReadSerializer(serializers.Serializer[dict[str, Any]]):
     created_at = serializers.DateTimeField(read_only=True)
 
 
+class DealCustomerSerializer(serializers.Serializer[dict[str, Any]]):
+    id = serializers.UUIDField(read_only=True)
+    name = serializers.CharField(read_only=True)
+    email = serializers.EmailField(read_only=True, allow_null=True)
+    phone = serializers.CharField(read_only=True, allow_null=True)
+
+
+class DealOwnerSerializer(serializers.Serializer[dict[str, Any]]):
+    id = serializers.UUIDField(read_only=True)
+    name = serializers.CharField(read_only=True)
+
+
+class DealDetailSerializer(DealReadSerializer):
+    """One deal with what its card needs: the linked customer and the owner's name.
+
+    `customer` is null when no customer is linked or the caller cannot view it.
+    """
+
+    customer = DealCustomerSerializer(read_only=True, allow_null=True)
+    owner = DealOwnerSerializer(read_only=True)
+
+
 class DealListSerializer(serializers.Serializer[dict[str, Any]]):
     count = serializers.IntegerField(read_only=True)
     results = DealReadSerializer(many=True, read_only=True)

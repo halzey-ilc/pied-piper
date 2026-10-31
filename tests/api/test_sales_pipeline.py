@@ -600,3 +600,63 @@ def test_stage_history_records_transitions_in_order(
     # Versions are recorded and strictly increasing.
     assert second["deal_version"] > first["deal_version"]
     assert first["author_user_id"] is not None
+
+
+# --- deal detail: linked customer and owner ---------------------------------
+
+
+def test_deal_detail_embeds_customer_and_owner(
+    make_user: Callable[..., Any],
+    tenants: dict[str, TenantFixture],
+    client_for: Callable[..., APIClient],
+) -> None:
+    owner_user = make_user("owner", tenant=tenants["acme"])
+    owner_user.first_name, owner_user.last_name = "Ann", "Lee"
+    owner_user.save()
+    client = client_for(owner_user, "acme")
+    _pipeline(client)
+    customer = client.post(
+        "/api/v1/customers/",
+        {"name": "Linked Co", "email": "buyer@linked.test", "phone": "+996555123456"},
+        format="json",
+    ).json()
+    deal = _deal(client, customer_id=customer["id"])
+
+    detail = client.get(f"/api/v1/sales/deals/{deal['id']}/").json()
+    assert detail["customer"] == {
+        "id": customer["id"],
+        "name": "Linked Co",
+        "email": "buyer@linked.test",
+        "phone": "+996555123456",
+    }
+    assert detail["owner"] == {"id": str(owner_user.id), "name": "Ann Lee"}
+    # The list stays lean: no embedded objects.
+    listed = client.get("/api/v1/sales/deals/").json()["results"][0]
+    assert "customer" not in listed and "owner" not in listed
+
+    unlinked = _deal(client, title="No customer")
+    assert client.get(f"/api/v1/sales/deals/{unlinked['id']}/").json()["customer"] is None
+    assert (
+        client.get("/api/v1/sales/deals/00000000-0000-0000-0000-000000000000/").status_code == 404
+    )
+
+
+def test_deal_detail_hides_customer_the_caller_cannot_view(
+    make_user: Callable[..., Any],
+    tenants: dict[str, TenantFixture],
+    client_for: Callable[..., APIClient],
+) -> None:
+    owner = client_for(make_user("owner", tenant=tenants["acme"]), "acme")
+    rep_user = make_user("rep", tenant=tenants["acme"], role=Role.SALES_REP)
+    rep = client_for(rep_user, "acme")
+    _pipeline(owner)
+    # The owner's customer is outside the rep's own scope.
+    foreign = owner.post("/api/v1/customers/", {"name": "Owner's client"}, format="json").json()
+    assert rep.get(f"/api/v1/customers/{foreign['id']}/").status_code == 404
+    deal = _deal(rep, customer_id=foreign["id"])
+
+    detail = rep.get(f"/api/v1/sales/deals/{deal['id']}/").json()
+    assert detail["customer_id"] == foreign["id"]
+    assert detail["customer"] is None
+    assert detail["owner"]["id"] == str(rep_user.id)
+    assert detail["owner"]["name"] == "rep"

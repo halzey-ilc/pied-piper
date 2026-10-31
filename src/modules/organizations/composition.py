@@ -102,3 +102,20 @@ def list_active_members(tenant_id: UUID) -> list[tuple[UUID, str]]:
         user__is_active=True,
     )
     return [(row.user_id, row.role) for row in rows.only("user_id", "role")]
+
+
+def member_display_name(tenant_id: UUID, user_id: UUID) -> str | None:
+    """Full name (or login) of a user who is or was a member of this organization; else None.
+
+    Scoped to the organization so another company's users are never resolved.
+    """
+    row = (
+        Membership.objects.using("default")
+        .filter(organization_id=tenant_id, user_id=user_id)
+        .select_related("user")
+        .first()
+    )
+    if row is None:
+        return None
+    user = row.user
+    return " ".join(p for p in (user.first_name, user.last_name) if p) or user.get_username()
