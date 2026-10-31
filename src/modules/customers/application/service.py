@@ -96,7 +96,9 @@ class CustomerService:
             raise NotFoundError("Customer not found.")
         return customer
 
-    def list_customers(self, principal: Principal, *, limit: int, offset: int) -> CustomerPage:
+    def list_customers(
+        self, principal: Principal, *, limit: int, offset: int, search: str | None = None
+    ) -> CustomerPage:
         scope = self._policy.require(principal, Permission.CUSTOMERS_VIEW)
         if scope is Scope.ALL:
             visibility = CustomerVisibility()
@@ -107,8 +109,8 @@ class CustomerService:
         else:
             visibility = CustomerVisibility(owner_user_id=principal.user_id)
         return CustomerPage(
-            items=self._repo.list_visible(visibility, limit=limit, offset=offset),
-            total=self._repo.count(visibility),
+            items=self._repo.list_visible(visibility, limit=limit, offset=offset, search=search),
+            total=self._repo.count(visibility, search=search),
         )
 
     def update(self, principal: Principal, command: UpdateCustomer) -> Customer:

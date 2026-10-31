@@ -216,3 +216,387 @@ def test_cross_tenant_isolation(
     assert client_for(alice, "acme").get(f"/api/v1/sales/deals/{bob_deal}/").status_code == 404
     assert DealRecord.objects.using("tenant_globex").get().title == "Globex deal"
     assert DealRecord.objects.using("tenant_acme").count() == 0
+
+
+# --- stage kinds (open/won/lost) and transitions ---------------------------
+
+_KIND_STAGES = [
+    {"name": "New", "probability": 10},  # defaults to kind=open
+    {"name": "Closed won", "probability": 100, "kind": "won"},
+    {"name": "Closed lost", "probability": 0, "kind": "lost"},
+]
+
+
+def _kind_pipeline(client: APIClient, *, name: str = "Kinds") -> dict[str, Any]:
+    response = client.post(
+        "/api/v1/sales/pipelines/",
+        {"name": name, "is_default": True, "stages": _KIND_STAGES},
+        format="json",
+    )
+    assert response.status_code == 201, response.content
+    data: dict[str, Any] = response.json()
+    return data
+
+
+def test_stage_read_exposes_kind_and_active_defaults(
+    make_user: Callable[..., Any],
+    tenants: dict[str, TenantFixture],
+    client_for: Callable[..., APIClient],
+) -> None:
+    client = client_for(make_user("owner", tenant=tenants["acme"]), "acme")
+    pipeline = _pipeline(client)  # plain _STAGES, no explicit kind
+    for stage in pipeline["stages"]:
+        assert stage["kind"] == "open"
+        assert stage["is_active"] is True
+
+
+def test_pipeline_requires_at_least_one_open_stage(
+    make_user: Callable[..., Any],
+    tenants: dict[str, TenantFixture],
+    client_for: Callable[..., APIClient],
+) -> None:
+    client = client_for(make_user("owner", tenant=tenants["acme"]), "acme")
+    response = client.post(
+        "/api/v1/sales/pipelines/",
+        {
+            "name": "No open",
+            "is_default": True,
+            "stages": [
+                {"name": "Won", "kind": "won"},
+                {"name": "Lost", "kind": "lost"},
+            ],
+        },
+        format="json",
+    )
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "validation_error"
+
+
+def test_transition_to_won_stage_closes_deal_as_won(
+    make_user: Callable[..., Any],
+    tenants: dict[str, TenantFixture],
+    client_for: Callable[..., APIClient],
+) -> None:
+    client = client_for(make_user("owner", tenant=tenants["acme"]), "acme")
+    pipeline = _kind_pipeline(client)
+    won_stage = next(s for s in pipeline["stages"] if s["kind"] == "won")
+    deal_id = _deal(client, amount="4000.00")["id"]
+
+    response = client.post(
+        f"/api/v1/sales/deals/{deal_id}/stage/",
+        {"stage_id": won_stage["id"]},
+        format="json",
+    )
+    assert response.status_code == 200, response.content
+    body = response.json()
+    assert body["status"] == "won"
+    assert body["stage_id"] == won_stage["id"]
+    assert body["closed_at"] is not None
+
+    events = set(OutboxMessage.objects.using("tenant_acme").values_list("event_type", flat=True))
+    assert "sales.deal_won" in events
+
+
+def test_transition_to_lost_stage_requires_reason(
+    make_user: Callable[..., Any],
+    tenants: dict[str, TenantFixture],
+    client_for: Callable[..., APIClient],
+) -> None:
+    client = client_for(make_user("owner", tenant=tenants["acme"]), "acme")
+    pipeline = _kind_pipeline(client)
+    lost_stage = next(s for s in pipeline["stages"] if s["kind"] == "lost")
+    deal_id = _deal(client)["id"]
+
+    without_reason = client.post(
+        f"/api/v1/sales/deals/{deal_id}/stage/",
+        {"stage_id": lost_stage["id"]},
+        format="json",
+    )
+    assert without_reason.status_code == 400
+
+    with_reason = client.post(
+        f"/api/v1/sales/deals/{deal_id}/stage/",
+        {"stage_id": lost_stage["id"], "reason": "budget cut"},
+        format="json",
+    )
+    assert with_reason.status_code == 200, with_reason.content
+    body = with_reason.json()
+    assert body["status"] == "lost"
+    assert body["stage_id"] == lost_stage["id"]
+    assert body["lost_reason"] == "budget cut"
+
+
+# --- loss reason catalog ----------------------------------------------------
+
+
+def test_loss_reason_catalog_crud_and_permissions(
+    make_user: Callable[..., Any],
+    tenants: dict[str, TenantFixture],
+    client_for: Callable[..., APIClient],
+) -> None:
+    owner = client_for(make_user("owner", tenant=tenants["acme"]), "acme")
+    rep = client_for(make_user("rep", tenant=tenants["acme"], role=Role.SALES_REP), "acme")
+
+    created = owner.post("/api/v1/sales/loss-reasons/", {"name": "Too expensive"}, format="json")
+    assert created.status_code == 201, created.content
+    reason_id = created.json()["id"]
+    assert created.json()["is_active"] is True
+
+    # Duplicate name is rejected.
+    assert (
+        owner.post("/api/v1/sales/loss-reasons/", {"name": "Too expensive"}, format="json")
+    ).status_code == 409
+
+    # Managers may read the catalog but not manage it.
+    assert rep.get("/api/v1/sales/loss-reasons/").status_code == 200
+    assert (
+        rep.post("/api/v1/sales/loss-reasons/", {"name": "Nope"}, format="json").status_code == 403
+    )
+
+    # Deactivate: it disappears from the active-only list but stays in the full list.
+    patched = owner.patch(
+        f"/api/v1/sales/loss-reasons/{reason_id}/", {"is_active": False}, format="json"
+    )
+    assert patched.status_code == 200 and patched.json()["is_active"] is False
+    assert owner.get("/api/v1/sales/loss-reasons/?active=true").json()["count"] == 0
+    assert owner.get("/api/v1/sales/loss-reasons/").json()["count"] == 1
+
+
+def test_lose_via_catalog_reason(
+    make_user: Callable[..., Any],
+    tenants: dict[str, TenantFixture],
+    client_for: Callable[..., APIClient],
+) -> None:
+    client = client_for(make_user("owner", tenant=tenants["acme"]), "acme")
+    pipeline = _kind_pipeline(client)
+    lost_stage = next(s for s in pipeline["stages"] if s["kind"] == "lost")
+    reason_id = client.post(
+        "/api/v1/sales/loss-reasons/", {"name": "Chose competitor"}, format="json"
+    ).json()["id"]
+
+    deal_id = _deal(client)["id"]
+    response = client.post(
+        f"/api/v1/sales/deals/{deal_id}/stage/",
+        {"stage_id": lost_stage["id"], "loss_reason_id": reason_id},
+        format="json",
+    )
+    assert response.status_code == 200, response.content
+    body = response.json()
+    assert body["status"] == "lost"
+    assert body["loss_reason_id"] == reason_id
+    # The catalog name is stored as the free-text note when no explicit reason is given.
+    assert body["lost_reason"] == "Chose competitor"
+
+    # An unknown loss reason is rejected.
+    other_deal = _deal(client, title="Other")["id"]
+    bad = client.post(
+        f"/api/v1/sales/deals/{other_deal}/stage/",
+        {
+            "stage_id": lost_stage["id"],
+            "loss_reason_id": "00000000-0000-0000-0000-000000000000",
+        },
+        format="json",
+    )
+    assert bad.status_code == 400
+
+
+def test_custom_fields_definition_validation_and_values(
+    make_user: Callable[..., Any],
+    tenants: dict[str, TenantFixture],
+    client_for: Callable[..., APIClient],
+) -> None:
+    owner = client_for(make_user("owner", tenant=tenants["acme"]), "acme")
+    rep = client_for(make_user("rep", tenant=tenants["acme"], role=Role.SALES_REP), "acme")
+    _pipeline(owner)
+
+    # Managers cannot define custom fields.
+    assert (
+        rep.post(
+            "/api/v1/sales/custom-fields/",
+            {"key": "x", "label": "X", "field_type": "text"},
+            format="json",
+        ).status_code
+        == 403
+    )
+
+    segment = owner.post(
+        "/api/v1/sales/custom-fields/",
+        {
+            "key": "segment",
+            "label": "Segment",
+            "field_type": "single_select",
+            "options": ["smb", "enterprise"],
+            "required": True,
+        },
+        format="json",
+    )
+    assert segment.status_code == 201, segment.content
+    assert (
+        owner.post(
+            "/api/v1/sales/custom-fields/",
+            {"key": "seats", "label": "Seats", "field_type": "number"},
+            format="json",
+        ).status_code
+        == 201
+    )
+
+    # Missing a required field, a bad select value, and an unknown key are all rejected.
+    assert (
+        owner.post(
+            "/api/v1/sales/deals/",
+            {"title": "x", "amount": "1", "custom_fields": {"seats": 5}},
+            format="json",
+        ).status_code
+        == 400
+    )
+    assert (
+        owner.post(
+            "/api/v1/sales/deals/",
+            {"title": "x", "amount": "1", "custom_fields": {"segment": "nope"}},
+            format="json",
+        ).status_code
+        == 400
+    )
+    assert (
+        owner.post(
+            "/api/v1/sales/deals/",
+            {"title": "x", "amount": "1", "custom_fields": {"segment": "smb", "ghost": 1}},
+            format="json",
+        ).status_code
+        == 400
+    )
+
+    # A valid custom-field map is stored and returned.
+    deal = _deal(owner, custom_fields={"segment": "smb", "seats": 5})
+    assert deal["custom_fields"] == {"segment": "smb", "seats": 5}
+
+    # Deactivating the required field relaxes it (and its key becomes unknown).
+    field_id = segment.json()["id"]
+    assert (
+        owner.patch(
+            f"/api/v1/sales/custom-fields/{field_id}/", {"is_active": False}, format="json"
+        ).status_code
+        == 200
+    )
+    deal2 = _deal(owner, title="Later", custom_fields={"seats": 3})
+    assert deal2["custom_fields"] == {"seats": 3}
+
+
+def test_deal_source_and_next_step(
+    make_user: Callable[..., Any],
+    tenants: dict[str, TenantFixture],
+    client_for: Callable[..., APIClient],
+) -> None:
+    client = client_for(make_user("owner", tenant=tenants["acme"]), "acme")
+    _pipeline(client)
+    deal = _deal(client, source="Instagram", next_step="Call back Monday")
+    assert deal["source"] == "Instagram"
+    assert deal["next_step"] == "Call back Monday"
+
+    deal_id = deal["id"]
+    patched = client.patch(
+        f"/api/v1/sales/deals/{deal_id}/",
+        {"source": "", "next_step": "Send quote"},
+        format="json",
+    )
+    assert patched.status_code == 200, patched.content
+    body = patched.json()
+    assert body["source"] is None  # an empty string clears the field
+    assert body["next_step"] == "Send quote"
+
+
+def test_deal_list_search_sorting_and_attention(
+    make_user: Callable[..., Any],
+    tenants: dict[str, TenantFixture],
+    client_for: Callable[..., APIClient],
+) -> None:
+    owner = client_for(make_user("owner", tenant=tenants["acme"]), "acme")
+    rep = client_for(make_user("rep", tenant=tenants["acme"], role=Role.SALES_REP), "acme")
+    _pipeline(owner)
+
+    _deal(owner, title="Alpha", amount="100.00", next_step="call back")
+    _deal(owner, title="Bravo", amount="300.00")  # no next step
+    _deal(owner, title="Charlie", amount="200.00", expected_close_date="2000-01-01")  # overdue
+    reps_deal = _deal(rep, title="Rep deal", amount="50.00")["id"]
+
+    # search matches title (case-insensitive)
+    found = owner.get("/api/v1/sales/deals/?search=brav").json()
+    assert found["count"] == 1 and found["results"][0]["title"] == "Bravo"
+
+    # ordering by amount ascending and descending
+    asc = [d["amount"] for d in owner.get("/api/v1/sales/deals/?ordering=amount").json()["results"]]
+    assert asc == ["50.00", "100.00", "200.00", "300.00"]
+    desc = [
+        d["amount"] for d in owner.get("/api/v1/sales/deals/?ordering=-amount").json()["results"]
+    ]
+    assert desc == ["300.00", "200.00", "100.00", "50.00"]
+
+    # attention=no_next_step: open deals with no next step (Bravo, Charlie, Rep deal)
+    no_step = owner.get("/api/v1/sales/deals/?attention=no_next_step").json()
+    assert {d["title"] for d in no_step["results"]} == {"Bravo", "Charlie", "Rep deal"}
+
+    # attention=overdue: past expected close and still open (Charlie only)
+    overdue = owner.get("/api/v1/sales/deals/?attention=overdue").json()
+    assert [d["title"] for d in overdue["results"]] == ["Charlie"]
+
+    # manager_id filters to one owner's deals
+    by_rep = owner.get(f"/api/v1/sales/deals/?manager_id={_rep_owner_id(reps_deal, owner)}").json()
+    assert {d["id"] for d in by_rep["results"]} == {reps_deal}
+
+
+def _rep_owner_id(deal_id: str, client: APIClient) -> str:
+    owner_id: str = client.get(f"/api/v1/sales/deals/{deal_id}/").json()["owner_user_id"]
+    return owner_id
+
+
+# --- stage history ----------------------------------------------------------
+
+
+def test_stage_history_records_transitions_in_order(
+    make_user: Callable[..., Any],
+    tenants: dict[str, TenantFixture],
+    client_for: Callable[..., APIClient],
+) -> None:
+    client = client_for(make_user("owner", tenant=tenants["acme"]), "acme")
+    created = client.post(
+        "/api/v1/sales/pipelines/",
+        {
+            "name": "Full",
+            "is_default": True,
+            "stages": [
+                {"name": "New"},
+                {"name": "Qualify"},
+                {"name": "Won", "kind": "won"},
+            ],
+        },
+        format="json",
+    )
+    assert created.status_code == 201, created.content
+    stages = created.json()["stages"]
+    qualify = next(s for s in stages if s["name"] == "Qualify")
+    won = next(s for s in stages if s["kind"] == "won")
+
+    deal_id = _deal(client)["id"]
+    assert (
+        client.post(
+            f"/api/v1/sales/deals/{deal_id}/stage/", {"stage_id": qualify["id"]}, format="json"
+        ).status_code
+        == 200
+    )
+    assert (
+        client.post(
+            f"/api/v1/sales/deals/{deal_id}/stage/", {"stage_id": won["id"]}, format="json"
+        ).status_code
+        == 200
+    )
+
+    history = client.get(f"/api/v1/sales/deals/{deal_id}/stage-history/")
+    assert history.status_code == 200, history.content
+    body = history.json()
+    assert body["count"] == 2
+    first, second = body["results"]
+    assert first["to_stage_id"] == qualify["id"]
+    assert second["to_stage_id"] == won["id"]
+    # Versions are recorded and strictly increasing.
+    assert second["deal_version"] > first["deal_version"]
+    assert first["author_user_id"] is not None

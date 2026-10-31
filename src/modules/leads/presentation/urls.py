@@ -4,6 +4,7 @@ from modules.leads.presentation.views import (
     LeadConvertView,
     LeadDetailView,
     LeadDisqualifyView,
+    LeadDuplicatesView,
     LeadListCreateView,
     LeadQualifyView,
 )
@@ -14,4 +15,5 @@ urlpatterns = [
     path("<uuid:lead_id>/qualify/", LeadQualifyView.as_view(), name="lead-qualify"),
     path("<uuid:lead_id>/disqualify/", LeadDisqualifyView.as_view(), name="lead-disqualify"),
     path("<uuid:lead_id>/convert/", LeadConvertView.as_view(), name="lead-convert"),
+    path("<uuid:lead_id>/duplicates/", LeadDuplicatesView.as_view(), name="lead-duplicates"),
 ]

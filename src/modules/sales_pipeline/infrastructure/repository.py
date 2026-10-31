@@ -5,17 +5,34 @@ from uuid import UUID
 from django.db import transaction
 from django.db.models import F, Q, QuerySet
 
-from modules.sales_pipeline.application.ports import DealFilter, DealVisibility
+from modules.sales_pipeline.application.ports import ORDERING_FIELDS, DealFilter, DealVisibility
+from modules.sales_pipeline.domain.custom_field import CustomFieldDefinition, CustomFieldType
 from modules.sales_pipeline.domain.deal import Deal, DealStatus
-from modules.sales_pipeline.domain.pipeline import Pipeline, Stage
-from modules.sales_pipeline.infrastructure.models import DealRecord, PipelineRecord, StageRecord
+from modules.sales_pipeline.domain.loss_reason import LossReason
+from modules.sales_pipeline.domain.pipeline import Pipeline, Stage, StageKind
+from modules.sales_pipeline.domain.stage_change import StageChange
+from modules.sales_pipeline.infrastructure.models import (
+    CustomFieldDefinitionRecord,
+    DealRecord,
+    DealStageChangeRecord,
+    LossReasonRecord,
+    PipelineRecord,
+    StageRecord,
+)
 from shared.domain.errors import ConflictError
 from shared.domain.value_objects import Money
 
 
 def _pipeline_to_domain(row: PipelineRecord) -> Pipeline:
     stages = tuple(
-        Stage(id=s.id, name=s.name, position=s.position, probability=s.probability)
+        Stage(
+            id=s.id,
+            name=s.name,
+            position=s.position,
+            probability=s.probability,
+            kind=StageKind(s.kind),
+            is_active=s.is_active,
+        )
         for s in row.stages.all()
     )
     return Pipeline(
@@ -38,12 +55,20 @@ def _deal_to_domain(row: DealRecord) -> Deal:
         status=DealStatus(row.status),
         customer_id=row.customer_id,
         team_id=row.team_id,
+        source=row.source,
+        next_step=row.next_step,
+        custom_fields=dict(row.custom_fields or {}),
         expected_close_date=row.expected_close_date,
         closed_at=row.closed_at,
         lost_reason=row.lost_reason,
+        loss_reason_id=row.loss_reason_id,
         created_at=row.created_at,
         version=row.version,
     )
+
+
+def _loss_reason_to_domain(row: LossReasonRecord) -> LossReason:
+    return LossReason(id=row.id, name=row.name, is_active=row.is_active, created_at=row.created_at)
 
 
 class DjangoPipelineRepository:
@@ -65,6 +90,8 @@ class DjangoPipelineRepository:
                     name=stage.name,
                     position=stage.position,
                     probability=stage.probability,
+                    kind=stage.kind.value,
+                    is_active=stage.is_active,
                 )
                 for stage in pipeline.stages
             )
@@ -119,7 +146,38 @@ class DjangoDealRepository:
             qs = qs.filter(pipeline_id=filters.pipeline_id)
         if filters.stage_id is not None:
             qs = qs.filter(stage_id=filters.stage_id)
+        if filters.owner_user_id is not None:
+            qs = qs.filter(owner_user_id=filters.owner_user_id)
+        if filters.customer_id is not None:
+            qs = qs.filter(customer_id=filters.customer_id)
+        if filters.search:
+            qs = qs.filter(Q(title__icontains=filters.search) | Q(source__icontains=filters.search))
+        if filters.created_from is not None:
+            qs = qs.filter(created_at__date__gte=filters.created_from)
+        if filters.created_to is not None:
+            qs = qs.filter(created_at__date__lte=filters.created_to)
+        return self._with_attention(qs, filters)
+
+    @staticmethod
+    def _with_attention(qs: QuerySet[DealRecord], filters: DealFilter) -> QuerySet[DealRecord]:
+        if filters.attention == "overdue":
+            qs = qs.filter(status=DealStatus.OPEN.value, expected_close_date__isnull=False)
+            if filters.today is not None:
+                qs = qs.filter(expected_close_date__lt=filters.today)
+        elif filters.attention == "no_next_step":
+            qs = qs.filter(status=DealStatus.OPEN.value).filter(
+                Q(next_step__isnull=True) | Q(next_step="")
+            )
         return qs
+
+    def _order_by(self, ordering: str | None) -> list[str]:
+        default = ["-created_at", "id"]
+        if not ordering:
+            return default
+        field = ordering.removeprefix("-")
+        if field not in ORDERING_FIELDS:
+            return default
+        return [ordering, "id"]
 
     def add(self, deal: Deal) -> None:
         self._qs().create(
@@ -133,9 +191,13 @@ class DjangoDealRepository:
             customer_id=deal.customer_id,
             owner_user_id=deal.owner_user_id,
             team_id=deal.team_id,
+            source=deal.source,
+            next_step=deal.next_step,
+            custom_fields=deal.custom_fields,
             expected_close_date=deal.expected_close_date,
             closed_at=deal.closed_at,
             lost_reason=deal.lost_reason,
+            loss_reason_id=deal.loss_reason_id,
             version=deal.version,
             created_at=deal.created_at,
         )
@@ -155,9 +217,13 @@ class DjangoDealRepository:
                 amount=deal.value.amount,
                 currency=deal.value.currency,
                 customer_id=deal.customer_id,
+                source=deal.source,
+                next_step=deal.next_step,
+                custom_fields=deal.custom_fields,
                 expected_close_date=deal.expected_close_date,
                 closed_at=deal.closed_at,
                 lost_reason=deal.lost_reason,
+                loss_reason_id=deal.loss_reason_id,
                 version=F("version") + 1,
             )
         )
@@ -167,7 +233,7 @@ class DjangoDealRepository:
     def list_visible(
         self, visibility: DealVisibility, filters: DealFilter, *, limit: int, offset: int
     ) -> list[Deal]:
-        rows = self._visible(visibility, filters).order_by("-created_at", "id")[
+        rows = self._visible(visibility, filters).order_by(*self._order_by(filters.ordering))[
             offset : offset + limit
         ]
         return [_deal_to_domain(row) for row in rows]
@@ -177,3 +243,125 @@ class DjangoDealRepository:
 
     def has_open_deals_in_pipeline(self, pipeline_id: UUID) -> bool:
         return self._qs().filter(pipeline_id=pipeline_id, status=DealStatus.OPEN.value).exists()
+
+
+class DjangoLossReasonRepository:
+    def __init__(self, using: str) -> None:
+        self.using = using
+
+    def add(self, reason: LossReason) -> None:
+        LossReasonRecord.objects.using(self.using).create(
+            id=reason.id,
+            name=reason.name,
+            is_active=reason.is_active,
+            created_at=reason.created_at,
+        )
+
+    def get(self, reason_id: UUID) -> LossReason | None:
+        row = LossReasonRecord.objects.using(self.using).filter(id=reason_id).first()
+        return None if row is None else _loss_reason_to_domain(row)
+
+    def list_all(self, *, active_only: bool = False) -> list[LossReason]:
+        qs = LossReasonRecord.objects.using(self.using)
+        if active_only:
+            qs = qs.filter(is_active=True)
+        return [_loss_reason_to_domain(row) for row in qs.order_by("name")]
+
+    def save(self, reason: LossReason) -> None:
+        LossReasonRecord.objects.using(self.using).filter(id=reason.id).update(
+            name=reason.name, is_active=reason.is_active
+        )
+
+    def exists_by_name(self, name: str) -> bool:
+        return LossReasonRecord.objects.using(self.using).filter(name=name).exists()
+
+
+def _stage_change_to_domain(row: DealStageChangeRecord) -> StageChange:
+    return StageChange(
+        id=row.id,
+        deal_id=row.deal_id,
+        from_stage_id=row.from_stage_id,
+        to_stage_id=row.to_stage_id,
+        author_user_id=row.author_user_id,
+        deal_version=row.deal_version,
+        reason=row.reason,
+        loss_reason_id=row.loss_reason_id,
+        created_at=row.created_at,
+    )
+
+
+class DjangoStageChangeRepository:
+    def __init__(self, using: str) -> None:
+        self.using = using
+
+    def add(self, change: StageChange) -> None:
+        DealStageChangeRecord.objects.using(self.using).create(
+            id=change.id,
+            deal_id=change.deal_id,
+            from_stage_id=change.from_stage_id,
+            to_stage_id=change.to_stage_id,
+            author_user_id=change.author_user_id,
+            deal_version=change.deal_version,
+            reason=change.reason,
+            loss_reason_id=change.loss_reason_id,
+            created_at=change.created_at,
+        )
+
+    def list_for_deal(self, deal_id: UUID) -> list[StageChange]:
+        rows = (
+            DealStageChangeRecord.objects.using(self.using)
+            .filter(deal_id=deal_id)
+            .order_by("created_at", "id")
+        )
+        return [_stage_change_to_domain(row) for row in rows]
+
+
+def _custom_field_to_domain(row: CustomFieldDefinitionRecord) -> CustomFieldDefinition:
+    return CustomFieldDefinition(
+        id=row.id,
+        key=row.key,
+        label=row.label,
+        field_type=CustomFieldType(row.field_type),
+        options=tuple(row.options or ()),
+        required=row.required,
+        is_active=row.is_active,
+        created_at=row.created_at,
+    )
+
+
+class DjangoCustomFieldRepository:
+    def __init__(self, using: str) -> None:
+        self.using = using
+
+    def add(self, definition: CustomFieldDefinition) -> None:
+        CustomFieldDefinitionRecord.objects.using(self.using).create(
+            id=definition.id,
+            key=definition.key,
+            label=definition.label,
+            field_type=definition.field_type.value,
+            options=list(definition.options),
+            required=definition.required,
+            is_active=definition.is_active,
+            created_at=definition.created_at,
+        )
+
+    def get(self, definition_id: UUID) -> CustomFieldDefinition | None:
+        row = CustomFieldDefinitionRecord.objects.using(self.using).filter(id=definition_id).first()
+        return None if row is None else _custom_field_to_domain(row)
+
+    def list_all(self, *, active_only: bool = False) -> list[CustomFieldDefinition]:
+        qs = CustomFieldDefinitionRecord.objects.using(self.using)
+        if active_only:
+            qs = qs.filter(is_active=True)
+        return [_custom_field_to_domain(row) for row in qs.order_by("created_at")]
+
+    def save(self, definition: CustomFieldDefinition) -> None:
+        CustomFieldDefinitionRecord.objects.using(self.using).filter(id=definition.id).update(
+            label=definition.label,
+            options=list(definition.options),
+            required=definition.required,
+            is_active=definition.is_active,
+        )
+
+    def exists_by_key(self, key: str) -> bool:
+        return CustomFieldDefinitionRecord.objects.using(self.using).filter(key=key).exists()

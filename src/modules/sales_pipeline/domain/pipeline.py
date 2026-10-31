@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from enum import StrEnum
 from uuid import UUID, uuid4
 
 from shared.domain.errors import DomainValidationError, NotFoundError
@@ -12,6 +13,19 @@ MAX_NAME_LENGTH = 100
 MAX_STAGES = 20
 MIN_PROBABILITY = 0
 MAX_PROBABILITY = 100
+
+
+class StageKind(StrEnum):
+    """What reaching a stage means for the deal's status.
+
+    Moving a deal into a ``won``/``lost`` stage closes it; ``open`` stages keep it
+    open. A pipeline keeps at least one open stage so new deals have somewhere to
+    start.
+    """
+
+    OPEN = "open"
+    WON = "won"
+    LOST = "lost"
 
 
 class StageNotInPipelineError(NotFoundError):
@@ -33,6 +47,8 @@ class Stage:
     name: str
     position: int
     probability: int
+    kind: StageKind = StageKind.OPEN
+    is_active: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,6 +57,7 @@ class StageDefinition:
 
     name: str
     probability: int = 0
+    kind: StageKind = StageKind.OPEN
 
 
 @dataclass(slots=True)
@@ -75,8 +92,11 @@ class Pipeline:
                     name=stage_name,
                     position=position,
                     probability=definition.probability,
+                    kind=definition.kind,
                 )
             )
+        if not any(stage.kind is StageKind.OPEN for stage in built):
+            raise DomainValidationError("A pipeline needs at least one open stage.")
         return cls(
             id=uuid4(),
             name=_clean_name(name, "Pipeline"),
@@ -86,7 +106,9 @@ class Pipeline:
 
     @property
     def initial_stage(self) -> Stage:
-        return min(self.stages, key=lambda s: s.position)
+        """Where a new deal starts: the first active open stage (lowest position)."""
+        candidates = [s for s in self.stages if s.kind is StageKind.OPEN and s.is_active]
+        return min(candidates or self.stages, key=lambda s: s.position)
 
     def stage(self, stage_id: UUID) -> Stage:
         for stage in self.stages:

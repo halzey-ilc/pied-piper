@@ -5,6 +5,7 @@ from __future__ import annotations
 from modules.audit.infrastructure.audit_log import DjangoAuditLog
 from modules.leads.application.service import LeadService
 from modules.leads.infrastructure.customer_creation import CustomersCustomerCreation
+from modules.leads.infrastructure.duplicate_finder import DjangoDuplicateFinder
 from modules.leads.infrastructure.repository import DjangoLeadRepository
 from platform_core.application.context import require_tenant
 from platform_core.infrastructure.messaging.stores import DjangoEventOutbox
@@ -19,4 +20,5 @@ def lead_service() -> LeadService:
         outbox=DjangoEventOutbox(alias),
         audit=DjangoAuditLog(alias),
         customers=CustomersCustomerCreation(),
+        duplicates=DjangoDuplicateFinder(alias),
     )

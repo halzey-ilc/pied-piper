@@ -13,13 +13,19 @@ from modules.leads.composition import lead_service
 from modules.leads.domain.lead import LeadSource, LeadStatus
 from modules.leads.presentation.serializers import (
     ConversionResultSerializer,
+    DuplicatesListSerializer,
+    LeadConvertSerializer,
     LeadCreateSerializer,
     LeadDisqualifySerializer,
     LeadListSerializer,
     LeadReadSerializer,
     LeadUpdateSerializer,
+    duplicate_to_dict,
     lead_to_dict,
 )
+from modules.organizations.composition import company_settings
+from modules.sales_pipeline.application.deal_service import OpenDeal
+from modules.sales_pipeline.composition import deal_service
 from platform_core.presentation.tenancy import TenantScopedAPIView
 
 _TENANT_HEADER = OpenApiParameter(
@@ -212,15 +218,56 @@ class LeadConvertView(LeadBaseView):
             "permissions."
         ),
         parameters=[_TENANT_HEADER],
-        request=None,
+        request=LeadConvertSerializer,
         responses=ConversionResultSerializer,
     )
     def post(self, request: Request, lead_id: UUID) -> Response:
-        result = lead_service().convert(self.principal(), lead_id)
+        serializer = LeadConvertSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        create_deal = serializer.validated_data.get("create_deal")
+        principal = self.principal()
+        result = lead_service().convert(principal, lead_id)
+        deal_id: str | None = None
+        if create_deal is not None:
+            currency = (
+                create_deal.get("currency") or company_settings(self.tenant.tenant_id)["currency"]
+            )
+            deal = deal_service().open_deal(
+                principal,
+                OpenDeal(
+                    title=create_deal["title"],
+                    amount=create_deal["amount"],
+                    currency=currency,
+                    pipeline_id=create_deal.get("pipeline_id"),
+                    customer_id=result.customer_id,
+                ),
+            )
+            deal_id = str(deal.id)
         return Response(
             {
                 "lead": lead_to_dict(result.lead),
                 "customer_id": str(result.customer_id),
                 "already_converted": result.already_converted,
+                "deal_id": deal_id,
             }
+        )
+
+
+class LeadDuplicatesView(LeadBaseView):
+    @extend_schema(
+        tags=_TAGS,
+        operation_id="leads_duplicates",
+        summary="Find duplicate candidates for a lead",
+        description=(
+            "Returns leads and existing customers in the company that share this lead's "
+            "e-mail or phone (matched by digits). No automatic merge: the caller decides. "
+            "Requires leads.view."
+        ),
+        parameters=[_TENANT_HEADER],
+        responses=DuplicatesListSerializer,
+    )
+    def get(self, request: Request, lead_id: UUID) -> Response:
+        candidates = lead_service().find_duplicates(self.principal(), lead_id)
+        return Response(
+            {"count": len(candidates), "results": [duplicate_to_dict(c) for c in candidates]}
         )

@@ -3,7 +3,9 @@ from __future__ import annotations
 from django.db import models
 from django.db.models import Q
 
+from modules.sales_pipeline.domain.custom_field import CustomFieldType
 from modules.sales_pipeline.domain.deal import DealStatus
+from modules.sales_pipeline.domain.pipeline import StageKind
 
 
 class PipelineRecord(models.Model):
@@ -33,6 +35,12 @@ class StageRecord(models.Model):
     name = models.CharField(max_length=100)
     position = models.PositiveSmallIntegerField()
     probability = models.PositiveSmallIntegerField(default=0)
+    kind = models.CharField(
+        max_length=4,
+        choices=[(k.value, k.name.title()) for k in StageKind],
+        default=StageKind.OPEN.value,
+    )
+    is_active = models.BooleanField(default=True)
 
     class Meta:
         db_table = "sales_stage"
@@ -44,6 +52,46 @@ class StageRecord(models.Model):
 
     def __str__(self) -> str:
         return f"{self.name} (#{self.position})"
+
+
+class LossReasonRecord(models.Model):
+    id = models.UUIDField(primary_key=True, editable=False)
+    name = models.CharField(max_length=100)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField()
+
+    class Meta:
+        db_table = "sales_loss_reason"
+        constraints = [
+            models.UniqueConstraint(fields=["name"], name="sales_loss_reason_name"),
+        ]
+        ordering = ["name"]
+
+    def __str__(self) -> str:
+        return self.name
+
+
+class CustomFieldDefinitionRecord(models.Model):
+    id = models.UUIDField(primary_key=True, editable=False)
+    key = models.CharField(max_length=50)
+    label = models.CharField(max_length=100)
+    field_type = models.CharField(
+        max_length=16, choices=[(t.value, t.name.title()) for t in CustomFieldType]
+    )
+    options = models.JSONField(default=list)
+    required = models.BooleanField(default=False)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField()
+
+    class Meta:
+        db_table = "sales_custom_field"
+        constraints = [
+            models.UniqueConstraint(fields=["key"], name="sales_custom_field_key"),
+        ]
+        ordering = ["created_at"]
+
+    def __str__(self) -> str:
+        return f"{self.label} ({self.key})"
 
 
 class DealRecord(models.Model):
@@ -61,9 +109,19 @@ class DealRecord(models.Model):
     customer_id = models.UUIDField(null=True, blank=True)
     owner_user_id = models.UUIDField()
     team_id = models.UUIDField(null=True, blank=True)
+    source = models.CharField(max_length=100, null=True, blank=True)  # noqa: DJ001
+    next_step = models.CharField(max_length=500, null=True, blank=True)  # noqa: DJ001
+    custom_fields = models.JSONField(default=dict)
     expected_close_date = models.DateField(null=True, blank=True)
     closed_at = models.DateTimeField(null=True, blank=True)
     lost_reason = models.CharField(max_length=500, null=True, blank=True)  # noqa: DJ001
+    loss_reason = models.ForeignKey(
+        LossReasonRecord,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="deals",
+    )
     version = models.PositiveIntegerField(default=1)
     created_at = models.DateTimeField()
     updated_at = models.DateTimeField(auto_now=True)
@@ -81,3 +139,27 @@ class DealRecord(models.Model):
 
     def __str__(self) -> str:
         return f"{self.title} ({self.status})"
+
+
+class DealStageChangeRecord(models.Model):
+    """Append-only history of a deal's stage transitions."""
+
+    id = models.UUIDField(primary_key=True, editable=False)
+    deal = models.ForeignKey(DealRecord, on_delete=models.CASCADE, related_name="stage_changes")
+    from_stage_id = models.UUIDField(null=True, blank=True)
+    to_stage_id = models.UUIDField()
+    author_user_id = models.UUIDField()
+    deal_version = models.PositiveIntegerField()
+    reason = models.CharField(max_length=500, null=True, blank=True)  # noqa: DJ001
+    loss_reason_id = models.UUIDField(null=True, blank=True)
+    created_at = models.DateTimeField()
+
+    class Meta:
+        db_table = "sales_deal_stage_change"
+        indexes = [
+            models.Index(fields=["deal", "created_at"], name="deal_stage_change_idx"),
+        ]
+        ordering = ["created_at"]
+
+    def __str__(self) -> str:
+        return f"{self.deal_id}: -> {self.to_stage_id}"
