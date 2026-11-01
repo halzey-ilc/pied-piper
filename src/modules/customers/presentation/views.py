@@ -8,9 +8,11 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 
 from modules.access_control.domain.rbac import Principal, Role
+from modules.customers.application.ports import CustomerFilter
 from modules.customers.application.service import CreateCustomer, UpdateCustomer
 from modules.customers.composition import customer_service
 from modules.customers.presentation.serializers import (
+    CustomerAssignSerializer,
     CustomerCreateSerializer,
     CustomerListSerializer,
     CustomerReadSerializer,
@@ -18,6 +20,7 @@ from modules.customers.presentation.serializers import (
     customer_to_dict,
 )
 from platform_core.presentation.tenancy import TenantScopedAPIView
+from shared.domain.errors import DomainValidationError
 
 _TENANT_HEADER = OpenApiParameter(
     "X-Tenant",
@@ -29,6 +32,13 @@ _TENANT_HEADER = OpenApiParameter(
         "to use. Get it from GET /api/v1/me/. Omitting it returns 404 by design."
     ),
     examples=[OpenApiExample("Demo tenant", value="demo")],
+)
+_OWNER = OpenApiParameter("owner_id", str, description="Only customers of this responsible user.")
+_ARCHIVED = OpenApiParameter(
+    "archived", str, description="false (default): active; true: archived; all: both."
+)
+_ORDERING = OpenApiParameter(
+    "ordering", str, description="name | created_at, '-' for descending (default -created_at)."
 )
 _LIMIT = OpenApiParameter(
     "limit", int, OpenApiParameter.QUERY, description="Page size, 1-200 (default 50)."
@@ -81,7 +91,7 @@ class CustomerListCreateView(CustomerBaseView):
             "on your role: owners/admins and viewers see all, managers see their team, sales "
             "reps see only their own. Results are paged with `limit` and `offset`."
         ),
-        parameters=[_TENANT_HEADER, _SEARCH, _LIMIT, _OFFSET],
+        parameters=[_TENANT_HEADER, _SEARCH, _OWNER, _ARCHIVED, _ORDERING, _LIMIT, _OFFSET],
         responses=CustomerListSerializer,
     )
     def get(self, request: Request) -> Response:
@@ -90,9 +100,22 @@ class CustomerListCreateView(CustomerBaseView):
             offset = max(int(request.query_params.get("offset", 0)), 0)
         except ValueError:
             limit, offset = 50, 0
-        search = (request.query_params.get("search") or "").strip() or None
+        q = request.query_params
+        archived_param = q.get("archived", "false")
+        if archived_param not in ("true", "false", "all"):
+            raise DomainValidationError("archived must be true, false or all.")
+        try:
+            owner = UUID(q["owner_id"]) if q.get("owner_id") else None
+        except ValueError as exc:
+            raise DomainValidationError("owner_id must be a UUID.") from exc
+        filters = CustomerFilter(
+            search=(q.get("search") or "").strip() or None,
+            owner_user_id=owner,
+            archived={"true": True, "false": False, "all": None}[archived_param],
+            ordering=q.get("ordering") or None,
+        )
         page = customer_service().list_customers(
-            self.principal(), limit=limit, offset=offset, search=search
+            self.principal(), limit=limit, offset=offset, filters=filters
         )
         return Response({"count": page.total, "results": [customer_to_dict(c) for c in page.items]})
 
@@ -179,5 +202,58 @@ class CustomerDetailView(CustomerBaseView):
                 email=data.get("email"),
                 phone=data.get("phone"),
             ),
+        )
+        return Response(customer_to_dict(customer))
+
+
+class CustomerArchiveView(CustomerBaseView):
+    @extend_schema(
+        tags=["Customers"],
+        operation_id="customers_archive",
+        summary="Archive a customer",
+        description=(
+            "Takes the customer out of active work: hidden from the default list and "
+            "read-only until restored. Deals, tasks and history stay. Idempotent."
+        ),
+        parameters=[_TENANT_HEADER],
+        request=None,
+        responses=CustomerReadSerializer,
+    )
+    def post(self, request: Request, customer_id: UUID) -> Response:
+        return Response(customer_to_dict(customer_service().archive(self.principal(), customer_id)))
+
+
+class CustomerRestoreView(CustomerBaseView):
+    @extend_schema(
+        tags=["Customers"],
+        operation_id="customers_restore",
+        summary="Restore an archived customer",
+        parameters=[_TENANT_HEADER],
+        request=None,
+        responses=CustomerReadSerializer,
+    )
+    def post(self, request: Request, customer_id: UUID) -> Response:
+        return Response(customer_to_dict(customer_service().restore(self.principal(), customer_id)))
+
+
+class CustomerAssignView(CustomerBaseView):
+    @extend_schema(
+        tags=["Customers"],
+        operation_id="customers_assign",
+        summary="Change the responsible member",
+        description=(
+            "A manager cannot hand customers over; a head of sales hands them within their "
+            "department; a director to any active member. The new owner's department "
+            "becomes the customer's team."
+        ),
+        parameters=[_TENANT_HEADER],
+        request=CustomerAssignSerializer,
+        responses=CustomerReadSerializer,
+    )
+    def post(self, request: Request, customer_id: UUID) -> Response:
+        serializer = CustomerAssignSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        customer = customer_service().assign(
+            self.principal(), customer_id, serializer.validated_data["owner_user_id"]
         )
         return Response(customer_to_dict(customer))

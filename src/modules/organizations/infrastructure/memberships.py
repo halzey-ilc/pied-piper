@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
+from modules.access_control.domain.rbac import MemberRef
 from modules.organizations.infrastructure.models import Membership
 from platform_core.application.ports import TenantMembership
 
@@ -33,3 +34,25 @@ class DjangoMembershipProvider:
             team_ids=frozenset({department}) if department else frozenset(),
             department_id=department,
         )
+
+
+class DjangoMemberDirectory:
+    """Active members of one company with their departments (who may receive work)."""
+
+    def __init__(self, tenant_id: UUID) -> None:
+        self.tenant_id = tenant_id
+        self._members: dict[UUID, MemberRef] | None = None
+
+    def active_member(self, user_id: UUID) -> MemberRef | None:
+        if self._members is None:
+            rows = Membership.objects.using("default").filter(
+                organization_id=self.tenant_id,
+                is_active=True,
+                organization__is_active=True,
+                user__is_active=True,
+            )
+            self._members = {
+                row.user_id: MemberRef(user_id=row.user_id, department_id=row.department_id)
+                for row in rows.only("user_id", "department_id")
+            }
+        return self._members.get(user_id)

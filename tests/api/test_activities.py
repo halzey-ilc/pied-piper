@@ -147,13 +147,14 @@ def test_rbac_scope_and_roles(
     rep = client_for(make_user("rep", tenant=tenants["acme"], role=Role.SALES_REP), "acme")
     viewer = client_for(make_user("viewer", tenant=tenants["acme"], role=Role.VIEWER), "acme")
     cid = _customer(owner)
+    rep_cid = _customer(rep, "Rep's client")  # work links only to records the author can see
 
     owners_note = _log(
         owner, kind="note", subject_type="customer", subject_id=cid, body="owner"
     ).json()["id"]
-    reps_note = _log(rep, kind="note", subject_type="customer", subject_id=cid, body="rep").json()[
-        "id"
-    ]
+    reps_note = _log(
+        rep, kind="note", subject_type="customer", subject_id=rep_cid, body="rep"
+    ).json()["id"]
 
     assert [a["id"] for a in rep.get("/api/v1/activities/").json()["results"]] == [reps_note]
     assert rep.get(f"/api/v1/activities/{owners_note}/").status_code == 404
@@ -365,15 +366,15 @@ def test_single_head_of_sales_assigns_only_within_their_department(
 ) -> None:
     # The number of heads of sales does not widen access: the department decides.
     acme = tenants["acme"]
-    owner = client_for(make_user("owner", tenant=acme), "acme")
+    make_user("owner", tenant=acme)
     rop_user = make_user("rop", tenant=acme, role=Role.HEAD_OF_SALES)
     own_rep = make_user("own_rep", tenant=acme, role=Role.SALES_REP)
     other_rep = make_user("other_rep", tenant=acme, role=Role.SALES_REP)
     no_department_rep = make_user("loose_rep", tenant=acme, role=Role.SALES_REP)
     for user, team in ((rop_user, "North"), (own_rep, "North"), (other_rep, "South")):
         _in_department(user, acme, team)
-    cid = _customer(owner)
     rop = client_for(rop_user, "acme")
+    cid = _customer(rop)  # the head of sales' own customer: work links to visible records
 
     assert _assign(rop, cid, own_rep).status_code == 201
     assert _assign(rop, cid, other_rep).status_code == 403
@@ -386,23 +387,25 @@ def test_two_heads_of_sales_assign_only_within_their_teams(
     client_for: Callable[..., APIClient],
 ) -> None:
     acme = tenants["acme"]
-    owner = client_for(make_user("owner", tenant=acme), "acme")
+    make_user("owner", tenant=acme)
     rop1 = make_user("rop1", tenant=acme, role=Role.HEAD_OF_SALES)
     rop2 = make_user("rop2", tenant=acme, role=Role.HEAD_OF_SALES)
     rep1 = make_user("rep1", tenant=acme, role=Role.SALES_REP)
     rep2 = make_user("rep2", tenant=acme, role=Role.SALES_REP)
     for user, team in ((rop1, "North"), (rep1, "North"), (rop2, "South"), (rep2, "South")):
         _in_department(user, acme, team)
-    cid = _customer(owner)
     rop1_client, rop2_client = client_for(rop1, "acme"), client_for(rop2, "acme")
+    north, south = _customer(rop1_client, "North client"), _customer(rop2_client, "South client")
 
-    assert _assign(rop1_client, cid, rep1).status_code == 201
-    assert _assign(rop1_client, cid, rep2).status_code == 403
-    assert _assign(rop2_client, cid, rep1).status_code == 403
-    assert _assign(rop2_client, cid, rep2).status_code == 201
+    assert _assign(rop1_client, north, rep1).status_code == 201
+    assert _assign(rop1_client, north, rep2).status_code == 403
+    assert _assign(rop2_client, south, rep1).status_code == 403
+    assert _assign(rop2_client, south, rep2).status_code == 201
+    # Another department's customer is not even visible to link work to.
+    assert _assign(rop1_client, south, rep1).status_code == 404
 
     # Reassigning an existing task across teams is refused the same way.
-    own = _log(rop1_client, kind="task", subject_type="customer", subject_id=cid, title="Mine")
+    own = _log(rop1_client, kind="task", subject_type="customer", subject_id=north, title="Mine")
     moved = rop1_client.post(
         f"/api/v1/activities/{own.json()['id']}/reassign/",
         {"assignee_user_id": str(rep2.id)},

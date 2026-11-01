@@ -14,6 +14,7 @@ from modules.access_control.domain.rbac import (
     Principal,
     ResourceOwnership,
     Scope,
+    check_assignable,
 )
 from modules.activities.application.ports import (
     ActivityFilter,
@@ -35,9 +36,7 @@ from modules.audit.domain.entry import AuditEntry
 from platform_core.application.ports import EventOutbox
 from shared.application.ports import UnitOfWork
 from shared.domain.errors import (
-    AccessDeniedError,
     ConflictError,
-    DomainValidationError,
     NotFoundError,
 )
 from shared.domain.events import DomainEvent
@@ -150,12 +149,9 @@ class ActivityService:
         assignee = command.assignee_user_id or principal.user_id
         self._check_assignee(principal, scope, assignee)
         with self._uow:
-            if not self._subjects.exists(command.subject.type, command.subject.id) or (
-                # A deal outside the caller's scope is treated as missing, so its
-                # open-task cap cannot be used up by people who cannot see it.
-                command.subject.type is SubjectType.DEAL
-                and not self._subjects.deal_visible_to(principal, command.subject.id)
-            ):
+            # A record outside the caller's scope is treated as missing: nobody links work
+            # to (or uses up the open-task cap of) a deal or customer they cannot see.
+            if not self._subjects.visible_to(principal, command.subject.type, command.subject.id):
                 raise NotFoundError(
                     f"The {command.subject.type.value} this task refers to was not found."
                 )
@@ -280,24 +276,8 @@ class ActivityService:
     # --- helpers ------------------------------------------------------------
 
     def _check_assignee(self, principal: Principal, scope: Scope, assignee: UUID) -> None:
-        """Who may get a task from this caller.
-
-        - a manager (OWN scope) assigns only to themselves;
-        - a head of sales (TEAM scope) assigns only to members of their own department;
-        - a director or admin (ALL scope) assigns to any member of the company.
-        Nobody assigns to someone who is not an active member of this company.
-        """
-        if assignee == principal.user_id:
-            return
-        if scope is Scope.OWN:
-            raise AccessDeniedError("You can only assign tasks to yourself.")
-        member = self._members.active_member(assignee)
-        if member is None:
-            raise DomainValidationError("The assignee is not an active member of this company.")
-        if scope is Scope.TEAM and (
-            member.department_id is None or member.department_id != principal.department_id
-        ):
-            raise AccessDeniedError("You can only assign tasks to members of your department.")
+        member = None if assignee == principal.user_id else self._members.active_member(assignee)
+        check_assignable(principal, scope, assignee, member, what="tasks")
 
     def _log(
         self,
@@ -307,7 +287,7 @@ class ActivityService:
     ) -> Activity:
         self._policy.require(principal, Permission.ACTIVITIES_CREATE)
         with self._uow:
-            if not self._subjects.exists(subject.type, subject.id):
+            if not self._subjects.visible_to(principal, subject.type, subject.id):
                 raise NotFoundError(
                     f"The {subject.type.value} this activity refers to was not found."
                 )

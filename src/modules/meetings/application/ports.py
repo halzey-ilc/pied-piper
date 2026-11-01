@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import Protocol
 from uuid import UUID
 
+from modules.access_control.domain.rbac import Principal
 from modules.meetings.domain.meeting import Meeting, MeetingStatus, SubjectType
 
 
@@ -40,6 +41,8 @@ class MeetingRepository(Protocol):
 
 
 class SubjectChecker(Protocol):
-    """Verifies the customer or deal a meeting is linked to exists in this tenant."""
+    """Whether the customer or deal a meeting links to exists AND the caller may see it."""
 
-    def exists(self, subject_type: SubjectType, subject_id: UUID) -> bool: ...
+    def visible_to(
+        self, principal: Principal, subject_type: SubjectType, subject_id: UUID
+    ) -> bool: ...

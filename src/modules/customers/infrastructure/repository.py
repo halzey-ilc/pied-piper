@@ -12,7 +12,11 @@ from uuid import UUID
 from django.db import IntegrityError, transaction
 from django.db.models import F, Q, QuerySet
 
-from modules.customers.application.ports import CustomerVisibility
+from modules.customers.application.ports import (
+    CUSTOMER_ORDERING,
+    CustomerFilter,
+    CustomerVisibility,
+)
 from modules.customers.domain.customer import Customer
 from modules.customers.infrastructure.models import CustomerRecord
 from shared.domain.errors import ConflictError
@@ -28,6 +32,7 @@ def _to_domain(row: CustomerRecord) -> Customer:
         phone=PhoneNumber(row.phone) if row.phone else None,
         team_id=row.team_id,
         created_at=row.created_at,
+        archived_at=row.archived_at,
         version=row.version,
     )
 
@@ -88,6 +93,9 @@ class DjangoCustomerRepository:
                         name=customer.name,
                         email=str(customer.email) if customer.email else None,
                         phone=str(customer.phone) if customer.phone else None,
+                        owner_user_id=customer.owner_user_id,
+                        team_id=customer.team_id,
+                        archived_at=customer.archived_at,
                         version=F("version") + 1,
                     )
                 )
@@ -96,12 +104,24 @@ class DjangoCustomerRepository:
         if updated != 1:
             raise ConflictError("Customer was modified by someone else; reload and retry.")
 
+    def _filtered(
+        self, visibility: CustomerVisibility, filters: CustomerFilter
+    ) -> QuerySet[CustomerRecord]:
+        qs = self._search(self._visible(visibility), filters.search)
+        if filters.owner_user_id is not None:
+            qs = qs.filter(owner_user_id=filters.owner_user_id)
+        if filters.archived is not None:
+            qs = qs.filter(archived_at__isnull=not filters.archived)
+        return qs
+
     def list_visible(
-        self, visibility: CustomerVisibility, limit: int, offset: int, search: str | None = None
+        self, visibility: CustomerVisibility, filters: CustomerFilter, limit: int, offset: int
     ) -> list[Customer]:
-        qs = self._search(self._visible(visibility), search)
-        rows = qs.order_by("-created_at", "id")[offset : offset + limit]
+        ordering = filters.ordering or "-created_at"
+        if ordering.lstrip("-") not in CUSTOMER_ORDERING:
+            ordering = "-created_at"
+        rows = self._filtered(visibility, filters).order_by(ordering, "id")[offset : offset + limit]
         return [_to_domain(row) for row in rows]
 
-    def count(self, visibility: CustomerVisibility, search: str | None = None) -> int:
-        return self._search(self._visible(visibility), search).count()
+    def count(self, visibility: CustomerVisibility, filters: CustomerFilter) -> int:
+        return self._filtered(visibility, filters).count()

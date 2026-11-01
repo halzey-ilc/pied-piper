@@ -30,8 +30,14 @@ class CustomerReadSerializer(serializers.Serializer[dict[str, Any]]):
     email = serializers.EmailField(read_only=True, allow_null=True)
     phone = serializers.CharField(read_only=True, allow_null=True)
     owner_user_id = serializers.UUIDField(read_only=True)
+    team_id = serializers.UUIDField(read_only=True, allow_null=True)
+    archived_at = serializers.DateTimeField(read_only=True, allow_null=True)
     version = serializers.IntegerField(read_only=True)
     created_at = serializers.DateTimeField(read_only=True)
+
+
+class CustomerAssignSerializer(serializers.Serializer[dict[str, Any]]):
+    owner_user_id = serializers.UUIDField()
 
 
 class CustomerListSerializer(serializers.Serializer[dict[str, Any]]):
@@ -46,6 +52,8 @@ def customer_to_dict(customer: Customer) -> dict[str, Any]:
         "email": str(customer.email) if customer.email else None,
         "phone": str(customer.phone) if customer.phone else None,
         "owner_user_id": str(customer.owner_user_id),
+        "team_id": str(customer.team_id) if customer.team_id else None,
+        "archived_at": customer.archived_at.isoformat() if customer.archived_at else None,
         "version": customer.version,
         "created_at": customer.created_at.isoformat(),
     }

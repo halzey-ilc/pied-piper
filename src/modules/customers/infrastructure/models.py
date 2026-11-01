@@ -16,6 +16,8 @@ class CustomerRecord(models.Model):
     phone = models.CharField(max_length=16, null=True, blank=True)  # noqa: DJ001
     owner_user_id = models.UUIDField()
     team_id = models.UUIDField(null=True, blank=True)
+    # Out of active work; kept with its deals and history (never deleted).
+    archived_at = models.DateTimeField(null=True, blank=True)
     version = models.PositiveIntegerField(default=1)
     created_at = models.DateTimeField()
     updated_at = models.DateTimeField(auto_now=True)

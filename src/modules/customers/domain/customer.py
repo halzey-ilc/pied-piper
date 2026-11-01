@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from typing import Any, ClassVar
 from uuid import UUID, uuid4
 
-from shared.domain.errors import DomainValidationError
+from shared.domain.errors import ConflictError, DomainValidationError
 from shared.domain.events import DomainEvent
 from shared.domain.value_objects import EmailAddress, PhoneNumber
 
@@ -52,6 +52,8 @@ class Customer:
     phone: PhoneNumber | None = None
     team_id: UUID | None = None
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    # Archived: out of active work (hidden from the default list, read-only); history stays.
+    archived_at: datetime | None = None
     version: int = 1
 
     @classmethod
@@ -81,6 +83,7 @@ class Customer:
         email: str | None = None,
         phone: str | None = None,
     ) -> CustomerUpdated | None:
+        self._require_active()
         changed: list[str] = []
         if name is not None:
             new_name = _clean_name(name)
@@ -101,3 +104,39 @@ class Customer:
             return None
         self.version += 1
         return CustomerUpdated(customer_id=self.id, changed_fields=tuple(changed))
+
+    @property
+    def is_archived(self) -> bool:
+        return self.archived_at is not None
+
+    def _require_active(self) -> None:
+        if self.archived_at is not None:
+            raise CustomerArchivedError("The customer is archived; restore it first.")
+
+    def archive(self) -> bool:
+        if self.archived_at is not None:
+            return False
+        self.archived_at = datetime.now(UTC)
+        self.version += 1
+        return True
+
+    def restore(self) -> bool:
+        if self.archived_at is None:
+            return False
+        self.archived_at = None
+        self.version += 1
+        return True
+
+    def assign(self, owner_user_id: UUID, team_id: UUID | None) -> bool:
+        """Hand the customer to another responsible member (their department becomes its team)."""
+        self._require_active()
+        if owner_user_id == self.owner_user_id and team_id == self.team_id:
+            return False
+        self.owner_user_id = owner_user_id
+        self.team_id = team_id
+        self.version += 1
+        return True
+
+
+class CustomerArchivedError(ConflictError):
+    code = "customer_archived"

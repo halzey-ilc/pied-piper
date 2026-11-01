@@ -16,8 +16,9 @@ from modules.access_control.domain.rbac import (
     Principal,
     ResourceOwnership,
     Scope,
+    check_assignable,
 )
-from modules.audit.application.ports import AuditLog
+from modules.audit.application.ports import AuditLog, AuditTrail
 from modules.audit.domain.entry import AuditEntry
 from modules.sales_pipeline.application.ports import (
     CustomerLookup,
@@ -26,6 +27,7 @@ from modules.sales_pipeline.application.ports import (
     DealRepository,
     DealVisibility,
     LossReasonRepository,
+    MemberDirectory,
     PipelineRepository,
     StageChangeRepository,
 )
@@ -96,8 +98,12 @@ class DealService:
         loss_reasons: LossReasonRepository | None = None,
         stage_changes: StageChangeRepository | None = None,
         custom_fields: CustomFieldRepository | None = None,
+        members: MemberDirectory | None = None,
+        trail: AuditTrail | None = None,
         policy: AccessPolicy | None = None,
     ) -> None:
+        self._members = members
+        self._trail = trail
         self._deals = deals
         self._pipelines = pipelines
         self._customers = customers
@@ -148,8 +154,8 @@ class DealService:
         self._policy.require(principal, Permission.DEALS_CREATE)
         with self._uow:
             pipeline = self._resolve_pipeline(command.pipeline_id)
-            if command.customer_id is not None and not self._customers.exists(command.customer_id):
-                raise NotFoundError("Linked customer not found.")
+            if command.customer_id is not None:
+                self._check_customer(principal, command.customer_id)
             custom_fields = self._validated_custom_fields(command.custom_fields, require_all=True)
             deal, event = Deal.open(
                 title=command.title,
@@ -173,12 +179,8 @@ class DealService:
         with self._uow:
             deal = self._load_for_write(principal, command.deal_id)
             self._check_version(deal, command.expected_version)
-            if (
-                command.set_customer
-                and command.customer_id is not None
-                and not self._customers.exists(command.customer_id)
-            ):
-                raise NotFoundError("Linked customer not found.")
+            if command.set_customer and command.customer_id is not None:
+                self._check_customer(principal, command.customer_id)
             value = self._money_update(deal, command)
             custom_fields = (
                 self._validated_custom_fields(command.custom_fields, require_all=True)
@@ -202,8 +204,33 @@ class DealService:
             )
             if changed:
                 self._deals.save(deal, expected_version=version)
-                self._record(principal, "deal.updated", deal)
+                self._record(principal, "deal.updated", deal, changed)
         return deal
+
+    def assign(self, principal: Principal, deal_id: UUID, owner_user_id: UUID) -> Deal:
+        """Change the responsible member; the new owner's department becomes the deal's team."""
+        with self._uow:
+            deal = self.get(principal, deal_id)  # 404 if not visible
+            scope = self._policy.require(principal, Permission.DEALS_UPDATE, _ownership(deal))
+            member = (
+                self._members.active_member(owner_user_id)
+                if self._members is not None and owner_user_id != principal.user_id
+                else None
+            )
+            check_assignable(principal, scope, owner_user_id, member, what="deals")
+            team_id = member.department_id if member is not None else principal.department_id
+            version = deal.version
+            if deal.assign(owner_user_id, team_id):
+                self._deals.save(deal, expected_version=version)
+                self._record(principal, "deal.reassigned", deal, ("owner",))
+        return deal
+
+    def history(self, principal: Principal, deal_id: UUID) -> list[AuditEntry]:
+        """Audited changes of the deal, newest first: who changed which fields (no values)."""
+        self.get(principal, deal_id)  # 404 if the deal is not visible to the caller
+        if self._trail is None:
+            return []
+        return self._trail.entries_for(AGGREGATE, str(deal_id))
 
     def move_stage(
         self,
@@ -356,12 +383,27 @@ class DealService:
     def _emit(self, event: DomainEvent, deal: Deal) -> None:
         self._outbox.add(event, aggregate_type=AGGREGATE, aggregate_id=str(deal.id))
 
-    def _record(self, principal: Principal, action: str, deal: Deal) -> None:
+    def _check_customer(self, principal: Principal, customer_id: UUID) -> None:
+        """A deal links only to an active customer the caller may see (else 404 / 400)."""
+        customer = self._customers.find(customer_id)
+        if customer is None or not self._policy.allows(
+            principal,
+            Permission.CUSTOMERS_VIEW,
+            ResourceOwnership(owner_user_id=customer.owner_user_id, team_id=customer.team_id),
+        ):
+            raise NotFoundError("Linked customer not found.")
+        if customer.is_archived:
+            raise DomainValidationError("The customer is archived; restore it first.")
+
+    def _record(
+        self, principal: Principal, action: str, deal: Deal, fields: tuple[str, ...] = ()
+    ) -> None:
         self._audit.record(
             AuditEntry(
                 actor_user_id=principal.user_id,
                 action=action,
                 resource_type=AGGREGATE,
                 resource_id=str(deal.id),
+                changed_fields=fields,
             )
         )

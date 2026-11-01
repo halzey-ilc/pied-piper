@@ -35,6 +35,7 @@ from modules.sales_pipeline.presentation.serializers import (
     CustomFieldListSerializer,
     CustomFieldReadSerializer,
     CustomFieldUpdateSerializer,
+    DealAssignSerializer,
     DealCreateSerializer,
     DealDetailSerializer,
     DealListSerializer,
@@ -48,7 +49,11 @@ from modules.sales_pipeline.presentation.serializers import (
     LossReasonUpdateSerializer,
     PipelineCreateSerializer,
     PipelineReadSerializer,
+    PipelineUpdateSerializer,
+    StageAddSerializer,
     StageChangeListSerializer,
+    StageOrderSerializer,
+    StageUpdateSerializer,
     custom_field_to_dict,
     deal_to_dict,
     loss_reason_to_dict,
@@ -211,6 +216,100 @@ class PipelineDetailView(_Scoped):
     )
     def get(self, request: Request, pipeline_id: UUID) -> Response:
         return Response(pipeline_to_dict(pipeline_service().get(self.principal(), pipeline_id)))
+
+    @extend_schema(
+        tags=_PIPELINE_TAGS,
+        operation_id="pipelines_update",
+        summary="Rename a pipeline or make it the default",
+        description="Requires pipelines.manage. `is_default: true` moves the default flag here.",
+        parameters=[_TENANT_HEADER],
+        request=PipelineUpdateSerializer,
+        responses=PipelineReadSerializer,
+    )
+    def patch(self, request: Request, pipeline_id: UUID) -> Response:
+        serializer = PipelineUpdateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        pipeline = pipeline_service().update(
+            self.principal(),
+            pipeline_id,
+            name=data.get("name"),
+            make_default=bool(data.get("is_default")),
+        )
+        return Response(pipeline_to_dict(pipeline))
+
+
+class PipelineStagesView(_Scoped):
+    @extend_schema(
+        tags=_PIPELINE_TAGS,
+        operation_id="pipelines_stage_add",
+        summary="Add a stage",
+        description="Inserts a stage at `position` (0-based; default at the end).",
+        parameters=[_TENANT_HEADER],
+        request=StageAddSerializer,
+        responses={201: PipelineReadSerializer},
+    )
+    def post(self, request: Request, pipeline_id: UUID) -> Response:
+        serializer = StageAddSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        pipeline = pipeline_service().add_stage(
+            self.principal(),
+            pipeline_id,
+            StageDefinition(
+                name=data["name"], probability=data["probability"], kind=StageKind(data["kind"])
+            ),
+            data.get("position"),
+        )
+        return Response(pipeline_to_dict(pipeline), status=status.HTTP_201_CREATED)
+
+
+class PipelineStageDetailView(_Scoped):
+    @extend_schema(
+        tags=_PIPELINE_TAGS,
+        operation_id="pipelines_stage_update",
+        summary="Rename, re-weight, archive or restore a stage",
+        description=(
+            "`is_active: false` archives the stage: it stays in history and on closed deals "
+            "but deals can no longer be moved to it. A stage with open deals cannot be "
+            "archived (409 `stage_in_use`); a pipeline keeps at least one active open stage."
+        ),
+        parameters=[_TENANT_HEADER],
+        request=StageUpdateSerializer,
+        responses=PipelineReadSerializer,
+    )
+    def patch(self, request: Request, pipeline_id: UUID, stage_id: UUID) -> Response:
+        serializer = StageUpdateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        pipeline = pipeline_service().update_stage(
+            self.principal(),
+            pipeline_id,
+            stage_id,
+            name=data.get("name"),
+            probability=data.get("probability"),
+            is_active=data.get("is_active"),
+        )
+        return Response(pipeline_to_dict(pipeline))
+
+
+class PipelineStageOrderView(_Scoped):
+    @extend_schema(
+        tags=_PIPELINE_TAGS,
+        operation_id="pipelines_stage_order",
+        summary="Reorder stages",
+        description="`stage_ids` lists every stage of the pipeline once, in the new order.",
+        parameters=[_TENANT_HEADER],
+        request=StageOrderSerializer,
+        responses=PipelineReadSerializer,
+    )
+    def put(self, request: Request, pipeline_id: UUID) -> Response:
+        serializer = StageOrderSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        pipeline = pipeline_service().reorder_stages(
+            self.principal(), pipeline_id, serializer.validated_data["stage_ids"]
+        )
+        return Response(pipeline_to_dict(pipeline))
 
 
 # --- deals ------------------------------------------------------------------
@@ -487,6 +586,63 @@ class DealReopenView(_Scoped):
     )
     def post(self, request: Request, deal_id: UUID) -> Response:
         return Response(deal_to_dict(deal_service().reopen(self.principal(), deal_id)))
+
+
+class DealAssignView(_Scoped):
+    @extend_schema(
+        tags=_DEAL_TAGS,
+        operation_id="deals_assign",
+        summary="Change the responsible member",
+        description=(
+            "A manager cannot hand deals over; a head of sales hands them within their "
+            "department; a director to any active member. The new owner's department "
+            "becomes the deal's team. Works for open and closed deals."
+        ),
+        parameters=[_TENANT_HEADER],
+        request=DealAssignSerializer,
+        responses=DealReadSerializer,
+    )
+    def post(self, request: Request, deal_id: UUID) -> Response:
+        serializer = DealAssignSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        deal = deal_service().assign(
+            self.principal(), deal_id, serializer.validated_data["owner_user_id"]
+        )
+        return Response(deal_to_dict(deal))
+
+
+class DealHistoryView(_Scoped):
+    @extend_schema(
+        tags=_DEAL_TAGS,
+        operation_id="deals_history",
+        summary="Deal change history",
+        description=(
+            "Audited changes, newest first: action (deal.created, deal.updated, "
+            "deal.stage_changed, deal.won, deal.lost, deal.reopened, deal.reassigned), "
+            "who and when, and which fields changed (names only, never values). Stage "
+            "transitions with reasons are in `stage-history/`."
+        ),
+        parameters=[_TENANT_HEADER],
+        responses=None,
+    )
+    def get(self, request: Request, deal_id: UUID) -> Response:
+        entries = deal_service().history(self.principal(), deal_id)
+        tenant_id = self.membership.tenant_id
+        names: dict[UUID, str | None] = {}
+        results = []
+        for e in entries:
+            actor = e.actor_user_id
+            if actor is not None and actor not in names:
+                names[actor] = member_display_name(tenant_id, actor)
+            results.append(
+                {
+                    "action": e.action,
+                    "occurred_at": e.occurred_at.isoformat(),
+                    "actor": {"id": str(actor), "name": names[actor]} if actor else None,
+                    "changed_fields": list(e.changed_fields),
+                }
+            )
+        return Response({"count": len(results), "results": results})
 
 
 # --- loss reasons -----------------------------------------------------------

@@ -140,7 +140,7 @@ def test_closed_deal_is_read_only_until_reopened() -> None:
     assert deal.status.value == "open"
     assert deal.closed_at is None
     # Now editable again.
-    assert deal.update_details(title="Reworked") is True
+    assert deal.update_details(title="Reworked") == ("title",)
 
 
 def test_cannot_reopen_an_open_deal() -> None:
@@ -152,7 +152,7 @@ def test_cannot_reopen_an_open_deal() -> None:
 def test_update_details_can_clear_optional_fields() -> None:
     deal = _open_deal(_pipeline())
     customer = uuid4()
-    assert deal.update_details(customer_id=customer, set_customer=True) is True
+    assert deal.update_details(customer_id=customer, set_customer=True) == ("customer",)
     assert deal.customer_id == customer
-    assert deal.update_details(customer_id=None, set_customer=True) is True
+    assert deal.update_details(customer_id=None, set_customer=True) == ("customer",)
     assert deal.customer_id is None

@@ -26,7 +26,7 @@ def test_today_board_traffic_light_and_inactivity(
     make_user("rep2", tenant=tenants["acme"], role=Role.SALES_REP)  # a member with no activity
 
     # rep1 has activity today (a call); rep2 has none.
-    cid = director.post("/api/v1/customers/", {"name": "Acme"}, format="json").json()["id"]
+    cid = rep1.post("/api/v1/customers/", {"name": "Acme"}, format="json").json()["id"]
     call = rep1.post(
         "/api/v1/activities/",
         {

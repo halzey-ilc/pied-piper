@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from modules.audit.infrastructure.audit_log import DjangoAuditLog
+from modules.organizations.infrastructure.memberships import DjangoMemberDirectory
 from modules.sales_pipeline.application.custom_field_service import CustomFieldService
 from modules.sales_pipeline.application.deal_service import DealService
 from modules.sales_pipeline.application.loss_reason_service import LossReasonService
@@ -27,11 +28,13 @@ def pipeline_service() -> PipelineService:
         repository=DjangoPipelineRepository(alias),
         uow=DjangoUnitOfWork(alias),
         audit=DjangoAuditLog(alias),
+        deals=DjangoDealRepository(alias),
     )
 
 
 def deal_service() -> DealService:
-    alias = require_tenant().db_alias
+    tenant = require_tenant()
+    alias = tenant.db_alias
     return DealService(
         deals=DjangoDealRepository(alias),
         pipelines=DjangoPipelineRepository(alias),
@@ -42,6 +45,8 @@ def deal_service() -> DealService:
         loss_reasons=DjangoLossReasonRepository(alias),
         stage_changes=DjangoStageChangeRepository(alias),
         custom_fields=DjangoCustomFieldRepository(alias),
+        members=DjangoMemberDirectory(tenant.tenant_id),
+        trail=DjangoAuditLog(alias),
     )
 
 

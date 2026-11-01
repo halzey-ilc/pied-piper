@@ -126,8 +126,8 @@ class MeetingService:
     def schedule(self, principal: Principal, command: ScheduleMeeting) -> Meeting:
         self._policy.require(principal, Permission.MEETINGS_CREATE)
         with self._uow:
-            if command.link is not None and not self._subjects.exists(
-                command.link.type, command.link.id
+            if command.link is not None and not self._subjects.visible_to(
+                principal, command.link.type, command.link.id
             ):
                 raise NotFoundError(
                     f"The {command.link.type.value} this meeting links to was not found."

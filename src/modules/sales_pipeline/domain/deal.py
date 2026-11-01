@@ -191,31 +191,53 @@ class Deal:
         set_custom_fields: bool = False,
         expected_close_date: date | None = None,
         set_expected_close: bool = False,
-    ) -> bool:
-        """Edit an open deal. ``set_*`` flags allow clearing a field to None."""
+    ) -> tuple[str, ...]:
+        """Edit an open deal. ``set_*`` flags allow clearing a field to None.
+
+        Returns the names of the fields that changed (empty: nothing changed).
+        """
         self._require_open("edited")
-        changed = False
+        changed: list[str] = []
         if title is not None and (cleaned := _clean_title(title)) != self.title:
-            self.title, changed = cleaned, True
+            self.title = cleaned
+            changed.append("title")
         if value is not None and value != self.value:
-            self.value, changed = value, True
+            self.value = value
+            changed.append("amount")
         if set_customer and customer_id != self.customer_id:
-            self.customer_id, changed = customer_id, True
+            self.customer_id = customer_id
+            changed.append("customer")
         if set_source and (new_source := _clean_optional(source, MAX_SOURCE_LENGTH)) != self.source:
-            self.source, changed = new_source, True
+            self.source = new_source
+            changed.append("source")
         if set_next_step:
             new_next = _clean_optional(next_step, MAX_NEXT_STEP_LENGTH)
             if new_next != self.next_step:
-                self.next_step, changed = new_next, True
+                self.next_step = new_next
+                changed.append("next_step")
         if set_custom_fields:
             new_fields = dict(custom_fields) if custom_fields else {}
             if new_fields != self.custom_fields:
-                self.custom_fields, changed = new_fields, True
+                self.custom_fields = new_fields
+                changed.append("custom_fields")
         if set_expected_close and expected_close_date != self.expected_close_date:
-            self.expected_close_date, changed = expected_close_date, True
+            self.expected_close_date = expected_close_date
+            changed.append("expected_close_date")
         if changed:
             self.version += 1
-        return changed
+        return tuple(changed)
+
+    def assign(self, owner_user_id: UUID, team_id: UUID | None) -> bool:
+        """Hand the deal to another responsible member; their department becomes its team.
+
+        Allowed in any status: a closed deal keeps being serviced by someone.
+        """
+        if owner_user_id == self.owner_user_id and team_id == self.team_id:
+            return False
+        self.owner_user_id = owner_user_id
+        self.team_id = team_id
+        self.version += 1
+        return True
 
     def move_to(self, stage_id: UUID) -> DealStageChanged | None:
         self._require_open("moved to another stage")

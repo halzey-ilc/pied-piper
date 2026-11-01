@@ -33,6 +33,40 @@ class PipelineCreateSerializer(serializers.Serializer[dict[str, Any]]):
     )
 
 
+class PipelineUpdateSerializer(serializers.Serializer[dict[str, Any]]):
+    name = serializers.CharField(max_length=100, required=False)
+    is_default = serializers.BooleanField(
+        required=False, help_text="true makes this the default pipeline (the flag moves here)"
+    )
+
+    def validate_is_default(self, value: bool) -> bool:
+        if value is False:
+            raise serializers.ValidationError("Make another pipeline the default instead.")
+        return value
+
+
+class StageAddSerializer(StageDefinitionSerializer):
+    position = serializers.IntegerField(
+        min_value=0, required=False, help_text="0-based; omitted = at the end"
+    )
+
+
+class StageUpdateSerializer(serializers.Serializer[dict[str, Any]]):
+    name = serializers.CharField(max_length=100, required=False)
+    probability = serializers.IntegerField(min_value=0, max_value=100, required=False)
+    is_active = serializers.BooleanField(
+        required=False, help_text="false archives the stage, true restores it"
+    )
+
+
+class StageOrderSerializer(serializers.Serializer[dict[str, Any]]):
+    stage_ids = serializers.ListField(child=serializers.UUIDField(), min_length=1)
+
+
+class DealAssignSerializer(serializers.Serializer[dict[str, Any]]):
+    owner_user_id = serializers.UUIDField()
+
+
 class StageReadSerializer(serializers.Serializer[dict[str, Any]]):
     id = serializers.UUIDField(read_only=True)
     name = serializers.CharField(read_only=True)

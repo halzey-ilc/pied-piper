@@ -6,6 +6,7 @@ from decimal import Decimal
 from typing import Protocol
 from uuid import UUID
 
+from modules.access_control.domain.rbac import MemberRef
 from modules.sales_pipeline.domain.custom_field import CustomFieldDefinition
 from modules.sales_pipeline.domain.deal import Deal, DealStatus
 from modules.sales_pipeline.domain.loss_reason import LossReason
@@ -62,6 +63,8 @@ class PipelineRepository(Protocol):
         """Unset is_default on every pipeline (used before marking a new default)."""
         ...
 
+    def save(self, pipeline: Pipeline) -> None: ...
+
 
 class DealRepository(Protocol):
     def add(self, deal: Deal) -> None: ...
@@ -81,10 +84,25 @@ class DealRepository(Protocol):
     def has_open_deals_in_pipeline(self, pipeline_id: UUID) -> bool: ...
 
 
-class CustomerLookup(Protocol):
-    """Port to the customers context to verify a linked customer exists in this tenant."""
+@dataclass(frozen=True, slots=True)
+class LinkedCustomer:
+    """What a deal needs to know about a customer it links to."""
 
-    def exists(self, customer_id: UUID) -> bool: ...
+    owner_user_id: UUID
+    team_id: UUID | None
+    is_archived: bool
+
+
+class CustomerLookup(Protocol):
+    """Port to the customers context: the customer a deal links to, in this tenant."""
+
+    def find(self, customer_id: UUID) -> LinkedCustomer | None: ...
+
+
+class MemberDirectory(Protocol):
+    """Active members of the company (a deal can be handed only to one of them)."""
+
+    def active_member(self, user_id: UUID) -> MemberRef | None: ...
 
 
 class LossReasonRepository(Protocol):

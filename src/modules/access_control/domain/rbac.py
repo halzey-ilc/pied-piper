@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from enum import IntEnum, StrEnum
 from uuid import UUID
 
-from shared.domain.errors import AccessDeniedError
+from shared.domain.errors import AccessDeniedError, DomainValidationError
 
 
 class Permission(StrEnum):
@@ -342,3 +342,33 @@ class AccessPolicy:
         if scope is None:  # pragma: no cover - guarded by allows()
             raise AccessDeniedError("You do not have permission to perform this action.")
         return scope
+
+
+@dataclass(frozen=True, slots=True)
+class MemberRef:
+    """An active member of the company and the department (team) they belong to."""
+
+    user_id: UUID
+    department_id: UUID | None
+
+
+def check_assignable(
+    principal: Principal, scope: Scope, assignee_id: UUID, member: MemberRef | None, *, what: str
+) -> None:
+    """Who may receive work (a task, a deal, a customer) from this caller.
+
+    - OWN scope (a manager) hands work only to themselves;
+    - TEAM scope (a head of sales) only to members of their own department;
+    - ALL scope (a director) to any active member of the company.
+    Nobody hands work to someone who is not an active member of this company.
+    """
+    if assignee_id == principal.user_id:
+        return
+    if scope is Scope.OWN:
+        raise AccessDeniedError(f"You can only assign {what} to yourself.")
+    if member is None:
+        raise DomainValidationError("The assignee is not an active member of this company.")
+    if scope is Scope.TEAM and (
+        member.department_id is None or member.department_id != principal.department_id
+    ):
+        raise AccessDeniedError(f"You can only assign {what} to members of your department.")

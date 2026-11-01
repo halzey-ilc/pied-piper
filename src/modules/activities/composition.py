@@ -4,11 +4,9 @@ from __future__ import annotations
 
 from modules.activities.application.service import ActivityService
 from modules.activities.infrastructure.repository import DjangoActivityRepository
-from modules.activities.infrastructure.subject_checker import (
-    DjangoMemberDirectory,
-    DjangoSubjectChecker,
-)
+from modules.activities.infrastructure.subject_checker import DjangoSubjectChecker
 from modules.audit.infrastructure.audit_log import DjangoAuditLog
+from modules.organizations.infrastructure.memberships import DjangoMemberDirectory
 from platform_core.application.context import require_tenant
 from platform_core.infrastructure.messaging.stores import DjangoEventOutbox
 from shared.infrastructure.unit_of_work import DjangoUnitOfWork

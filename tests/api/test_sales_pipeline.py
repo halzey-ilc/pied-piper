@@ -653,7 +653,21 @@ def test_deal_detail_hides_customer_the_caller_cannot_view(
     # The owner's customer is outside the rep's own scope.
     foreign = owner.post("/api/v1/customers/", {"name": "Owner's client"}, format="json").json()
     assert rep.get(f"/api/v1/customers/{foreign['id']}/").status_code == 404
-    deal = _deal(rep, customer_id=foreign["id"])
+    # A rep cannot link a customer they cannot see...
+    refused = rep.post(
+        "/api/v1/sales/deals/",
+        {"title": "X", "amount": "1.00", "customer_id": foreign["id"]},
+        format="json",
+    )
+    assert refused.status_code == 404
+    # ...but may receive a deal whose customer stays outside their scope.
+    deal = _deal(owner, customer_id=foreign["id"])
+    assigned = owner.post(
+        f"/api/v1/sales/deals/{deal['id']}/assign/",
+        {"owner_user_id": str(rep_user.id)},
+        format="json",
+    )
+    assert assigned.status_code == 200, assigned.content
 
     detail = rep.get(f"/api/v1/sales/deals/{deal['id']}/").json()
     assert detail["customer_id"] == foreign["id"]

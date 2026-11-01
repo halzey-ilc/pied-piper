@@ -71,6 +71,9 @@ def _loss_reason_to_domain(row: LossReasonRecord) -> LossReason:
     return LossReason(id=row.id, name=row.name, is_active=row.is_active, created_at=row.created_at)
 
 
+_POSITION_SHIFT = 1000
+
+
 class DjangoPipelineRepository:
     def __init__(self, using: str) -> None:
         self.using = using
@@ -124,6 +127,28 @@ class DjangoPipelineRepository:
 
     def clear_default_flag(self) -> None:
         PipelineRecord.objects.using(self.using).filter(is_default=True).update(is_default=False)
+
+    def save(self, pipeline: Pipeline) -> None:
+        """Persist name, default flag and the stage set (positions are rewritten)."""
+        with transaction.atomic(using=self.using):
+            PipelineRecord.objects.using(self.using).filter(id=pipeline.id).update(
+                name=pipeline.name, is_default=pipeline.is_default
+            )
+            stages = StageRecord.objects.using(self.using).filter(pipeline_id=pipeline.id)
+            # Move every position out of the way first: (pipeline, position) is unique.
+            stages.update(position=F("position") + _POSITION_SHIFT)
+            for stage in pipeline.stages:
+                StageRecord.objects.using(self.using).update_or_create(
+                    id=stage.id,
+                    defaults={
+                        "pipeline_id": pipeline.id,
+                        "name": stage.name,
+                        "position": stage.position,
+                        "probability": stage.probability,
+                        "kind": stage.kind.value,
+                        "is_active": stage.is_active,
+                    },
+                )
 
 
 class DjangoDealRepository:
@@ -212,6 +237,8 @@ class DjangoDealRepository:
             .filter(id=deal.id, version=expected_version)
             .update(
                 title=deal.title,
+                owner_user_id=deal.owner_user_id,
+                team_id=deal.team_id,
                 stage_id=deal.stage_id,
                 status=deal.status.value,
                 amount=deal.value.amount,
