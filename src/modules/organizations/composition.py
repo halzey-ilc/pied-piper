@@ -13,8 +13,10 @@ from modules.access_control.domain.rbac import (
     Role,
     product_role,
 )
+from modules.activities.composition import hand_over_open_tasks
 from modules.audit.infrastructure.audit_log import DjangoAuditLog
 from modules.organizations.application.service import OrganizationService
+from modules.organizations.infrastructure.memberships import DjangoMemberDirectory
 from modules.organizations.infrastructure.models import Membership
 from modules.organizations.infrastructure.store import DjangoOrganizationStore
 from platform_core.application.context import require_tenant
@@ -26,13 +28,28 @@ def temporary_password() -> str:
     return secrets.token_urlsafe(12)
 
 
+class _TaskHandover:
+    """WorkHandover adapter: the activities module moves the open tasks."""
+
+    def __init__(self, tenant_id: UUID) -> None:
+        self.tenant_id = tenant_id
+
+    def hand_over(self, from_user: UUID, to_user: UUID, actor: UUID) -> int:
+
+        recipient = DjangoMemberDirectory(self.tenant_id).active_member(to_user)
+        team = recipient.department_id if recipient is not None else None
+        return hand_over_open_tasks(from_user, to_user, team, actor)
+
+
 def organization_service() -> OrganizationService:
     # Staff and settings live on the control plane; the audit trail in the company's database.
+    tenant = require_tenant()
     return OrganizationService(
         store=DjangoOrganizationStore(),
-        audit=DjangoAuditLog(require_tenant().db_alias),
+        audit=DjangoAuditLog(tenant.db_alias),
         uow=DjangoUnitOfWork("default"),
         passwords=temporary_password,
+        handover=_TaskHandover(tenant.tenant_id),
     )
 
 

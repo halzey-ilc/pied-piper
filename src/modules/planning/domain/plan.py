@@ -7,9 +7,10 @@ head of sales distributes it to managers and sets their weekly and daily targets
 
 from __future__ import annotations
 
+import calendar
 import re
 from dataclasses import dataclass, field
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from enum import StrEnum
 from uuid import UUID, uuid4
@@ -45,6 +46,21 @@ _GRANULARITY: dict[PlanMetric, str] = {
 
 def period_granularity(metric: PlanMetric) -> str:
     return _GRANULARITY[metric]
+
+
+def period_dates(metric: PlanMetric, period: str) -> tuple[date, date]:
+    """First and last calendar day (inclusive) of a plan period: a month ``YYYY-MM``,
+    an ISO week ``YYYY-Www`` (Monday..Sunday) or a day ``YYYY-MM-DD``."""
+    cleaned = _validate_period(metric, period)
+    granularity = _GRANULARITY[metric]
+    if granularity == "month":
+        year, month = int(cleaned[:4]), int(cleaned[5:7])
+        return date(year, month, 1), date(year, month, calendar.monthrange(year, month)[1])
+    if granularity == "week":
+        monday = date.fromisocalendar(int(cleaned[:4]), int(cleaned[6:]), 1)
+        return monday, monday + timedelta(days=6)
+    day = date.fromisoformat(cleaned)
+    return day, day
 
 
 def _validate_period(metric: PlanMetric, period: str) -> str:

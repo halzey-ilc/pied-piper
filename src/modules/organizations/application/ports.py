@@ -169,5 +169,11 @@ class OrganizationStore(Protocol):
         ...
 
 
+class WorkHandover(Protocol):
+    """Hands a deactivated member's open tasks to another member (company database)."""
+
+    def hand_over(self, from_user: UUID, to_user: UUID, actor: UUID) -> int: ...
+
+
 class PasswordGenerator(Protocol):
     def __call__(self) -> str: ...

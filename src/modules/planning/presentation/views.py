@@ -10,6 +10,7 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 
 from modules.access_control.domain.rbac import Principal, Role
+from modules.organizations.composition import company_settings
 from modules.planning.application.ports import AbsenceFilter, PlanFilter
 from modules.planning.application.service import CreateAbsence, SetPlan
 from modules.planning.composition import planning_service
@@ -26,6 +27,7 @@ from modules.planning.presentation.serializers import (
     absence_to_dict,
     plan_change_to_dict,
     plan_to_dict,
+    progress_to_dict,
 )
 from platform_core.presentation.tenancy import TenantScopedAPIView
 
@@ -78,6 +80,39 @@ def _enum[E: StrEnum](enum_cls: type[E], value: str | None) -> E | None:
     if value and value in {m.value for m in enum_cls}:
         return enum_cls(value)
     return None
+
+
+class PlanProgressView(_Scoped):
+    @extend_schema(
+        tags=_TAGS,
+        operation_id="planning_plans_progress",
+        summary="Plan vs actual",
+        description=(
+            "Each visible plan (same filters and scope rules as the plan list) with its "
+            "period dates, the actual result computed from the company's records and the "
+            "completion percent (null when the target is 0). Formulas: monthly_sales — deals "
+            "whose first payment falls in the month; monthly_turnover — payments minus "
+            "refunds in the company currency; weekly_leads — leads created; "
+            "weekly_prepayments — prepayments received (count); daily_calls — logged calls. "
+            "A department plan counts its current members' results."
+        ),
+        parameters=[_TENANT_HEADER, _LIMIT, _OFFSET],
+        responses=None,
+    )
+    def get(self, request: Request) -> Response:
+        limit, offset = self._paging(request)
+        q = request.query_params
+        filters = PlanFilter(
+            scope=_enum(PlanScope, q.get("scope")),
+            scope_id=_uuid(q.get("scope_id")),
+            metric=_enum(PlanMetric, q.get("metric")),
+            period=q.get("period") or None,
+        )
+        page = planning_service().progress(self.principal(), filters, limit=limit, offset=offset)
+        currency = company_settings(self.membership.tenant_id)["currency"]
+        return Response(
+            {"count": page.total, "results": [progress_to_dict(p, currency) for p in page.items]}
+        )
 
 
 class PlanListSetView(_Scoped):

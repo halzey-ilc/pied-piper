@@ -121,6 +121,19 @@ class DjangoActivityRepository:
         if updated != 1:
             raise ConflictError("Activity was modified by someone else; reload and retry.")
 
+    def hand_over_open_tasks(self, from_user: UUID, to_user: UUID, team_id: UUID | None) -> int:
+        """Move every open task of a leaving member to another member (bulk, versioned)."""
+        return (
+            self._qs()
+            .filter(kind="task", task_status="open", assignee_user_id=from_user)
+            .update(
+                assignee_user_id=to_user,
+                owner_user_id=to_user,
+                team_id=team_id,
+                version=F("version") + 1,
+            )
+        )
+
     def count_open_tasks_for_subject(self, subject: SubjectRef) -> int:
         return (
             self._qs()

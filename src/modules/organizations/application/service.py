@@ -38,6 +38,7 @@ from modules.organizations.application.ports import (
     PasswordGenerator,
     StaffMember,
     StaffRequestInfo,
+    WorkHandover,
 )
 from shared.application.ports import UnitOfWork
 from shared.domain.errors import (
@@ -62,8 +63,10 @@ class OrganizationService:
         uow: UnitOfWork,
         passwords: PasswordGenerator,
         *,
+        handover: WorkHandover | None = None,
         policy: AccessPolicy | None = None,
     ) -> None:
+        self._handover = handover
         self._store = store
         self._audit = audit
         self._uow = uow
@@ -376,10 +379,8 @@ class OrganizationService:
                 if target is not None and target.is_active:
                     if target.user_id == principal.user_id:
                         raise DomainValidationError("You cannot deactivate your own account.")
-                    self._store.deactivate(principal.tenant_id, target.membership_id)
-                    self._record(
-                        principal, "staff.deactivated", "membership", str(target.membership_id), ()
-                    )
+                    # The head of sales who asked takes over the open tasks of their department.
+                    self._offboard(principal, target, recipient=request.requested_by)
             decided = self._store.decide_request(
                 principal.tenant_id,
                 request.id,
@@ -418,6 +419,22 @@ class OrganizationService:
             )
             self._record(principal, "staff.request_cancelled", "staff_request", str(request.id), ())
         return decided
+
+    def _offboard(
+        self, principal: Principal, member: StaffMember, *, recipient: UUID
+    ) -> StaffMember:
+        """Deactivate an account (sign-in blocked) and hand over its open tasks.
+
+        Rule: open tasks go to ``recipient`` — the head of sales who requested the dismissal,
+        or the director who deactivated directly. Deals, customers, done tasks, meetings and
+        the audit trail stay with the person as history; the director can hand deals and
+        customers over explicitly. Nothing is deleted.
+        """
+        updated = self._store.deactivate(principal.tenant_id, member.membership_id)
+        self._record(principal, "staff.deactivated", "membership", str(member.membership_id), ())
+        if self._handover is not None:
+            self._handover.hand_over(member.user_id, recipient, principal.user_id)
+        return updated
 
     def _requesting_department(self, principal: Principal) -> UUID:
         scope = self._policy.require(principal, Permission.STAFF_MANAGE)
@@ -480,9 +497,7 @@ class OrganizationService:
                 raise DomainValidationError("You cannot deactivate your own account.")
             if not member.is_active:
                 return member
-            updated = self._store.deactivate(principal.tenant_id, member.membership_id)
-            self._record(principal, "staff.deactivated", "membership", str(membership_id), ())
-        return updated
+            return self._offboard(principal, member, recipient=principal.user_id)
 
     def reset_password(self, principal: Principal, membership_id: UUID) -> str:
         scope = self._policy.require(principal, Permission.STAFF_MANAGE)

@@ -7,6 +7,7 @@ from typing import Any
 
 from rest_framework import serializers
 
+from modules.planning.application.service import PlanProgress
 from modules.planning.domain.absence import Absence, AbsenceKind
 from modules.planning.domain.plan import Plan, PlanChange, PlanMetric, PlanScope
 
@@ -107,4 +108,27 @@ def absence_to_dict(absence: Absence) -> dict[str, Any]:
         "comment": absence.comment,
         "created_by": str(absence.created_by),
         "created_at": absence.created_at.isoformat(),
+    }
+
+
+# Unit of each metric's target and actual.
+METRIC_UNITS = {
+    "monthly_sales": "count",
+    "monthly_turnover": "money",
+    "weekly_leads": "count",
+    "weekly_prepayments": "count",
+    "daily_calls": "count",
+}
+
+
+def progress_to_dict(progress: PlanProgress, currency: str) -> dict[str, Any]:
+    unit = METRIC_UNITS[progress.plan.metric.value]
+    return {
+        **plan_to_dict(progress.plan),
+        "period_start": progress.start.isoformat(),
+        "period_end": progress.end.isoformat(),
+        "unit": unit,
+        "currency": currency if unit == "money" else None,
+        "actual": str(progress.actual) if progress.actual is not None else None,
+        "percent": str(progress.percent) if progress.percent is not None else None,
     }

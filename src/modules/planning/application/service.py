@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from uuid import UUID
 
 from modules.access_control.domain.rbac import AccessPolicy, Permission, Principal, Scope
@@ -20,12 +20,13 @@ from modules.planning.application.ports import (
     AbsenceFilter,
     AbsenceRepository,
     DepartmentRoster,
+    PlanActuals,
     PlanFilter,
     PlanRepository,
     PlanVisibility,
 )
 from modules.planning.domain.absence import Absence, AbsenceKind
-from modules.planning.domain.plan import Plan, PlanChange, PlanMetric, PlanScope
+from modules.planning.domain.plan import Plan, PlanChange, PlanMetric, PlanScope, period_dates
 from shared.application.ports import UnitOfWork
 from shared.domain.errors import AccessDeniedError, NotFoundError
 
@@ -55,6 +56,21 @@ class PlanPage:
 
 
 @dataclass(frozen=True, slots=True)
+class PlanProgress:
+    plan: Plan
+    start: date
+    end: date
+    actual: Decimal | None  # None: not computable from the records the CRM keeps
+    percent: Decimal | None  # actual / target * 100, one decimal; None if target is 0
+
+
+@dataclass(frozen=True, slots=True)
+class ProgressPage:
+    items: list[PlanProgress]
+    total: int
+
+
+@dataclass(frozen=True, slots=True)
 class AbsencePage:
     items: list[Absence]
     total: int
@@ -68,8 +84,14 @@ class PlanningService:
         roster: DepartmentRoster,
         uow: UnitOfWork,
         audit: AuditLog,
+        actuals: PlanActuals | None = None,
+        currency: str = "KGS",
+        timezone: str = "Asia/Bishkek",
         policy: AccessPolicy | None = None,
     ) -> None:
+        self._actuals = actuals
+        self._currency = currency
+        self._timezone = timezone
         self._plans = plans
         self._absences = absences
         self._roster = roster
@@ -148,6 +170,46 @@ class PlanningService:
             items=self._plans.list_all(filters, limit=limit, offset=offset),
             total=self._plans.count(filters),
         )
+
+    def progress(
+        self, principal: Principal, filters: PlanFilter, *, limit: int, offset: int
+    ) -> ProgressPage:
+        """Plan vs actual for the plans the caller may see (same scope rules as the list).
+
+        A manager sees only their own plans' progress, a head of sales the company plan,
+        their department's and its members', the director everything.
+        """
+        page = self.list_plans(principal, filters, limit=limit, offset=offset)
+        return ProgressPage(items=[self._progress(plan) for plan in page.items], total=page.total)
+
+    def _progress(self, plan: Plan) -> PlanProgress:
+        start, end = period_dates(plan.metric, plan.period)
+        actual = (
+            self._actuals.actual(
+                plan.metric,
+                start,
+                end,
+                user_ids=self._contributors(plan),
+                currency=self._currency,
+                timezone=self._timezone,
+            )
+            if self._actuals is not None
+            else None
+        )
+        percent = (
+            (actual / plan.target * 100).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)
+            if actual is not None and plan.target > 0
+            else None
+        )
+        return PlanProgress(plan=plan, start=start, end=end, actual=actual, percent=percent)
+
+    def _contributors(self, plan: Plan) -> frozenset[UUID] | None:
+        """Whose results count: the manager, the department's current members, or everyone."""
+        if plan.scope is PlanScope.USER and plan.scope_id is not None:
+            return frozenset({plan.scope_id})
+        if plan.scope is PlanScope.DEPARTMENT:
+            return self._roster.members_of(plan.scope_id)
+        return None
 
     def plan_history(self, principal: Principal, plan_id: UUID) -> list[PlanChange]:
         scope = self._policy.require(principal, Permission.PLANS_VIEW)

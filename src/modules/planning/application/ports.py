@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
+from decimal import Decimal
 from typing import Protocol
 from uuid import UUID
 
@@ -72,3 +73,23 @@ class DepartmentRoster(Protocol):
     """Active members of a department (a head of sales manages only these)."""
 
     def members_of(self, department_id: UUID | None) -> frozenset[UUID]: ...
+
+
+class PlanActuals(Protocol):
+    """Actual results of a plan metric over a period, from the company's own records.
+
+    ``user_ids`` limits to these members' results (one manager, or a department's current
+    members); None = the whole company. Money is summed only in the company ``currency``.
+    Returns None when the metric cannot be computed.
+    """
+
+    def actual(
+        self,
+        metric: PlanMetric,
+        start: date,
+        end: date,
+        *,
+        user_ids: frozenset[UUID] | None,
+        currency: str,
+        timezone: str,
+    ) -> Decimal | None: ...
