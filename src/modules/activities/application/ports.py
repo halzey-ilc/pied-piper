@@ -59,7 +59,19 @@ class SubjectChecker(Protocol):
         ...
 
 
+@dataclass(frozen=True, slots=True)
+class MemberInfo:
+    """An active member of the company and the department (team) they belong to."""
+
+    user_id: UUID
+    department_id: UUID | None
+
+
 class MemberDirectory(Protocol):
     """Who belongs to the active company (tasks may only be assigned to its members)."""
 
-    def is_active_member(self, user_id: UUID) -> bool: ...
+    def active_member(self, user_id: UUID) -> MemberInfo | None: ...
+
+    def heads_of_sales_count(self) -> int:
+        """Active heads of sales (РОП) in the company."""
+        ...

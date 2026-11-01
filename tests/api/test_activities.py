@@ -335,3 +335,107 @@ def test_task_assignee_must_be_an_active_member(
     )
     assert response.status_code == 400, response.content
     assert ActivityRecord.objects.using("tenant_acme").count() == 0
+
+
+# --- task assignment between heads of sales (РОП) ---------------------------
+
+
+def _in_department(user: Any, tenant: TenantFixture, name: str) -> None:
+    from modules.organizations.infrastructure.models import Department, Membership
+
+    department, _ = Department.objects.get_or_create(organization=tenant.org, name=name)
+    Membership.objects.filter(user=user, organization=tenant.org).update(department=department)
+
+
+def _assign(client: APIClient, subject_id: str, assignee: Any) -> Any:
+    return _log(
+        client,
+        kind="task",
+        subject_type="customer",
+        subject_id=subject_id,
+        title="Assigned task",
+        assignee_user_id=str(assignee.id),
+    )
+
+
+def test_single_head_of_sales_assigns_anyone_in_the_company(
+    make_user: Callable[..., Any],
+    tenants: dict[str, TenantFixture],
+    client_for: Callable[..., APIClient],
+) -> None:
+    acme = tenants["acme"]
+    owner = client_for(make_user("owner", tenant=acme), "acme")
+    rop_user = make_user("rop", tenant=acme, role=Role.HEAD_OF_SALES)
+    _in_department(rop_user, acme, "North")
+    rep_elsewhere = make_user("rep", tenant=acme, role=Role.SALES_REP)
+    _in_department(rep_elsewhere, acme, "South")
+    cid = _customer(owner)
+
+    response = _assign(client_for(rop_user, "acme"), cid, rep_elsewhere)
+    assert response.status_code == 201, response.content
+
+
+def test_two_heads_of_sales_assign_only_within_their_teams(
+    make_user: Callable[..., Any],
+    tenants: dict[str, TenantFixture],
+    client_for: Callable[..., APIClient],
+) -> None:
+    acme = tenants["acme"]
+    owner = client_for(make_user("owner", tenant=acme), "acme")
+    rop1 = make_user("rop1", tenant=acme, role=Role.HEAD_OF_SALES)
+    rop2 = make_user("rop2", tenant=acme, role=Role.HEAD_OF_SALES)
+    rep1 = make_user("rep1", tenant=acme, role=Role.SALES_REP)
+    rep2 = make_user("rep2", tenant=acme, role=Role.SALES_REP)
+    for user, team in ((rop1, "North"), (rep1, "North"), (rop2, "South"), (rep2, "South")):
+        _in_department(user, acme, team)
+    cid = _customer(owner)
+    rop1_client, rop2_client = client_for(rop1, "acme"), client_for(rop2, "acme")
+
+    assert _assign(rop1_client, cid, rep1).status_code == 201
+    assert _assign(rop1_client, cid, rep2).status_code == 403
+    assert _assign(rop2_client, cid, rep1).status_code == 403
+    assert _assign(rop2_client, cid, rep2).status_code == 201
+
+    # Reassigning an existing task across teams is refused the same way.
+    own = _log(rop1_client, kind="task", subject_type="customer", subject_id=cid, title="Mine")
+    moved = rop1_client.post(
+        f"/api/v1/activities/{own.json()['id']}/reassign/",
+        {"assignee_user_id": str(rep2.id)},
+        format="json",
+    )
+    assert moved.status_code == 403
+    assert ActivityRecord.objects.using("tenant_acme").filter(assignee_user_id=rep2.id).count() == 1
+
+
+def test_head_of_sales_cannot_assign_another_companys_member(
+    make_user: Callable[..., Any],
+    tenants: dict[str, TenantFixture],
+    client_for: Callable[..., APIClient],
+) -> None:
+    acme = tenants["acme"]
+    owner = client_for(make_user("owner", tenant=acme), "acme")
+    rop = make_user("rop", tenant=acme, role=Role.HEAD_OF_SALES)
+    outsider = make_user("outsider", tenant=tenants["globex"], role=Role.SALES_REP)
+    cid = _customer(owner)
+
+    assert _assign(client_for(rop, "acme"), cid, outsider).status_code == 400
+
+
+def test_director_assigns_across_teams_with_several_heads_of_sales(
+    make_user: Callable[..., Any],
+    tenants: dict[str, TenantFixture],
+    client_for: Callable[..., APIClient],
+) -> None:
+    acme = tenants["acme"]
+    director = make_user("director", tenant=acme, role=Role.DIRECTOR)
+    director_client = client_for(director, "acme")
+    rop1 = make_user("rop1", tenant=acme, role=Role.HEAD_OF_SALES)
+    rop2 = make_user("rop2", tenant=acme, role=Role.HEAD_OF_SALES)
+    rep1 = make_user("rep1", tenant=acme, role=Role.SALES_REP)
+    rep2 = make_user("rep2", tenant=acme, role=Role.SALES_REP)
+    for user, team in ((rop1, "North"), (rep1, "North"), (rop2, "South"), (rep2, "South")):
+        _in_department(user, acme, team)
+    cid = _customer(director_client)
+
+    assert _assign(director_client, cid, rep1).status_code == 201
+    assert _assign(director_client, cid, rep2).status_code == 201

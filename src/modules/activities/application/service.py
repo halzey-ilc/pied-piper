@@ -148,12 +148,7 @@ class ActivityService:
     def log_task(self, principal: Principal, command: LogTask) -> Activity:
         scope = self._policy.require(principal, Permission.ACTIVITIES_CREATE)
         assignee = command.assignee_user_id or principal.user_id
-        # A manager (OWN scope) may only assign tasks to themselves; a head of
-        # sales (TEAM) or director/admin (ALL) may assign them to others.
-        if assignee != principal.user_id and scope is Scope.OWN:
-            raise AccessDeniedError("You can only assign tasks to yourself.")
-        if assignee != principal.user_id and not self._members.is_active_member(assignee):
-            raise DomainValidationError("The assignee is not an active member of this company.")
+        self._check_assignee(principal, scope, assignee)
         with self._uow:
             if not self._subjects.exists(command.subject.type, command.subject.id) or (
                 # A deal outside the caller's scope is treated as missing, so its
@@ -265,8 +260,8 @@ class ActivityService:
             scope = self._policy.require(
                 principal, Permission.ACTIVITIES_UPDATE, _ownership(activity)
             )
-            if assignee_user_id != activity.assignee_user_id and scope is Scope.OWN:
-                raise AccessDeniedError("You cannot reassign tasks to another user.")
+            if assignee_user_id != activity.assignee_user_id:
+                self._check_assignee(principal, scope, assignee_user_id)
             version = activity.version
             if activity.reassign(assignee_user_id, team_id=principal.department_id, set_team=True):
                 self._repo.save(activity, expected_version=version)
@@ -283,6 +278,30 @@ class ActivityService:
         return activity
 
     # --- helpers ------------------------------------------------------------
+
+    def _check_assignee(self, principal: Principal, scope: Scope, assignee: UUID) -> None:
+        """Who may get a task from this caller.
+
+        - a manager (OWN scope) assigns only to themselves;
+        - anyone else assigns only to active members of the company;
+        - a head of sales (TEAM scope) in a company with several heads of sales
+          assigns only within their own department (team); with a single head
+          of sales the whole company is their team.
+        Directors and admins (ALL scope) keep company-wide assignment.
+        """
+        if assignee == principal.user_id:
+            return
+        if scope is Scope.OWN:
+            raise AccessDeniedError("You can only assign tasks to yourself.")
+        member = self._members.active_member(assignee)
+        if member is None:
+            raise DomainValidationError("The assignee is not an active member of this company.")
+        if (
+            scope is Scope.TEAM
+            and self._members.heads_of_sales_count() > 1
+            and (principal.department_id is None or member.department_id != principal.department_id)
+        ):
+            raise AccessDeniedError("You can only assign tasks to members of your team.")
 
     def _log(
         self,

@@ -104,6 +104,20 @@ def list_active_members(tenant_id: UUID) -> list[tuple[UUID, str]]:
     return [(row.user_id, row.role) for row in rows.only("user_id", "role")]
 
 
+def active_member_departments(tenant_id: UUID) -> list[tuple[UUID, str, UUID | None]]:
+    """(user id, role, department id) of every active member of an active organization."""
+    rows = Membership.objects.using("default").filter(
+        organization_id=tenant_id,
+        is_active=True,
+        organization__is_active=True,
+        user__is_active=True,
+    )
+    return [
+        (row.user_id, row.role, row.department_id)
+        for row in rows.only("user_id", "role", "department_id")
+    ]
+
+
 def member_display_name(tenant_id: UUID, user_id: UUID) -> str | None:
     """Full name (or login) of a user who is or was a member of this organization; else None.
 
