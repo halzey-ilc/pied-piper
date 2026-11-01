@@ -40,7 +40,12 @@ from modules.platform_admin.application.ports import (
     TicketStore,
 )
 from modules.platform_admin.domain.support import ErrorStatus, TicketKind, TicketStatus
-from modules.subscriptions.application.ports import SubscriptionRepository
+from modules.subscriptions.application.ports import (
+    PaymentFilter,
+    SubscriptionPaymentRepository,
+    SubscriptionRepository,
+)
+from modules.subscriptions.domain.payment import SubscriptionPayment
 from modules.subscriptions.domain.plan import Feature, PlanCode, all_plans, get_plan
 from modules.subscriptions.domain.subscription import (
     AccessState,
@@ -97,8 +102,22 @@ class Overview:
     counts: PlatformCounts
     period_days: int
     # Sum of the monthly list prices of plans that currently give access, per currency.
-    # An assigned price, NOT received money: the platform does not record payments yet.
+    # An assigned price, NOT received money.
     assigned_monthly: dict[str, Decimal]
+    # CONFIRMED subscription payments paid within the period, per currency.
+    received: dict[str, Decimal]
+
+
+@dataclass(frozen=True, slots=True)
+class RecordPayment:
+    amount: Decimal
+    currency: str
+    paid_on: date
+    reference: str
+    period_start: date | None = None
+    period_end: date | None = None
+    note: str = ""
+    confirm: bool = False  # record and confirm in one step (money already seen)
 
 
 def period_bounds(terms: Terms) -> tuple[datetime, datetime | None]:
@@ -120,6 +139,7 @@ class PlatformAdminService:
         provisioner: TenantProvisioner,
         errors: ErrorLog,
         tickets: TicketStore,
+        payments: SubscriptionPaymentRepository,
         uow: UnitOfWork,
         outbox: EventOutbox,
         audit: AuditLog,
@@ -131,6 +151,7 @@ class PlatformAdminService:
         self._provisioner = provisioner
         self._errors = errors
         self._tickets = tickets
+        self._payments = payments
         self._uow = uow
         self._outbox = outbox
         self._audit = audit
@@ -152,7 +173,12 @@ class PlatformAdminService:
                 assigned[plan.currency] = assigned.get(plan.currency, Decimal(0)) + (
                     plan.monthly_price * n
                 )
-        return Overview(counts=counts, period_days=period_days, assigned_monthly=assigned)
+        received = self._payments.confirmed_totals(
+            (now - timedelta(days=period_days)).date(), now.date()
+        )
+        return Overview(
+            counts=counts, period_days=period_days, assigned_monthly=assigned, received=received
+        )
 
     # --- companies ------------------------------------------------------------
 
@@ -290,6 +316,72 @@ class PlatformAdminService:
                 ("plan", "term", "modules", "status"),
             )
         return self.company(actor, company_id)
+
+    # --- subscription payments --------------------------------------------------
+
+    def record_payment(
+        self, actor: PlatformActor, company_id: UUID, command: RecordPayment
+    ) -> SubscriptionPayment:
+        """Record money the platform received for a company's subscription (manual entry).
+
+        The same external reference cannot be recorded twice (409 duplicate_payment).
+        """
+        _require(actor)
+        with self._uow:
+            self.company(actor, company_id)
+            subscription = self._subscriptions.get_by_org(company_id)
+            payment = SubscriptionPayment.record(
+                organization_id=company_id,
+                subscription_id=subscription.id if subscription else None,
+                amount=command.amount,
+                currency=command.currency,
+                paid_on=command.paid_on,
+                reference=command.reference,
+                recorded_by=actor.user_id,
+                period_start=command.period_start,
+                period_end=command.period_end,
+                note=command.note,
+            )
+            if command.paid_on > self._now().date():
+                raise DomainValidationError("paid_on must not be in the future.")
+            self._payments.add(payment)
+            self._record(actor, "platform.payment_recorded", company_id, ("payment",))
+            if command.confirm:
+                payment.confirm(actor.user_id)
+                self._payments.save_decision(payment)
+                self._record(actor, "platform.payment_confirmed", company_id, ("payment",))
+        return payment
+
+    def confirm_payment(self, actor: PlatformActor, payment_id: UUID) -> SubscriptionPayment:
+        return self._decide_payment(actor, payment_id, confirm=True, note="")
+
+    def cancel_payment(
+        self, actor: PlatformActor, payment_id: UUID, note: str = ""
+    ) -> SubscriptionPayment:
+        return self._decide_payment(actor, payment_id, confirm=False, note=note)
+
+    def payments(
+        self, actor: PlatformActor, filters: PaymentFilter, *, limit: int, offset: int
+    ) -> tuple[list[SubscriptionPayment], int]:
+        _require(actor)
+        return self._payments.list(filters, limit=limit, offset=offset)
+
+    def _decide_payment(
+        self, actor: PlatformActor, payment_id: UUID, *, confirm: bool, note: str
+    ) -> SubscriptionPayment:
+        _require(actor)
+        with self._uow:
+            payment = self._payments.get(payment_id)
+            if payment is None:
+                raise NotFoundError("Payment not found.")
+            if confirm:
+                payment.confirm(actor.user_id)
+            else:
+                payment.cancel(actor.user_id, note)
+            self._payments.save_decision(payment)
+            action = "platform.payment_confirmed" if confirm else "platform.payment_cancelled"
+            self._record(actor, action, payment.organization_id, ("payment",))
+        return payment
 
     # --- errors ---------------------------------------------------------------
 

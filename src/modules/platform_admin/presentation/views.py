@@ -8,6 +8,7 @@ use case. A company role, the director's included, never opens them.
 
 from __future__ import annotations
 
+from datetime import date
 from typing import Any, NoReturn, cast
 from uuid import UUID
 
@@ -20,13 +21,15 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from modules.platform_admin.application.ports import CompanyFilter, NewDirector, PlatformActor
-from modules.platform_admin.application.service import NewCompany, Terms
+from modules.platform_admin.application.service import NewCompany, RecordPayment, Terms
 from modules.platform_admin.composition import platform_admin_service, support_service
 from modules.platform_admin.domain.support import ErrorStatus, TicketStatus
 from modules.platform_admin.presentation.serializers import (
     CompanyCreateSerializer,
     CompanyUpdateSerializer,
     ErrorStatusSerializer,
+    PaymentCancelSerializer,
+    PaymentRecordSerializer,
     TermsSerializer,
     TicketCreateSerializer,
     TicketUpdateSerializer,
@@ -34,9 +37,12 @@ from modules.platform_admin.presentation.serializers import (
     detail_to_dict,
     error_to_dict,
     overview_to_dict,
+    payment_to_dict,
     summary_to_dict,
     ticket_to_dict,
 )
+from modules.subscriptions.application.ports import PaymentFilter
+from modules.subscriptions.domain.payment import PaymentStatus
 from modules.subscriptions.domain.plan import Feature, PlanCode
 from modules.subscriptions.domain.subscription import AccessState, SubscriptionStatus
 from platform_core.presentation.tenancy import TenantScopedAPIView
@@ -218,6 +224,102 @@ class PlatformCompanySubscriptionView(_Platform):
             self.actor(), company_id, _terms(s.validated_data)
         )
         return Response(detail_to_dict(detail))
+
+
+class PlatformCompanyPaymentsView(_Platform):
+    @extend_schema(
+        tags=_TAGS, summary="Subscription payments of a company", responses=OpenApiTypes.OBJECT
+    )
+    def get(self, request: Request, company_id: UUID) -> Response:
+        limit, offset = _page_params(request)
+        service = platform_admin_service()
+        service.company(self.actor(), company_id)  # 404 for an unknown company
+        items, total = service.payments(
+            self.actor(), PaymentFilter(organization_id=company_id), limit=limit, offset=offset
+        )
+        return Response({"count": total, "results": [payment_to_dict(p) for p in items]})
+
+    @extend_schema(
+        tags=_TAGS,
+        summary="Record a subscription payment",
+        description=(
+            "Manual entry of money the platform received (no payment provider is "
+            "connected). `reference` is the external operation id and is unique: recording "
+            "it twice returns 409 `duplicate_payment`. A pending payment is not revenue "
+            "until confirmed; `confirm: true` records and confirms at once."
+        ),
+        request=PaymentRecordSerializer,
+        responses=OpenApiTypes.OBJECT,
+    )
+    def post(self, request: Request, company_id: UUID) -> Response:
+        s = PaymentRecordSerializer(data=request.data)
+        s.is_valid(raise_exception=True)
+        d = s.validated_data
+        payment = platform_admin_service().record_payment(
+            self.actor(),
+            company_id,
+            RecordPayment(
+                amount=d["amount"],
+                currency=d["currency"],
+                paid_on=d["paid_on"],
+                reference=d["reference"],
+                period_start=d.get("period_start"),
+                period_end=d.get("period_end"),
+                note=d.get("note", ""),
+                confirm=d.get("confirm", False),
+            ),
+        )
+        return Response(payment_to_dict(payment), status=status.HTTP_201_CREATED)
+
+
+class PlatformPaymentsView(_Platform):
+    @extend_schema(
+        tags=_TAGS,
+        summary="Subscription payments of all companies",
+        description="Filter with ?status=pending|confirmed|cancelled&paid_from&paid_to&company_id.",
+        responses=OpenApiTypes.OBJECT,
+    )
+    def get(self, request: Request) -> Response:
+        limit, offset = _page_params(request)
+        q = request.query_params
+        try:
+            filters = PaymentFilter(
+                organization_id=UUID(q["company_id"]) if q.get("company_id") else None,
+                status=_enum(q.get("status"), PaymentStatus, "status"),
+                paid_from=date.fromisoformat(q["paid_from"]) if q.get("paid_from") else None,
+                paid_to=date.fromisoformat(q["paid_to"]) if q.get("paid_to") else None,
+            )
+        except ValueError as exc:
+            raise DomainValidationError("company_id must be a UUID, dates YYYY-MM-DD.") from exc
+        items, total = platform_admin_service().payments(
+            self.actor(), filters, limit=limit, offset=offset
+        )
+        return Response({"count": total, "results": [payment_to_dict(p) for p in items]})
+
+
+class PlatformPaymentConfirmView(_Platform):
+    @extend_schema(
+        tags=_TAGS, summary="Confirm a pending payment", request=None, responses=OpenApiTypes.OBJECT
+    )
+    def post(self, request: Request, payment_id: UUID) -> Response:
+        payment = platform_admin_service().confirm_payment(self.actor(), payment_id)
+        return Response(payment_to_dict(payment))
+
+
+class PlatformPaymentCancelView(_Platform):
+    @extend_schema(
+        tags=_TAGS,
+        summary="Cancel a pending payment (recorded by mistake / never arrived)",
+        request=PaymentCancelSerializer,
+        responses=OpenApiTypes.OBJECT,
+    )
+    def post(self, request: Request, payment_id: UUID) -> Response:
+        s = PaymentCancelSerializer(data=request.data)
+        s.is_valid(raise_exception=True)
+        payment = platform_admin_service().cancel_payment(
+            self.actor(), payment_id, s.validated_data["note"]
+        )
+        return Response(payment_to_dict(payment))
 
 
 class PlatformErrorsView(_Platform):

@@ -1,13 +1,26 @@
 from __future__ import annotations
 
+from datetime import date
+from decimal import Decimal
 from uuid import UUID
 
 from django.db import IntegrityError, transaction
-from django.db.models import F
+from django.db.models import F, Sum
 
+from modules.subscriptions.application.ports import PaymentFilter
+from modules.subscriptions.domain.payment import (
+    DuplicatePaymentError,
+    PaymentSource,
+    PaymentStateError,
+    PaymentStatus,
+    SubscriptionPayment,
+)
 from modules.subscriptions.domain.plan import Feature, PlanCode
 from modules.subscriptions.domain.subscription import Subscription, SubscriptionStatus
-from modules.subscriptions.infrastructure.models import SubscriptionRecord
+from modules.subscriptions.infrastructure.models import (
+    SubscriptionPaymentRecord,
+    SubscriptionRecord,
+)
 from shared.domain.errors import ConflictError
 
 # Control-plane module: always the default (global) database.
@@ -76,3 +89,93 @@ class DjangoSubscriptionRepository:
         )
         if updated != 1:
             raise ConflictError("Subscription was modified by someone else; reload and retry.")
+
+
+def _payment(row: SubscriptionPaymentRecord) -> SubscriptionPayment:
+    return SubscriptionPayment(
+        id=row.id,
+        organization_id=row.organization_id,
+        subscription_id=row.subscription_id,
+        amount=row.amount,
+        currency=row.currency,
+        paid_on=row.paid_on,
+        reference=row.reference,
+        source=PaymentSource(row.source),
+        status=PaymentStatus(row.status),
+        recorded_by=row.recorded_by,
+        period_start=row.period_start,
+        period_end=row.period_end,
+        note=row.note,
+        decided_by=row.decided_by,
+        decided_at=row.decided_at,
+        created_at=row.created_at,
+    )
+
+
+class DjangoSubscriptionPaymentRepository:
+    def add(self, payment: SubscriptionPayment) -> None:
+        try:
+            with transaction.atomic(using=_USING):
+                SubscriptionPaymentRecord.objects.using(_USING).create(
+                    id=payment.id,
+                    organization_id=payment.organization_id,
+                    subscription_id=payment.subscription_id,
+                    amount=payment.amount,
+                    currency=payment.currency,
+                    paid_on=payment.paid_on,
+                    reference=payment.reference,
+                    source=payment.source.value,
+                    status=payment.status.value,
+                    period_start=payment.period_start,
+                    period_end=payment.period_end,
+                    note=payment.note,
+                    recorded_by=payment.recorded_by,
+                    created_at=payment.created_at,
+                )
+        except IntegrityError:
+            raise DuplicatePaymentError(
+                "A payment with this reference is already recorded."
+            ) from None
+
+    def get(self, payment_id: UUID) -> SubscriptionPayment | None:
+        row = SubscriptionPaymentRecord.objects.using(_USING).filter(id=payment_id).first()
+        return None if row is None else _payment(row)
+
+    def save_decision(self, payment: SubscriptionPayment) -> None:
+        updated = (
+            SubscriptionPaymentRecord.objects.using(_USING)
+            .filter(id=payment.id, status=PaymentStatus.PENDING.value)
+            .update(
+                status=payment.status.value,
+                decided_by=payment.decided_by,
+                decided_at=payment.decided_at,
+                note=payment.note,
+            )
+        )
+        if updated != 1:
+            raise PaymentStateError("The payment has already been decided.")
+
+    def list(
+        self, filters: PaymentFilter, *, limit: int, offset: int
+    ) -> tuple[list[SubscriptionPayment], int]:
+        qs = SubscriptionPaymentRecord.objects.using(_USING).order_by("-paid_on", "-created_at")
+        if filters.organization_id is not None:
+            qs = qs.filter(organization_id=filters.organization_id)
+        if filters.status is not None:
+            qs = qs.filter(status=filters.status.value)
+        if filters.paid_from is not None:
+            qs = qs.filter(paid_on__gte=filters.paid_from)
+        if filters.paid_to is not None:
+            qs = qs.filter(paid_on__lte=filters.paid_to)
+        return [_payment(row) for row in qs[offset : offset + limit]], qs.count()
+
+    def confirmed_totals(self, paid_from: date, paid_to: date) -> dict[str, Decimal]:
+        rows = (
+            SubscriptionPaymentRecord.objects.using(_USING)
+            .filter(
+                status=PaymentStatus.CONFIRMED.value, paid_on__gte=paid_from, paid_on__lte=paid_to
+            )
+            .values("currency")
+            .annotate(total=Sum("amount"))
+        )
+        return {row["currency"]: row["total"] for row in rows}

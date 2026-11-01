@@ -12,7 +12,10 @@ from modules.platform_admin.infrastructure.store import (
     DjangoTenantProvisioner,
     DjangoTicketStore,
 )
-from modules.subscriptions.infrastructure.repository import DjangoSubscriptionRepository
+from modules.subscriptions.infrastructure.repository import (
+    DjangoSubscriptionPaymentRepository,
+    DjangoSubscriptionRepository,
+)
 from platform_core.infrastructure.messaging.stores import DjangoEventOutbox
 from shared.infrastructure.unit_of_work import DjangoUnitOfWork
 
@@ -30,6 +33,7 @@ def platform_admin_service() -> PlatformAdminService:
         provisioner=tenant_provisioner(),
         errors=DjangoErrorLog(),
         tickets=DjangoTicketStore(),
+        payments=DjangoSubscriptionPaymentRepository(),
         uow=DjangoUnitOfWork(_CONTROL_PLANE),
         outbox=DjangoEventOutbox(_CONTROL_PLANE),
         audit=DjangoAuditLog(_CONTROL_PLANE),

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from django.db import models
+from django.db.models import Q
 
 from modules.organizations.infrastructure.models import Organization
+from modules.subscriptions.domain.payment import PaymentSource, PaymentStatus
 from modules.subscriptions.domain.plan import PlanCode
 from modules.subscriptions.domain.subscription import SubscriptionStatus
 
@@ -39,3 +41,52 @@ class SubscriptionRecord(models.Model):
 
     def __str__(self) -> str:
         return f"{self.organization_id}:{self.plan_code}:{self.status}"
+
+
+class SubscriptionPaymentRecord(models.Model):
+    """A payment for a company's subscription received by the platform (control plane)."""
+
+    id = models.UUIDField(primary_key=True, editable=False)
+    organization = models.ForeignKey(
+        Organization, on_delete=models.PROTECT, related_name="subscription_payments"
+    )
+    subscription = models.ForeignKey(
+        SubscriptionRecord, on_delete=models.PROTECT, null=True, blank=True, related_name="+"
+    )
+    amount = models.DecimalField(max_digits=14, decimal_places=2)
+    currency = models.CharField(max_length=3)
+    paid_on = models.DateField()
+    reference = models.CharField(max_length=100)
+    source = models.CharField(
+        max_length=10, choices=[(s.value, s.name.title()) for s in PaymentSource]
+    )
+    status = models.CharField(
+        max_length=10, choices=[(s.value, s.name.title()) for s in PaymentStatus]
+    )
+    period_start = models.DateField(null=True, blank=True)
+    period_end = models.DateField(null=True, blank=True)
+    note = models.CharField(max_length=500, blank=True, default="")
+    recorded_by = models.UUIDField()
+    decided_by = models.UUIDField(null=True, blank=True)
+    decided_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField()
+
+    class Meta:
+        db_table = "subscriptions_payment"
+        constraints = [
+            # One external operation is recorded once (cancelled ones included: a reused
+            # reference is a mistake to look at, not a new payment).
+            models.UniqueConstraint(
+                fields=["source", "reference"], name="subscription_payment_reference_unique"
+            ),
+            models.CheckConstraint(
+                condition=Q(amount__gt=0), name="subscription_payment_amount_positive"
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["organization", "paid_on"], name="sub_payment_org_paid_idx"),
+            models.Index(fields=["status", "paid_on"], name="sub_payment_status_paid_idx"),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.organization_id}:{self.amount} {self.currency}:{self.status}"

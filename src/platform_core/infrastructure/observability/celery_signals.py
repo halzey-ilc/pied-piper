@@ -7,6 +7,7 @@ must not touch Django models or settings.
 
 from __future__ import annotations
 
+import inspect
 import logging
 import os
 import time
@@ -72,6 +73,46 @@ def _on_retry(sender: Any = None, **_: Any) -> None:
     TASKS.labels(task=getattr(sender, "name", "unknown"), state="RETRY").inc()
 
 
+def _on_failure(
+    sender: Any = None,
+    exception: BaseException | None = None,
+    args: tuple[Any, ...] | None = None,
+    kwargs: dict[str, Any] | None = None,
+    **_: Any,
+) -> None:
+    """Record a task that failed for good (retries are separate signals) for the platform
+    administrator: task name, exception type, request id and — when the task takes one —
+    the tenant slug. Never the exception message or the task arguments."""
+    from platform_core.application.context import current_request_id
+    from platform_core.domain.tenancy import validate_tenant_slug
+    from platform_core.infrastructure.tenancy.services import error_recorder
+
+    recorder = error_recorder()
+    if recorder is None:
+        return
+    name = getattr(sender, "name", "unknown")
+    tenant_slug: str | None = None
+    try:
+        bound = inspect.signature(sender.run).bind_partial(*(args or ()), **(kwargs or {}))
+        candidate = bound.arguments.get("tenant_slug")
+        if isinstance(candidate, str):
+            tenant_slug = validate_tenant_slug(candidate)
+    except Exception:  # noqa: BLE001 - an unexpected signature only means "no tenant"
+        tenant_slug = None
+    try:
+        recorder.record(
+            component=name.rsplit(".", 1)[0],
+            view=name,
+            method="TASK",
+            route=name,
+            exception_type=type(exception).__name__ if exception else "unknown",
+            request_id=current_request_id(),
+            tenant_slug=tenant_slug,
+        )
+    except Exception:
+        logger.warning("task_error_record_failed", exc_info=True)
+
+
 def _declare_dead_letter_queues(sender: Any = None, **_: Any) -> None:
     from platform_core.infrastructure.messaging.queues import build_dead_letter_queues
 
@@ -110,6 +151,7 @@ def connect_celery_signals(app: Celery) -> None:
     signals.task_prerun.connect(_on_prerun, weak=False)
     signals.task_postrun.connect(_on_postrun, weak=False)
     signals.task_retry.connect(_on_retry, weak=False)
+    signals.task_failure.connect(_on_failure, weak=False)
     signals.worker_ready.connect(_declare_dead_letter_queues, weak=False)
     signals.worker_init.connect(_start_worker_metrics_server, weak=False)
     signals.worker_process_init.connect(_init_process_observability, weak=False)

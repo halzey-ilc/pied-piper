@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from decimal import Decimal
 from typing import Any
 
 from rest_framework import serializers
@@ -13,6 +14,7 @@ from modules.platform_admin.application.ports import (
 )
 from modules.platform_admin.application.service import Overview
 from modules.platform_admin.domain.support import ErrorStatus, TicketKind, TicketStatus
+from modules.subscriptions.domain.payment import SubscriptionPayment
 from modules.subscriptions.domain.plan import Feature, PlanCode, all_plans
 from modules.subscriptions.domain.subscription import AccessState, SubscriptionStatus
 
@@ -159,11 +161,18 @@ def overview_to_dict(o: Overview) -> dict[str, Any]:
                 {"currency": cur, "amount": str(amount)}
                 for cur, amount in sorted(o.assigned_monthly.items())
             ],
-            "received": None,
-            "received_unavailable_reason": (
-                "Subscription payments are not recorded on the platform yet."
-            ),
+            # Confirmed subscription payments paid within the period (real money received).
+            "received": [
+                {"currency": cur, "amount": str(amount)}
+                for cur, amount in sorted(o.received.items())
+            ],
+            "received_unavailable_reason": None,
+            # Debt needs issued obligations (invoices); the platform does not issue them yet.
             "overdue": None,
+            "overdue_unavailable_reason": (
+                "Overdue amounts need issued subscription invoices, which the platform "
+                "does not record."
+            ),
         },
         "errors": {"new": c.errors_new, "in_period": c.errors_in_period},
         "tickets": {"open": c.tickets_open, "in_period": c.tickets_in_period},
@@ -218,3 +227,41 @@ def ticket_to_dict(t: Ticket, *, internal: bool) -> dict[str, Any]:
     if internal:
         out["internal_note"] = t.internal_note
     return out
+
+
+class PaymentRecordSerializer(serializers.Serializer[dict[str, Any]]):
+    amount = serializers.DecimalField(max_digits=14, decimal_places=2, min_value=Decimal("0.01"))
+    currency = serializers.CharField(min_length=3, max_length=3)
+    paid_on = serializers.DateField()
+    reference = serializers.CharField(
+        max_length=100, help_text="External operation id: bank reference, receipt number"
+    )
+    period_start = serializers.DateField(required=False, allow_null=True)
+    period_end = serializers.DateField(required=False, allow_null=True)
+    note = serializers.CharField(max_length=500, required=False, allow_blank=True, default="")
+    confirm = serializers.BooleanField(
+        required=False, default=False, help_text="true: the money is already confirmed"
+    )
+
+
+class PaymentCancelSerializer(serializers.Serializer[dict[str, Any]]):
+    note = serializers.CharField(max_length=500, required=False, allow_blank=True, default="")
+
+
+def payment_to_dict(p: SubscriptionPayment) -> dict[str, Any]:
+    return {
+        "id": str(p.id),
+        "company_id": str(p.organization_id),
+        "subscription_id": str(p.subscription_id) if p.subscription_id else None,
+        "amount": str(p.amount),
+        "currency": p.currency,
+        "paid_on": p.paid_on.isoformat(),
+        "reference": p.reference,
+        "source": p.source.value,
+        "status": p.status.value,
+        "period_start": p.period_start.isoformat() if p.period_start else None,
+        "period_end": p.period_end.isoformat() if p.period_end else None,
+        "note": p.note,
+        "decided_at": p.decided_at.isoformat() if p.decided_at else None,
+        "created_at": p.created_at.isoformat(),
+    }
