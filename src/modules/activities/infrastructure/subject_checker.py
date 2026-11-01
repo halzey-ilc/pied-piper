@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from modules.access_control.domain.rbac import Principal, Role, product_role
+from modules.access_control.domain.rbac import Principal
 from modules.activities.application.ports import MemberInfo
 from modules.activities.domain.activity import SubjectType
 from modules.customers.infrastructure.models import CustomerRecord
@@ -13,9 +13,6 @@ from modules.organizations.composition import active_member_departments
 from modules.sales_pipeline.composition import deal_service
 from modules.sales_pipeline.infrastructure.models import DealRecord
 from shared.domain.errors import NotFoundError
-
-# Stored roles of a head of sales (РОП), including the legacy "manager" value.
-_HEAD_OF_SALES_ROLES = frozenset(r.value for r in Role if product_role(r) == "head_of_sales")
 
 
 class DjangoSubjectChecker:
@@ -52,6 +49,3 @@ class DjangoMemberDirectory:
             if member_id == user_id:
                 return MemberInfo(user_id=member_id, department_id=department_id)
         return None
-
-    def heads_of_sales_count(self) -> int:
-        return sum(1 for _, role, _ in self._all() if role in _HEAD_OF_SALES_ROLES)

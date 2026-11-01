@@ -283,11 +283,9 @@ class ActivityService:
         """Who may get a task from this caller.
 
         - a manager (OWN scope) assigns only to themselves;
-        - anyone else assigns only to active members of the company;
-        - a head of sales (TEAM scope) in a company with several heads of sales
-          assigns only within their own department (team); with a single head
-          of sales the whole company is their team.
-        Directors and admins (ALL scope) keep company-wide assignment.
+        - a head of sales (TEAM scope) assigns only to members of their own department;
+        - a director or admin (ALL scope) assigns to any member of the company.
+        Nobody assigns to someone who is not an active member of this company.
         """
         if assignee == principal.user_id:
             return
@@ -296,12 +294,10 @@ class ActivityService:
         member = self._members.active_member(assignee)
         if member is None:
             raise DomainValidationError("The assignee is not an active member of this company.")
-        if (
-            scope is Scope.TEAM
-            and self._members.heads_of_sales_count() > 1
-            and (principal.department_id is None or member.department_id != principal.department_id)
+        if scope is Scope.TEAM and (
+            member.department_id is None or member.department_id != principal.department_id
         ):
-            raise AccessDeniedError("You can only assign tasks to members of your team.")
+            raise AccessDeniedError("You can only assign tasks to members of your department.")
 
     def _log(
         self,

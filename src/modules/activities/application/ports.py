@@ -71,7 +71,3 @@ class MemberDirectory(Protocol):
     """Who belongs to the active company (tasks may only be assigned to its members)."""
 
     def active_member(self, user_id: UUID) -> MemberInfo | None: ...
-
-    def heads_of_sales_count(self) -> int:
-        """Active heads of sales (РОП) in the company."""
-        ...

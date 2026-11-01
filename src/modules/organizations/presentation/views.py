@@ -15,6 +15,7 @@ from modules.organizations.presentation.serializers import (
     DepartmentSerializer,
     StaffCreatedSerializer,
     StaffCreateSerializer,
+    StaffNameSerializer,
     StaffSerializer,
     StaffUpdateSerializer,
     TemporaryPasswordSerializer,
@@ -125,6 +126,26 @@ class DepartmentDetailView(_Scoped):
             self.principal(), department_id, **s.validated_data
         )
         return Response(department_to_dict(d))
+
+
+class StaffNamesView(_Scoped):
+    @extend_schema(
+        tags=_TAGS,
+        operation_id="staff_names",
+        summary="Names of the company's staff",
+        description=(
+            "Every member of the company sees the names of its active staff, e.g. to show who "
+            "owns a deal. Only `user_id` and `full_name`: contacts, roles and activity stay "
+            "behind the staff list."
+        ),
+        parameters=[_TENANT_HEADER],
+        responses=StaffNameSerializer(many=True),
+    )
+    def get(self, request: Request) -> Response:
+        names = organization_service().member_names(self.principal())
+        return Response(
+            _page([{"user_id": str(user_id), "full_name": name} for user_id, name in names])
+        )
 
 
 class StaffView(_Scoped):

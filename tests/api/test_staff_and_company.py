@@ -122,28 +122,27 @@ def test_head_of_sales_manages_only_their_department(
     hos.save()
     hos_client = client_for(hos, "acme")
 
-    # A head of sales creates in their own department, whatever department was sent.
-    rep = _create(hos_client, first_name="Rep", role="sales_rep", department_id=other)
-    assert rep["member"]["department"]["id"] == sales
-    assert (
-        hos_client.post(
-            "/api/v1/staff/", {"first_name": "X", "role": "director"}, format="json"
-        ).status_code
-        == 403
-    )
-    assert (
-        hos_client.post(
-            "/api/v1/staff/", {"first_name": "X", "role": "head_of_sales"}, format="json"
-        ).status_code
-        == 403
-    )
+    # Hiring is the director's decision: a head of sales cannot create accounts at all.
+    for role in ("sales_rep", "director", "head_of_sales"):
+        assert (
+            hos_client.post(
+                "/api/v1/staff/", {"first_name": "X", "role": role}, format="json"
+            ).status_code
+            == 403
+        )
+    assert hos_client.get("/api/v1/staff/create-options/").status_code == 403
+    rep = _create(director, first_name="Rep", role="sales_rep", department_id=sales)
 
     outsider = _create(director, first_name="Out", role="sales_rep", department_id=other)
     visible = {m["id"] for m in _ok(hos_client.get("/api/v1/staff/"))["results"]}
     assert rep["member"]["id"] in visible and outsider["member"]["id"] not in visible
-    assert (
-        hos_client.post(f"/api/v1/staff/{outsider['member']['id']}/deactivate/").status_code == 404
-    )
+    # Dismissal is the director's decision too, inside or outside the department.
+    for member in (rep, outsider):
+        assert (
+            hos_client.post(f"/api/v1/staff/{member['member']['id']}/deactivate/").status_code
+            == 403
+        )
+    assert _user(rep).memberships.get().is_active
     # Moving between departments is the director's call.
     move = hos_client.patch(
         f"/api/v1/staff/{rep['member']['id']}/", {"department_id": other}, format="json"

@@ -358,21 +358,26 @@ def _assign(client: APIClient, subject_id: str, assignee: Any) -> Any:
     )
 
 
-def test_single_head_of_sales_assigns_anyone_in_the_company(
+def test_single_head_of_sales_assigns_only_within_their_department(
     make_user: Callable[..., Any],
     tenants: dict[str, TenantFixture],
     client_for: Callable[..., APIClient],
 ) -> None:
+    # The number of heads of sales does not widen access: the department decides.
     acme = tenants["acme"]
     owner = client_for(make_user("owner", tenant=acme), "acme")
     rop_user = make_user("rop", tenant=acme, role=Role.HEAD_OF_SALES)
-    _in_department(rop_user, acme, "North")
-    rep_elsewhere = make_user("rep", tenant=acme, role=Role.SALES_REP)
-    _in_department(rep_elsewhere, acme, "South")
+    own_rep = make_user("own_rep", tenant=acme, role=Role.SALES_REP)
+    other_rep = make_user("other_rep", tenant=acme, role=Role.SALES_REP)
+    no_department_rep = make_user("loose_rep", tenant=acme, role=Role.SALES_REP)
+    for user, team in ((rop_user, "North"), (own_rep, "North"), (other_rep, "South")):
+        _in_department(user, acme, team)
     cid = _customer(owner)
+    rop = client_for(rop_user, "acme")
 
-    response = _assign(client_for(rop_user, "acme"), cid, rep_elsewhere)
-    assert response.status_code == 201, response.content
+    assert _assign(rop, cid, own_rep).status_code == 201
+    assert _assign(rop, cid, other_rep).status_code == 403
+    assert _assign(rop, cid, no_department_rep).status_code == 403
 
 
 def test_two_heads_of_sales_assign_only_within_their_teams(

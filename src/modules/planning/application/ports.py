@@ -15,11 +15,23 @@ class PlanFilter:
     scope_id: UUID | None = None
     metric: PlanMetric | None = None
     period: str | None = None
+    # Row limit from the caller's scope; None = every plan (director).
+    visibility: PlanVisibility | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class PlanVisibility:
+    """Plans a head of sales may see: the company plan, their department's and its members'."""
+
+    department_id: UUID | None
+    user_ids: frozenset[UUID]
 
 
 @dataclass(frozen=True, slots=True)
 class AbsenceFilter:
     user_id: UUID | None = None
+    # Row limit from the caller's scope; None = every absence (director).
+    user_ids: frozenset[UUID] | None = None
     kind: AbsenceKind | None = None
     # Overlap window: absences that intersect [active_from, active_to].
     active_from: date | None = None
@@ -54,3 +66,9 @@ class AbsenceRepository(Protocol):
     def list_all(self, filters: AbsenceFilter, *, limit: int, offset: int) -> list[Absence]: ...
 
     def count(self, filters: AbsenceFilter) -> int: ...
+
+
+class DepartmentRoster(Protocol):
+    """Active members of a department (a head of sales manages only these)."""
+
+    def members_of(self, department_id: UUID | None) -> frozenset[UUID]: ...

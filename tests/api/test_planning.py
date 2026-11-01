@@ -14,6 +14,14 @@ from tests.conftest import ALL_DATABASES, TenantFixture
 pytestmark = pytest.mark.django_db(databases=ALL_DATABASES)
 
 
+def _in_department(tenant: TenantFixture, name: str, *users: Any) -> str:
+    from modules.organizations.infrastructure.models import Department, Membership
+
+    department, _ = Department.objects.get_or_create(organization=tenant.org, name=name)
+    Membership.objects.filter(user__in=users, organization=tenant.org).update(department=department)
+    return str(department.id)
+
+
 def _set_plan(client: APIClient, **body: Any) -> Any:
     body.setdefault("scope", "company")
     body.setdefault("metric", "monthly_sales")
@@ -56,6 +64,7 @@ def test_plan_rbac_and_period_validation(
     head = client_for(head_user, "acme")
     rep_user = make_user("rep", tenant=tenants["acme"], role=Role.SALES_REP)
     rep = client_for(rep_user, "acme")
+    _in_department(tenants["acme"], "Sales", head_user, rep_user)
 
     # A head of sales cannot set a company plan, but can set a manager's plan.
     assert _set_plan(head, scope="company", target="30").status_code == 403

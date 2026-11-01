@@ -24,6 +24,11 @@ class DepartmentSerializer(serializers.Serializer[dict[str, Any]]):
     is_active = serializers.BooleanField(required=False)
 
 
+class StaffNameSerializer(serializers.Serializer[dict[str, Any]]):
+    user_id = serializers.UUIDField(read_only=True)
+    full_name = serializers.CharField(read_only=True)
+
+
 class StaffSerializer(serializers.Serializer[dict[str, Any]]):
     id = serializers.UUIDField(read_only=True, help_text="Membership id")
     user_id = serializers.UUIDField(read_only=True)

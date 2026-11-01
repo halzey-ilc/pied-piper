@@ -8,15 +8,18 @@ from modules.planning.infrastructure.repository import (
     DjangoAbsenceRepository,
     DjangoPlanRepository,
 )
+from modules.planning.infrastructure.roster import DjangoDepartmentRoster
 from platform_core.application.context import require_tenant
 from shared.infrastructure.unit_of_work import DjangoUnitOfWork
 
 
 def planning_service() -> PlanningService:
-    alias = require_tenant().db_alias
+    tenant = require_tenant()
+    alias = tenant.db_alias
     return PlanningService(
         plans=DjangoPlanRepository(alias),
         absences=DjangoAbsenceRepository(alias),
+        roster=DjangoDepartmentRoster(tenant.tenant_id),
         uow=DjangoUnitOfWork(alias),
         audit=DjangoAuditLog(alias),
     )

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from django.db.models import QuerySet
+from django.db.models import Q, QuerySet
 
 from modules.planning.application.ports import AbsenceFilter, PlanFilter
 from modules.planning.domain.absence import Absence, AbsenceKind
@@ -65,6 +65,15 @@ class DjangoPlanRepository:
             qs = qs.filter(metric=filters.metric.value)
         if filters.period is not None:
             qs = qs.filter(period=filters.period)
+        if filters.visibility is not None:
+            visible = Q(scope=PlanScope.COMPANY.value) | Q(
+                scope=PlanScope.USER.value, scope_id__in=filters.visibility.user_ids
+            )
+            if filters.visibility.department_id is not None:
+                visible |= Q(
+                    scope=PlanScope.DEPARTMENT.value, scope_id=filters.visibility.department_id
+                )
+            qs = qs.filter(visible)
         return qs
 
     def add(self, plan: Plan) -> None:
@@ -133,6 +142,8 @@ class DjangoAbsenceRepository:
         qs = self._qs()
         if filters.user_id is not None:
             qs = qs.filter(user_id=filters.user_id)
+        if filters.user_ids is not None:
+            qs = qs.filter(user_id__in=filters.user_ids)
         if filters.kind is not None:
             qs = qs.filter(kind=filters.kind.value)
         # Overlap: absence.start <= active_to and absence.end >= active_from.
