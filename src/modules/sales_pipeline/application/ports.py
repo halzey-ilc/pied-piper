@@ -63,6 +63,10 @@ class PipelineRepository(Protocol):
         """Unset is_default on every pipeline (used before marking a new default)."""
         ...
 
+    def get_for_update(self, pipeline_id: UUID) -> Pipeline | None:
+        """Like get, but locks the pipeline until the transaction ends (configuration edits)."""
+        ...
+
     def save(self, pipeline: Pipeline) -> None: ...
 
 

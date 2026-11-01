@@ -163,7 +163,7 @@ class PipelineService:
     ) -> Pipeline:
         self._policy.require(principal, Permission.PIPELINES_MANAGE)
         with self._uow:
-            pipeline = self._repo.get(pipeline_id)
+            pipeline = self._repo.get_for_update(pipeline_id)
             if pipeline is None:
                 raise NotFoundError("Pipeline not found.")
             if change(pipeline):

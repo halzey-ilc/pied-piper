@@ -271,6 +271,7 @@ class StaffResetPasswordView(_Scoped):
 class StaffRequestsView(_Scoped):
     @extend_schema(
         tags=_TAGS,
+        operation_id="staff_requests_list",
         summary="Hire and dismissal requests",
         description=(
             "The director sees the company's requests, a head of sales those of their "
@@ -287,6 +288,7 @@ class StaffRequestsView(_Scoped):
 
     @extend_schema(
         tags=_TAGS,
+        operation_id="staff_requests_create",
         summary="Request a hire or a dismissal (head of sales)",
         description=(
             "A head of sales asks the director to hire into their own department (roles "
@@ -322,6 +324,7 @@ class StaffRequestsView(_Scoped):
 class StaffRequestApproveView(_Scoped):
     @extend_schema(
         tags=_TAGS,
+        operation_id="staff_requests_approve",
         summary="Approve a request (director)",
         description=(
             "Hire: creates the account and returns its temporary password once. "
@@ -342,6 +345,7 @@ class StaffRequestApproveView(_Scoped):
 class StaffRequestRejectView(_Scoped):
     @extend_schema(
         tags=_TAGS,
+        operation_id="staff_requests_reject",
         summary="Reject a request (director)",
         parameters=[_TENANT_HEADER],
         request=RequestDecisionSerializer,
@@ -359,6 +363,7 @@ class StaffRequestRejectView(_Scoped):
 class StaffRequestCancelView(_Scoped):
     @extend_schema(
         tags=_TAGS,
+        operation_id="staff_requests_cancel",
         summary="Withdraw your own pending request",
         parameters=[_TENANT_HEADER],
         request=None,

@@ -15,7 +15,11 @@ from platform_core.infrastructure.messaging.queues import build_task_queues
 
 BASE_DIR = Path(__file__).resolve().parents[2]
 # The .env file is a local-development convenience; tests never read it.
-ENV = load_env(None if os.environ.get("DJANGO_ENV") == "test" else BASE_DIR / ".env")
+# DJANGO_ENV_FILE overrides its location; an empty value reads no file at all, so a
+# process sees only its real environment (e.g. checking production settings on a
+# developer machine that has a .env).
+_ENV_FILE = os.environ.get("DJANGO_ENV_FILE", str(BASE_DIR / ".env"))
+ENV = load_env(None if os.environ.get("DJANGO_ENV") == "test" or not _ENV_FILE else Path(_ENV_FILE))
 
 SECRET_KEY = ENV.DJANGO_SECRET_KEY.get_secret_value()
 # Previous secrets still honoured for signature verification during rotation

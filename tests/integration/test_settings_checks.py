@@ -25,6 +25,8 @@ def test_deploy_check_passes_for_production_settings(settings_module: str) -> No
         "PYTHONPATH": f"{ROOT}{os.pathsep}{ROOT / 'src'}",
         "DJANGO_SETTINGS_MODULE": settings_module,
         "DJANGO_ENV": "production",
+        # Only this environment: a developer's .env must not leak into the production check.
+        "DJANGO_ENV_FILE": "",
         "DJANGO_SECRET_KEY": secrets.token_urlsafe(64),
         "JWT_SIGNING_KEY": secrets.token_urlsafe(64),
         "DJANGO_ALLOWED_HOSTS": "api.example.com",
@@ -54,6 +56,7 @@ def test_production_settings_refuse_placeholder_secrets() -> None:
         "PYTHONPATH": f"{ROOT}{os.pathsep}{ROOT / 'src'}",
         "DJANGO_SETTINGS_MODULE": "config.settings.production",
         "DJANGO_ENV": "production",
+        "DJANGO_ENV_FILE": "",
         "DJANGO_SECRET_KEY": "__GENERATE__",
         "JWT_SIGNING_KEY": "__GENERATE__",
         "DB_PASSWORD": "__GENERATE__",
@@ -70,3 +73,32 @@ def test_production_settings_refuse_placeholder_secrets() -> None:
     )
     assert result.returncode != 0
     assert "Unsafe environment" in result.stderr
+
+
+def test_production_settings_refuse_debug_even_from_a_dotenv_file(tmp_path: Path) -> None:
+    """The .env file is still honoured: DEBUG from it is refused in production."""
+    dotenv = tmp_path / ".env"
+    dotenv.write_text("DJANGO_DEBUG=true\n")
+    env = {
+        "PATH": os.environ.get("PATH", ""),
+        "PYTHONPATH": f"{ROOT}{os.pathsep}{ROOT / 'src'}",
+        "DJANGO_SETTINGS_MODULE": "config.settings.production",
+        "DJANGO_ENV": "production",
+        "DJANGO_ENV_FILE": str(dotenv),
+        "DJANGO_SECRET_KEY": secrets.token_urlsafe(64),
+        "JWT_SIGNING_KEY": secrets.token_urlsafe(64),
+        "DJANGO_ALLOWED_HOSTS": "api.example.com",
+        "DB_PASSWORD": secrets.token_urlsafe(24),
+        "RABBITMQ_PASSWORD": secrets.token_urlsafe(24),
+    }
+    result = subprocess.run(
+        [sys.executable, "manage.py", "check"],
+        cwd=ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=120,
+    )
+    assert result.returncode != 0
+    assert "DJANGO_DEBUG must be false in production" in result.stderr

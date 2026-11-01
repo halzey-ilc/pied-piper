@@ -579,6 +579,28 @@ def test_scenario_g_dismissal_keeps_history_and_hands_over_open_tasks(
     assert refused.status_code == 400
 
 
+def test_dismissal_falls_back_to_the_director_when_the_requester_has_left(
+    company: dict[str, Any],
+) -> None:
+    c, users = company["c"], company["users"]
+    task = _ok(_task(c["rep_north"], _deal(c["rep_north"], "Open")["id"], "Follow up"), 201)
+    rep_membership = Membership.objects.get(user=users["rep_north"])
+    request = _ok(
+        c["rop_north"].post(
+            "/api/v1/staff/requests/",
+            {"kind": "dismiss", "membership_id": str(rep_membership.id)},
+            format="json",
+        ),
+        201,
+    )
+    # The requesting head of sales leaves before the decision.
+    rop_membership = Membership.objects.get(user=users["rop_north"])
+    _ok(c["director"].post(f"/api/v1/staff/{rop_membership.id}/deactivate/"))
+    _ok(c["director"].post(f"/api/v1/staff/requests/{request['id']}/approve/"))
+    moved = ActivityRecord.objects.using("tenant_acme").get(id=task["id"])
+    assert moved.assignee_user_id == users["director"].id  # never an inactive account
+
+
 # --- pipeline configuration and customers ------------------------------------------------
 
 
@@ -653,14 +675,27 @@ def test_customers_archive_filter_and_handover(company: dict[str, Any]) -> None:
     rep = c["rep_north"]
     alpha = _customer(rep, "Alpha")
     beta = _customer(rep, "Beta")
+    old_deal = _deal(rep, "Beta's old deal", customer_id=beta)
+    note = _ok(
+        rep.post(
+            "/api/v1/activities/",
+            {"kind": "note", "subject_type": "customer", "subject_id": beta, "body": "Met"},
+            format="json",
+        ),
+        201,
+    )
     _ok(rep.post(f"/api/v1/customers/{beta}/archive/"))
+    # Archiving keeps the card, its deals and its history readable.
+    assert _ok(rep.get(f"/api/v1/customers/{beta}/"))["archived_at"]
+    assert _ok(rep.get(f"/api/v1/sales/deals/{old_deal['id']}/"))["customer_id"] == beta
+    timeline = _ok(rep.get(f"/api/v1/activities/?subject_type=customer&subject_id={beta}"))
+    assert [a["id"] for a in timeline["results"]] == [note["id"]]
+    deals = _ok(c["director"].get(f"/api/v1/sales/deals/?customer_id={beta}"))["results"]
+    assert [d["id"] for d in deals] == [old_deal["id"]]
 
     assert [x["name"] for x in _ok(rep.get("/api/v1/customers/"))["results"]] == ["Alpha"]
     archived = _ok(rep.get("/api/v1/customers/?archived=true"))["results"]
     assert [x["name"] for x in archived] == ["Beta"] and archived[0]["archived_at"]
-    assert [
-        x["name"] for x in _ok(rep.get("/api/v1/customers/?archived=all&ordering=name"))["results"]
-    ] == ["Alpha", "Beta"]
     # An archived customer is read-only and takes no new deals until restored.
     assert rep.patch(f"/api/v1/customers/{beta}/", {"name": "B2"}, format="json").status_code == 409
     no_deal = rep.post(
@@ -669,6 +704,9 @@ def test_customers_archive_filter_and_handover(company: dict[str, Any]) -> None:
     assert no_deal.status_code == 400
     _ok(rep.post(f"/api/v1/customers/{beta}/restore/"))
     _deal(rep, "Beta deal", customer_id=beta)
+    assert [
+        x["name"] for x in _ok(rep.get("/api/v1/customers/?archived=all&ordering=name"))["results"]
+    ] == ["Alpha", "Beta"]
 
     # Handover: a manager cannot, the head of sales within the department, director anywhere.
     rop_north = str(users["rop_north"].id)

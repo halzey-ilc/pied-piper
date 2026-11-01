@@ -108,6 +108,17 @@ class DjangoPipelineRepository:
         )
         return None if row is None else _pipeline_to_domain(row)
 
+    def get_for_update(self, pipeline_id: UUID) -> Pipeline | None:
+        # Serialises concurrent configuration edits: the second waits and re-reads.
+        locked = (
+            PipelineRecord.objects.using(self.using)
+            .select_for_update()
+            .filter(id=pipeline_id)
+            .values_list("id", flat=True)
+            .first()
+        )
+        return None if locked is None else self.get(pipeline_id)
+
     def list_all(self) -> list[Pipeline]:
         rows = (
             PipelineRecord.objects.using(self.using)

@@ -112,7 +112,12 @@ def _terms(data: dict[str, Any]) -> Terms:
 
 
 class PlatformOverviewView(_Platform):
-    @extend_schema(tags=_TAGS, summary="Platform overview", responses=OpenApiTypes.OBJECT)
+    @extend_schema(
+        operation_id="platform_overview",
+        tags=_TAGS,
+        summary="Platform overview",
+        responses=OpenApiTypes.OBJECT,
+    )
     def get(self, request: Request) -> Response:
         try:
             days = int(request.query_params.get("period_days", 30))
@@ -122,13 +127,23 @@ class PlatformOverviewView(_Platform):
 
 
 class PlatformCatalogView(_Platform):
-    @extend_schema(tags=_TAGS, summary="Plans and modules", responses=OpenApiTypes.OBJECT)
+    @extend_schema(
+        operation_id="platform_catalog",
+        tags=_TAGS,
+        summary="Plans and modules",
+        responses=OpenApiTypes.OBJECT,
+    )
     def get(self, request: Request) -> Response:
         return Response(catalog_to_dict())
 
 
 class PlatformCompaniesView(_Platform):
-    @extend_schema(tags=_TAGS, summary="Companies", responses=OpenApiTypes.OBJECT)
+    @extend_schema(
+        operation_id="platform_companies_list",
+        tags=_TAGS,
+        summary="Companies",
+        responses=OpenApiTypes.OBJECT,
+    )
     def get(self, request: Request) -> Response:
         limit, offset = _page_params(request)
         q = request.query_params
@@ -145,6 +160,7 @@ class PlatformCompaniesView(_Platform):
         return Response({"count": total, "results": [summary_to_dict(c) for c in items]})
 
     @extend_schema(
+        operation_id="platform_companies_create",
         tags=_TAGS,
         summary="Connect a company",
         description=(
@@ -190,11 +206,17 @@ class PlatformCompaniesView(_Platform):
 
 
 class PlatformCompanyDetailView(_Platform):
-    @extend_schema(tags=_TAGS, summary="Company card", responses=OpenApiTypes.OBJECT)
+    @extend_schema(
+        operation_id="platform_companies_retrieve",
+        tags=_TAGS,
+        summary="Company card",
+        responses=OpenApiTypes.OBJECT,
+    )
     def get(self, request: Request, company_id: UUID) -> Response:
         return Response(detail_to_dict(platform_admin_service().company(self.actor(), company_id)))
 
     @extend_schema(
+        operation_id="platform_companies_update",
         tags=_TAGS,
         summary="Rename, suspend or resume a company",
         request=CompanyUpdateSerializer,
@@ -211,6 +233,7 @@ class PlatformCompanyDetailView(_Platform):
 
 class PlatformCompanySubscriptionView(_Platform):
     @extend_schema(
+        operation_id="platform_companies_subscription_set",
         tags=_TAGS,
         summary="Assign plan, term and modules",
         description="An assignment by the platform, not a payment record.",
@@ -228,7 +251,10 @@ class PlatformCompanySubscriptionView(_Platform):
 
 class PlatformCompanyPaymentsView(_Platform):
     @extend_schema(
-        tags=_TAGS, summary="Subscription payments of a company", responses=OpenApiTypes.OBJECT
+        operation_id="platform_company_payments_list",
+        tags=_TAGS,
+        summary="Subscription payments of a company",
+        responses=OpenApiTypes.OBJECT,
     )
     def get(self, request: Request, company_id: UUID) -> Response:
         limit, offset = _page_params(request)
@@ -240,6 +266,7 @@ class PlatformCompanyPaymentsView(_Platform):
         return Response({"count": total, "results": [payment_to_dict(p) for p in items]})
 
     @extend_schema(
+        operation_id="platform_company_payments_create",
         tags=_TAGS,
         summary="Record a subscription payment",
         description=(
@@ -274,6 +301,7 @@ class PlatformCompanyPaymentsView(_Platform):
 
 class PlatformPaymentsView(_Platform):
     @extend_schema(
+        operation_id="platform_payments_list",
         tags=_TAGS,
         summary="Subscription payments of all companies",
         description="Filter with ?status=pending|confirmed|cancelled&paid_from&paid_to&company_id.",
@@ -299,7 +327,11 @@ class PlatformPaymentsView(_Platform):
 
 class PlatformPaymentConfirmView(_Platform):
     @extend_schema(
-        tags=_TAGS, summary="Confirm a pending payment", request=None, responses=OpenApiTypes.OBJECT
+        operation_id="platform_payments_confirm",
+        tags=_TAGS,
+        summary="Confirm a pending payment",
+        request=None,
+        responses=OpenApiTypes.OBJECT,
     )
     def post(self, request: Request, payment_id: UUID) -> Response:
         payment = platform_admin_service().confirm_payment(self.actor(), payment_id)
@@ -308,6 +340,7 @@ class PlatformPaymentConfirmView(_Platform):
 
 class PlatformPaymentCancelView(_Platform):
     @extend_schema(
+        operation_id="platform_payments_cancel",
         tags=_TAGS,
         summary="Cancel a pending payment (recorded by mistake / never arrived)",
         request=PaymentCancelSerializer,
@@ -323,7 +356,12 @@ class PlatformPaymentCancelView(_Platform):
 
 
 class PlatformErrorsView(_Platform):
-    @extend_schema(tags=_TAGS, summary="Server errors", responses=OpenApiTypes.OBJECT)
+    @extend_schema(
+        operation_id="platform_errors_list",
+        tags=_TAGS,
+        summary="Server errors",
+        responses=OpenApiTypes.OBJECT,
+    )
     def get(self, request: Request) -> Response:
         limit, offset = _page_params(request)
         items, total = platform_admin_service().errors(
@@ -337,6 +375,7 @@ class PlatformErrorsView(_Platform):
 
 class PlatformErrorDetailView(_Platform):
     @extend_schema(
+        operation_id="platform_errors_update",
         tags=_TAGS,
         summary="Mark an error acknowledged or resolved",
         request=ErrorStatusSerializer,
@@ -352,7 +391,12 @@ class PlatformErrorDetailView(_Platform):
 
 
 class PlatformTicketsView(_Platform):
-    @extend_schema(tags=_TAGS, summary="Support requests", responses=OpenApiTypes.OBJECT)
+    @extend_schema(
+        operation_id="platform_tickets_list",
+        tags=_TAGS,
+        summary="Support requests",
+        responses=OpenApiTypes.OBJECT,
+    )
     def get(self, request: Request) -> Response:
         limit, offset = _page_params(request)
         items, total = platform_admin_service().tickets(
@@ -367,12 +411,18 @@ class PlatformTicketsView(_Platform):
 
 
 class PlatformTicketDetailView(_Platform):
-    @extend_schema(tags=_TAGS, summary="Support request", responses=OpenApiTypes.OBJECT)
+    @extend_schema(
+        operation_id="platform_tickets_retrieve",
+        tags=_TAGS,
+        summary="Support request",
+        responses=OpenApiTypes.OBJECT,
+    )
     def get(self, request: Request, ticket_id: UUID) -> Response:
         ticket = platform_admin_service().ticket(self.actor(), ticket_id)
         return Response(ticket_to_dict(ticket, internal=True))
 
     @extend_schema(
+        operation_id="platform_tickets_update",
         tags=_TAGS,
         summary="Change status or internal note",
         request=TicketUpdateSerializer,
@@ -394,7 +444,12 @@ class PlatformTicketDetailView(_Platform):
 class SupportTicketsView(TenantScopedAPIView):
     """A company member sends a request to the platform and follows their own requests."""
 
-    @extend_schema(tags=["Support"], summary="My support requests", responses=OpenApiTypes.OBJECT)
+    @extend_schema(
+        operation_id="support_tickets_list",
+        tags=["Support"],
+        summary="My support requests",
+        responses=OpenApiTypes.OBJECT,
+    )
     def get(self, request: Request) -> Response:
         limit, offset = _page_params(request)
         items, total = support_service().mine(
@@ -405,6 +460,7 @@ class SupportTicketsView(TenantScopedAPIView):
         )
 
     @extend_schema(
+        operation_id="support_tickets_create",
         tags=["Support"],
         summary="Send a request to the platform",
         request=TicketCreateSerializer,

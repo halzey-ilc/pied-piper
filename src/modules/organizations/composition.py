@@ -36,7 +36,11 @@ class _TaskHandover:
 
     def hand_over(self, from_user: UUID, to_user: UUID, actor: UUID) -> int:
 
-        recipient = DjangoMemberDirectory(self.tenant_id).active_member(to_user)
+        members = DjangoMemberDirectory(self.tenant_id)
+        recipient = members.active_member(to_user)
+        if recipient is None:
+            # The intended recipient left meanwhile: the deciding director takes the tasks.
+            to_user, recipient = actor, members.active_member(actor)
         team = recipient.department_id if recipient is not None else None
         return hand_over_open_tasks(from_user, to_user, team, actor)
 
