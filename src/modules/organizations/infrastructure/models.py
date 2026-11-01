@@ -80,3 +80,65 @@ class Membership(models.Model):
 
     def __str__(self) -> str:
         return f"{self.user_id}@{self.organization_id}:{self.role}"
+
+
+class StaffRequest(models.Model):
+    """A head of sales asks the director to hire or dismiss a member of their department.
+
+    Nothing happens to accounts until the director approves; approval runs the same
+    account operation the director would run directly. No password is stored here.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    organization = models.ForeignKey(
+        Organization, on_delete=models.CASCADE, related_name="staff_requests"
+    )
+    kind = models.CharField(max_length=16)  # hire | dismiss
+    status = models.CharField(max_length=16, default="pending")
+    department = models.ForeignKey(
+        Department, on_delete=models.PROTECT, related_name="staff_requests"
+    )
+    requested_by = models.UUIDField()
+    # hire: the account to create
+    first_name = models.CharField(max_length=150, blank=True, default="")
+    last_name = models.CharField(max_length=150, blank=True, default="")
+    login = models.CharField(max_length=150, blank=True, default="")
+    email = models.EmailField(blank=True, default="")
+    phone = models.CharField(max_length=16, blank=True, default="")
+    role = models.CharField(max_length=32, blank=True, default="")
+    # dismiss: whom
+    target = models.ForeignKey(
+        Membership,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="dismissal_requests",
+    )
+    reason = models.CharField(max_length=500, blank=True, default="")
+    decided_by = models.UUIDField(null=True, blank=True)
+    decided_at = models.DateTimeField(null=True, blank=True)
+    decision_note = models.CharField(max_length=500, blank=True, default="")
+    # hire, once approved: the created account
+    result = models.ForeignKey(
+        Membership, on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "organizations_staff_request"
+        indexes = [
+            models.Index(
+                fields=["organization", "status", "created_at"], name="staff_request_status_idx"
+            ),
+        ]
+        constraints = [
+            # One open dismissal request per person.
+            models.UniqueConstraint(
+                fields=["target"],
+                condition=Q(status="pending", kind="dismiss"),
+                name="staff_request_one_pending_dismissal",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.kind}:{self.status}"

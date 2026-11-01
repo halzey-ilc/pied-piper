@@ -10,7 +10,12 @@ from django.conf import settings
 from django.utils.module_loading import import_string
 
 from platform_core.application.context import TenantContext, tenant_scope
-from platform_core.application.ports import MembershipProvider, TenantDirectory
+from platform_core.application.ports import (
+    ErrorRecorder,
+    MembershipProvider,
+    TenantAccessGate,
+    TenantDirectory,
+)
 from platform_core.application.tenancy import TenantResolver
 from platform_core.infrastructure.tenancy.connections import DjangoTenantConnectionRegistry
 
@@ -34,6 +39,24 @@ def tenant_directory() -> TenantDirectory:
 def membership_provider() -> MembershipProvider:
     provider: MembershipProvider = import_string(settings.TENANCY["MEMBERSHIPS"])()
     return provider
+
+
+@cache
+def tenant_access_gate() -> TenantAccessGate | None:
+    path = settings.TENANCY.get("ACCESS_GATE")
+    if not path:
+        return None
+    gate: TenantAccessGate = import_string(path)()
+    return gate
+
+
+@cache
+def error_recorder() -> ErrorRecorder | None:
+    path = settings.TENANCY.get("ERROR_RECORDER")
+    if not path:
+        return None
+    recorder: ErrorRecorder = import_string(path)()
+    return recorder
 
 
 def tenant_resolver() -> TenantResolver:

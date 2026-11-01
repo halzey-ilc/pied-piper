@@ -6,7 +6,9 @@ Isolation is layered; this view is only the first layer:
    the ``X-Tenant`` header; otherwise 404 (no tenant enumeration).
 2. The tenant context routes tenant-plane models to that tenant's own database;
    with no context the router raises instead of falling back.
-3. Use cases enforce RBAC (role + ownership scope) on every operation.
+3. The company's subscription must be active and include the module of the path
+   (the configured TenantAccessGate); otherwise 403.
+4. Use cases enforce RBAC (role + ownership scope) on every operation.
 """
 
 from __future__ import annotations
@@ -22,7 +24,11 @@ from rest_framework.views import APIView
 from platform_core.application.context import TenantContext, activate_tenant, deactivate_tenant
 from platform_core.application.ports import TenantMembership
 from platform_core.domain.tenancy import TenantNotFoundError
-from platform_core.infrastructure.tenancy.services import connection_registry, tenant_resolver
+from platform_core.infrastructure.tenancy.services import (
+    connection_registry,
+    tenant_access_gate,
+    tenant_resolver,
+)
 from shared.domain.errors import AccessDeniedError
 
 
@@ -43,6 +49,9 @@ class TenantScopedAPIView(APIView):
         resolved = tenant_resolver().resolve_for_user(request.headers.get(header), user_id)
         if resolved.membership is None:
             raise TenantNotFoundError("Tenant not found.")
+        gate = tenant_access_gate()
+        if gate is not None:
+            gate.check(resolved.context.tenant_id, request.path)
         self.tenant = resolved.context
         self.membership = resolved.membership
         self._tenant_token = activate_tenant(resolved.context)

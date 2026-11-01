@@ -8,6 +8,10 @@ from modules.organizations.presentation.views import (
     StaffDeactivateView,
     StaffDetailView,
     StaffNamesView,
+    StaffRequestApproveView,
+    StaffRequestCancelView,
+    StaffRequestRejectView,
+    StaffRequestsView,
     StaffResetPasswordView,
     StaffView,
 )
@@ -18,6 +22,22 @@ urlpatterns = [
     path("departments/<uuid:department_id>/", DepartmentDetailView.as_view(), name="department"),
     path("staff/", StaffView.as_view(), name="staff"),
     path("staff/names/", StaffNamesView.as_view(), name="staff-names"),
+    path("staff/requests/", StaffRequestsView.as_view(), name="staff-requests"),
+    path(
+        "staff/requests/<uuid:request_id>/approve/",
+        StaffRequestApproveView.as_view(),
+        name="staff-request-approve",
+    ),
+    path(
+        "staff/requests/<uuid:request_id>/reject/",
+        StaffRequestRejectView.as_view(),
+        name="staff-request-reject",
+    ),
+    path(
+        "staff/requests/<uuid:request_id>/cancel/",
+        StaffRequestCancelView.as_view(),
+        name="staff-request-cancel",
+    ),
     path("staff/create-options/", StaffCreateOptionsView.as_view(), name="staff-create-options"),
     path("staff/<uuid:membership_id>/", StaffDetailView.as_view(), name="staff-member"),
     path(

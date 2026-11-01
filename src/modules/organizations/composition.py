@@ -21,7 +21,7 @@ from platform_core.application.context import require_tenant
 from shared.infrastructure.unit_of_work import DjangoUnitOfWork
 
 
-def _temporary_password() -> str:
+def temporary_password() -> str:
     # 12+ URL-safe characters: shown once, must be changed at first sign-in.
     return secrets.token_urlsafe(12)
 
@@ -32,7 +32,7 @@ def organization_service() -> OrganizationService:
         store=DjangoOrganizationStore(),
         audit=DjangoAuditLog(require_tenant().db_alias),
         uow=DjangoUnitOfWork("default"),
-        passwords=_temporary_password,
+        passwords=temporary_password,
     )
 
 

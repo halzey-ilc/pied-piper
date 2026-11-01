@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 from uuid import UUID
 
+from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import OpenApiExample, OpenApiParameter, extend_schema
 from rest_framework import status
 from rest_framework.request import Request
@@ -13,6 +14,8 @@ from modules.organizations.composition import organization_service
 from modules.organizations.presentation.serializers import (
     CompanySerializer,
     DepartmentSerializer,
+    HireRequestSerializer,
+    RequestDecisionSerializer,
     StaffCreatedSerializer,
     StaffCreateSerializer,
     StaffNameSerializer,
@@ -21,6 +24,7 @@ from modules.organizations.presentation.serializers import (
     TemporaryPasswordSerializer,
     company_to_dict,
     department_to_dict,
+    staff_request_to_dict,
     staff_to_dict,
 )
 from platform_core.presentation.tenancy import TenantScopedAPIView
@@ -203,6 +207,8 @@ class StaffCreateOptionsView(_Scoped):
                 "fixed_department_id": (
                     str(options["fixed_department_id"]) if options["fixed_department_id"] else None
                 ),
+                # direct: the director creates accounts; request: a head of sales asks the director
+                "mode": options["mode"],
             }
         )
 
@@ -260,3 +266,104 @@ class StaffResetPasswordView(_Scoped):
     def post(self, request: Request, membership_id: UUID) -> Response:
         password = organization_service().reset_password(self.principal(), membership_id)
         return Response({"temporary_password": password})
+
+
+class StaffRequestsView(_Scoped):
+    @extend_schema(
+        tags=_TAGS,
+        summary="Hire and dismissal requests",
+        description=(
+            "The director sees the company's requests, a head of sales those of their "
+            "department. Filter with ?status=pending|approved|rejected|cancelled."
+        ),
+        parameters=[_TENANT_HEADER],
+        responses=OpenApiTypes.OBJECT,
+    )
+    def get(self, request: Request) -> Response:
+        items = organization_service().staff_requests(
+            self.principal(), request.query_params.get("status") or None
+        )
+        return Response(_page([staff_request_to_dict(r) for r in items]))
+
+    @extend_schema(
+        tags=_TAGS,
+        summary="Request a hire or a dismissal (head of sales)",
+        description=(
+            "A head of sales asks the director to hire into their own department (roles "
+            "they may give) or to dismiss a member of their department. Nothing changes "
+            "until the director approves."
+        ),
+        parameters=[_TENANT_HEADER],
+        request=HireRequestSerializer,
+        responses=OpenApiTypes.OBJECT,
+    )
+    def post(self, request: Request) -> Response:
+        s = HireRequestSerializer(data=request.data)
+        s.is_valid(raise_exception=True)
+        d = s.validated_data
+        service = organization_service()
+        if d["kind"] == "hire":
+            created = service.request_hire(
+                self.principal(),
+                first_name=d["first_name"],
+                last_name=d.get("last_name", ""),
+                role=d["role"],
+                login=d.get("login") or None,
+                email=d.get("email") or None,
+                phone=d.get("phone", ""),
+            )
+        else:
+            created = service.request_dismissal(
+                self.principal(), d["membership_id"], d.get("reason", "")
+            )
+        return Response(staff_request_to_dict(created), status=status.HTTP_201_CREATED)
+
+
+class StaffRequestApproveView(_Scoped):
+    @extend_schema(
+        tags=_TAGS,
+        summary="Approve a request (director)",
+        description=(
+            "Hire: creates the account and returns its temporary password once. "
+            "Dismissal: deactivates the account."
+        ),
+        parameters=[_TENANT_HEADER],
+        request=None,
+        responses=OpenApiTypes.OBJECT,
+    )
+    def post(self, request: Request, request_id: UUID) -> Response:
+        decided, password = organization_service().approve_request(self.principal(), request_id)
+        body: dict[str, Any] = {"request": staff_request_to_dict(decided)}
+        if password is not None:
+            body["temporary_password"] = password
+        return Response(body)
+
+
+class StaffRequestRejectView(_Scoped):
+    @extend_schema(
+        tags=_TAGS,
+        summary="Reject a request (director)",
+        parameters=[_TENANT_HEADER],
+        request=RequestDecisionSerializer,
+        responses=OpenApiTypes.OBJECT,
+    )
+    def post(self, request: Request, request_id: UUID) -> Response:
+        s = RequestDecisionSerializer(data=request.data)
+        s.is_valid(raise_exception=True)
+        decided = organization_service().reject_request(
+            self.principal(), request_id, s.validated_data["note"]
+        )
+        return Response(staff_request_to_dict(decided))
+
+
+class StaffRequestCancelView(_Scoped):
+    @extend_schema(
+        tags=_TAGS,
+        summary="Withdraw your own pending request",
+        parameters=[_TENANT_HEADER],
+        request=None,
+        responses=OpenApiTypes.OBJECT,
+    )
+    def post(self, request: Request, request_id: UUID) -> Response:
+        decided = organization_service().cancel_request(self.principal(), request_id)
+        return Response(staff_request_to_dict(decided))

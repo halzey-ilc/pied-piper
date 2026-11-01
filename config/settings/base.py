@@ -47,6 +47,7 @@ INSTALLED_APPS = [
     "modules.payments.infrastructure.apps.PaymentsConfig",
     "modules.telephony.infrastructure.apps.TelephonyConfig",
     "modules.subscriptions.infrastructure.apps.SubscriptionsConfig",
+    "modules.platform_admin.infrastructure.apps.PlatformAdminConfig",
     "modules.notifications.infrastructure.apps.NotificationsConfig",
     "modules.communications.infrastructure.apps.CommunicationsConfig",
     "modules.ai_insights.infrastructure.apps.AiInsightsConfig",
@@ -153,6 +154,7 @@ TENANCY: dict[str, Any] = {
         "organizations",
         "tenant_registry",
         "subscriptions",
+        "platform_admin",
     },
     "TENANT_PLANE_APPS": {
         "customers",
@@ -176,6 +178,10 @@ TENANCY: dict[str, Any] = {
     # Dependency inversion: platform_core only knows these ports by import path.
     "DIRECTORY": "modules.tenant_registry.infrastructure.directory.DjangoTenantDirectory",
     "MEMBERSHIPS": "modules.organizations.infrastructure.memberships.DjangoMembershipProvider",
+    # Subscription term and modules, checked on every tenant-scoped request.
+    "ACCESS_GATE": "modules.subscriptions.infrastructure.gate.SubscriptionAccessGate",
+    # Safe records of unexpected server errors for the platform administrator.
+    "ERROR_RECORDER": "modules.platform_admin.infrastructure.store.DjangoErrorRecorder",
 }
 
 # --- Cache / Redis ----------------------------------------------------------

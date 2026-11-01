@@ -7,16 +7,24 @@ from uuid import UUID
 
 from django.contrib.auth import get_user_model
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 
 from modules.organizations.application.ports import (
     Company,
     DepartmentInfo,
     NewAccount,
+    NewStaffRequest,
     StaffMember,
+    StaffRequestInfo,
 )
-from modules.organizations.infrastructure.models import Department, Membership, Organization
-from shared.domain.errors import NotFoundError
+from modules.organizations.infrastructure.models import (
+    Department,
+    Membership,
+    Organization,
+    StaffRequest,
+)
+from shared.domain.errors import ConflictError, NotFoundError
 
 DB = "default"
 
@@ -46,7 +54,126 @@ def _member(row: Membership) -> StaffMember:
     )
 
 
-class DjangoOrganizationStore:
+def _name(user: Any) -> str:
+    return " ".join(p for p in (user.first_name, user.last_name) if p) or user.username
+
+
+def _request(row: StaffRequest, names: dict[Any, str]) -> StaffRequestInfo:
+    department = DepartmentInfo(
+        id=row.department.id, name=row.department.name, is_active=row.department.is_active
+    )
+    target = row.target
+    return StaffRequestInfo(
+        id=row.id,
+        kind=row.kind,
+        status=row.status,
+        department=department,
+        requested_by=row.requested_by,
+        requested_by_name=names.get(row.requested_by, "—"),
+        created_at=row.created_at,
+        first_name=row.first_name,
+        last_name=row.last_name,
+        login=row.login,
+        email=row.email or None,
+        phone=row.phone,
+        role=row.role,
+        target_membership_id=row.target_id,
+        target_name=_name(target.user) if target is not None else None,
+        reason=row.reason,
+        decided_by_name=names.get(row.decided_by) if row.decided_by else None,
+        decided_at=row.decided_at,
+        decision_note=row.decision_note,
+        result_membership_id=row.result_id,
+    )
+
+
+def _requests(rows: list[StaffRequest]) -> list[StaffRequestInfo]:
+    ids = {r.requested_by for r in rows} | {r.decided_by for r in rows if r.decided_by}
+    names = {u.id: _name(u) for u in get_user_model().objects.using(DB).filter(id__in=ids)}
+    return [_request(r, names) for r in rows]
+
+
+class DjangoStaffRequestMixin:
+    """Hire and dismissal requests (part of DjangoOrganizationStore)."""
+
+    def _request_rows(self, company_id: UUID) -> Any:
+        return (
+            StaffRequest.objects.using(DB)
+            .filter(organization_id=company_id)
+            .select_related("department", "target__user")
+        )
+
+    def add_request(self, company_id: UUID, request: NewStaffRequest) -> StaffRequestInfo:
+        row = StaffRequest.objects.using(DB).create(
+            organization_id=company_id,
+            kind=request.kind,
+            department_id=request.department_id,
+            requested_by=request.requested_by,
+            first_name=request.first_name,
+            last_name=request.last_name,
+            login=request.login,
+            email=request.email or "",
+            phone=request.phone,
+            role=request.role,
+            target_id=request.target_membership_id,
+            reason=request.reason,
+        )
+        return self._one(company_id, row.id)
+
+    def staff_request(self, company_id: UUID, request_id: UUID) -> StaffRequestInfo | None:
+        row = self._request_rows(company_id).filter(id=request_id).first()
+        return None if row is None else _requests([row])[0]
+
+    def staff_requests(
+        self, company_id: UUID, department_id: UUID | None, status: str | None
+    ) -> list[StaffRequestInfo]:
+        qs = self._request_rows(company_id)
+        if department_id is not None:
+            qs = qs.filter(department_id=department_id)
+        if status is not None:
+            qs = qs.filter(status=status)
+        return _requests(list(qs.order_by("-created_at")[:200]))
+
+    def _one(self, company_id: UUID, request_id: UUID) -> StaffRequestInfo:
+        found = self.staff_request(company_id, request_id)
+        if found is None:
+            raise NotFoundError("Request not found.")
+        return found
+
+    def pending_dismissal_exists(self, membership_id: UUID) -> bool:
+        return (
+            StaffRequest.objects.using(DB)
+            .filter(Q(target_id=membership_id), kind="dismiss", status="pending")
+            .exists()
+        )
+
+    def decide_request(
+        self,
+        company_id: UUID,
+        request_id: UUID,
+        *,
+        status: str,
+        decided_by: UUID | None,
+        note: str = "",
+        result_membership_id: UUID | None = None,
+    ) -> StaffRequestInfo:
+        updated = (
+            StaffRequest.objects.using(DB)
+            .filter(organization_id=company_id, id=request_id, status="pending")
+            .update(
+                status=status,
+                decided_by=decided_by,
+                decided_at=timezone.now(),
+                decision_note=note,
+                result_id=result_membership_id,
+            )
+        )
+        if updated != 1:
+            raise ConflictError("The request has already been decided.")
+        return self._one(company_id, request_id)
+
+
+class DjangoOrganizationStore(DjangoStaffRequestMixin):
     def _members(self, company_id: UUID) -> Any:
         return (
             Membership.objects.using(DB)

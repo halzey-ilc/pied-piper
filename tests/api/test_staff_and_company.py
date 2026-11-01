@@ -130,7 +130,11 @@ def test_head_of_sales_manages_only_their_department(
             ).status_code
             == 403
         )
-    assert hos_client.get("/api/v1/staff/create-options/").status_code == 403
+    # ...only request a hire into their own department, which the director approves.
+    options = _ok(hos_client.get("/api/v1/staff/create-options/"))
+    assert options["mode"] == "request"
+    assert options["fixed_department_id"] == sales
+    assert set(options["creatable_roles"]) == {"sales_rep", "lead_caller"}
     rep = _create(director, first_name="Rep", role="sales_rep", department_id=sales)
 
     outsider = _create(director, first_name="Out", role="sales_rep", department_id=other)

@@ -52,6 +52,50 @@ class NewAccount:
     created_by: UUID
 
 
+@dataclass(frozen=True, slots=True)
+class StaffRequestInfo:
+    """A hire or dismissal request of a head of sales, awaiting the director."""
+
+    id: UUID
+    kind: str  # hire | dismiss
+    status: str  # pending | approved | rejected | cancelled
+    department: DepartmentInfo
+    requested_by: UUID
+    requested_by_name: str
+    created_at: datetime
+    # hire
+    first_name: str
+    last_name: str
+    login: str
+    email: str | None
+    phone: str
+    role: str
+    # dismiss
+    target_membership_id: UUID | None
+    target_name: str | None
+    reason: str
+    # decision
+    decided_by_name: str | None
+    decided_at: datetime | None
+    decision_note: str
+    result_membership_id: UUID | None
+
+
+@dataclass(frozen=True, slots=True)
+class NewStaffRequest:
+    kind: str
+    department_id: UUID
+    requested_by: UUID
+    first_name: str = ""
+    last_name: str = ""
+    login: str = ""
+    email: str | None = None
+    phone: str = ""
+    role: str = ""
+    target_membership_id: UUID | None = None
+    reason: str = ""
+
+
 class OrganizationStore(Protocol):
     """Control-plane data of one company (organizations and identity tables)."""
 
@@ -99,6 +143,29 @@ class OrganizationStore(Protocol):
 
     def set_temporary_password(self, company_id: UUID, membership_id: UUID, password: str) -> None:
         """Store a hash only and require a change at next sign-in."""
+        ...
+
+    def add_request(self, company_id: UUID, request: NewStaffRequest) -> StaffRequestInfo: ...
+
+    def staff_request(self, company_id: UUID, request_id: UUID) -> StaffRequestInfo | None: ...
+
+    def staff_requests(
+        self, company_id: UUID, department_id: UUID | None, status: str | None
+    ) -> list[StaffRequestInfo]: ...
+
+    def pending_dismissal_exists(self, membership_id: UUID) -> bool: ...
+
+    def decide_request(
+        self,
+        company_id: UUID,
+        request_id: UUID,
+        *,
+        status: str,
+        decided_by: UUID | None,
+        note: str = "",
+        result_membership_id: UUID | None = None,
+    ) -> StaffRequestInfo:
+        """Move a pending request to its final status; ConflictError if no longer pending."""
         ...
 
 

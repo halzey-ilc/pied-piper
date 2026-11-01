@@ -5,7 +5,7 @@ from uuid import UUID
 from django.db import IntegrityError, transaction
 from django.db.models import F
 
-from modules.subscriptions.domain.plan import PlanCode
+from modules.subscriptions.domain.plan import Feature, PlanCode
 from modules.subscriptions.domain.subscription import Subscription, SubscriptionStatus
 from modules.subscriptions.infrastructure.models import SubscriptionRecord
 from shared.domain.errors import ConflictError
@@ -23,8 +23,18 @@ def _to_domain(row: SubscriptionRecord) -> Subscription:
         started_at=row.started_at,
         current_period_end=row.current_period_end,
         cancelled_at=row.cancelled_at,
+        features=None if row.features is None else _features(row.features),
         version=row.version,
     )
+
+
+def _features(values: list[str]) -> frozenset[Feature]:
+    # Unknown values (a module removed from the catalog) are dropped, not fatal.
+    return frozenset(Feature(v) for v in values if v in Feature.__members__.values())
+
+
+def _stored(features: frozenset[Feature] | None) -> list[str] | None:
+    return None if features is None else sorted(f.value for f in features)
 
 
 class DjangoSubscriptionRepository:
@@ -45,6 +55,7 @@ class DjangoSubscriptionRepository:
                     started_at=subscription.started_at,
                     current_period_end=subscription.current_period_end,
                     cancelled_at=subscription.cancelled_at,
+                    features=_stored(subscription.features),
                 )
         except IntegrityError:
             raise ConflictError("A subscription already exists for this organization.") from None
@@ -56,6 +67,8 @@ class DjangoSubscriptionRepository:
             .update(
                 plan_code=subscription.plan_code.value,
                 status=subscription.status.value,
+                started_at=subscription.started_at,
+                features=_stored(subscription.features),
                 current_period_end=subscription.current_period_end,
                 cancelled_at=subscription.cancelled_at,
                 version=F("version") + 1,

@@ -17,6 +17,7 @@ from modules.identity.presentation.views import (
     TokenRefreshThrottledView,
 )
 from modules.integrations.presentation.views import WebhookView
+from modules.platform_admin.presentation.views import SupportTicketsView
 
 urlpatterns = [
     path("auth/token/", TokenObtainView.as_view(), name="auth-token"),
@@ -57,6 +58,8 @@ urlpatterns = [
     path("ai/", include("modules.ai_insights.presentation.urls")),
     path("operations/", include("modules.operations.presentation.urls")),
     path("risk/", include("modules.risk.presentation.urls")),
+    path("platform/", include("modules.platform_admin.presentation.urls")),
+    path("support/tickets/", SupportTicketsView.as_view(), name="support-tickets"),
     path(
         "webhooks/<str:provider>/<slug:tenant_slug>/",
         WebhookView.as_view(),

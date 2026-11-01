@@ -25,12 +25,17 @@ class SubscriptionRecord(models.Model):
     started_at = models.DateTimeField()
     current_period_end = models.DateTimeField(null=True, blank=True)
     cancelled_at = models.DateTimeField(null=True, blank=True)
+    # Switched-on modules (Feature values); NULL = no restriction (pre-catalog subscriptions).
+    features = models.JSONField(null=True, blank=True)
     version = models.PositiveIntegerField(default=1)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         db_table = "subscriptions_subscription"
-        indexes = [models.Index(fields=["status"], name="subscription_status_idx")]
+        indexes = [
+            models.Index(fields=["status"], name="subscription_status_idx"),
+            models.Index(fields=["current_period_end"], name="subscription_period_end_idx"),
+        ]
 
     def __str__(self) -> str:
         return f"{self.organization_id}:{self.plan_code}:{self.status}"

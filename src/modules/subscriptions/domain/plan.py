@@ -14,6 +14,22 @@ from shared.domain.errors import NotFoundError
 UNLIMITED = -1
 
 
+class Feature(StrEnum):
+    """Paid modules a company can have switched on (spec: platform administration).
+
+    The core CRM — customers, leads, deals, tasks, meetings, staff and plans — is part of
+    every plan and is not listed here.
+    """
+
+    TELEPHONY = "telephony"
+    COMMUNICATIONS = "communications"
+    PAYMENTS = "payments"
+    ANALYTICS = "analytics"
+    AI = "ai"
+    OPERATIONS = "operations"
+    RISK = "risk"
+
+
 class PlanCode(StrEnum):
     FREE = "free"
     PRO = "pro"
@@ -31,6 +47,8 @@ class Plan:
     monthly_price: Decimal
     currency: str
     limits: dict[str, int] = field(default_factory=dict)
+    # Modules a new subscription on this plan starts with; the platform admin may change them.
+    features: frozenset[Feature] = frozenset()
 
     def limit_for(self, metric: str) -> int:
         """Max allowed for ``metric`` (UNLIMITED if uncapped or unknown)."""
@@ -55,6 +73,9 @@ _CATALOG: dict[PlanCode, Plan] = {
         monthly_price=Decimal(49),
         currency="USD",
         limits={"users": 25, "customers": 10000, "deals": 50000},
+        features=frozenset(
+            {Feature.TELEPHONY, Feature.COMMUNICATIONS, Feature.PAYMENTS, Feature.ANALYTICS}
+        ),
     ),
     PlanCode.ENTERPRISE: Plan(
         code=PlanCode.ENTERPRISE,
@@ -62,6 +83,7 @@ _CATALOG: dict[PlanCode, Plan] = {
         monthly_price=Decimal(499),
         currency="USD",
         limits={"users": UNLIMITED, "customers": UNLIMITED, "deals": UNLIMITED},
+        features=frozenset(Feature),
     ),
 }
 

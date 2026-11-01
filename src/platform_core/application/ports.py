@@ -35,6 +35,34 @@ class MembershipProvider(Protocol):
     def get_membership(self, user_id: UUID, tenant_id: UUID) -> TenantMembership | None: ...
 
 
+class TenantAccessGate(Protocol):
+    """Commercial access of a tenant (subscription term and modules) for one API path.
+
+    Raises an AccessDeniedError subclass when the path is closed for the tenant.
+    """
+
+    def check(self, tenant_id: UUID, path: str) -> None: ...
+
+
+class ErrorRecorder(Protocol):
+    """Keeps a safe record of an unexpected server error for the platform administrator.
+
+    Receives no exception message or request data: only where and what kind of error.
+    """
+
+    def record(
+        self,
+        *,
+        component: str,
+        view: str,
+        method: str,
+        route: str,
+        exception_type: str,
+        request_id: str | None,
+        tenant_slug: str | None,
+    ) -> None: ...
+
+
 class TenantConnectionRegistry(Protocol):
     """Registers database aliases for tenants on demand (bounded, never all at once)."""
 

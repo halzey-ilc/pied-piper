@@ -4,7 +4,12 @@ from typing import Any
 
 from rest_framework import serializers
 
-from modules.organizations.application.ports import Company, DepartmentInfo, StaffMember
+from modules.organizations.application.ports import (
+    Company,
+    DepartmentInfo,
+    StaffMember,
+    StaffRequestInfo,
+)
 
 
 class CompanySerializer(serializers.Serializer[dict[str, Any]]):
@@ -69,6 +74,59 @@ class StaffCreatedSerializer(serializers.Serializer[dict[str, Any]]):
 
 class TemporaryPasswordSerializer(serializers.Serializer[dict[str, Any]]):
     temporary_password = serializers.CharField()
+
+
+class HireRequestSerializer(serializers.Serializer[dict[str, Any]]):
+    kind = serializers.ChoiceField(choices=["hire", "dismiss"])
+    # hire
+    first_name = serializers.CharField(max_length=150, required=False, allow_blank=True)
+    last_name = serializers.CharField(max_length=150, required=False, allow_blank=True, default="")
+    role = serializers.CharField(required=False, help_text="sales_rep | lead_caller")
+    login = serializers.CharField(max_length=150, required=False, allow_blank=True)
+    email = serializers.EmailField(required=False, allow_blank=True)
+    phone = serializers.CharField(max_length=16, required=False, allow_blank=True, default="")
+    # dismiss
+    membership_id = serializers.UUIDField(required=False)
+    reason = serializers.CharField(max_length=500, required=False, allow_blank=True, default="")
+
+    def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
+        if attrs["kind"] == "hire" and not (attrs.get("first_name") and attrs.get("role")):
+            raise serializers.ValidationError("A hire request needs first_name and role.")
+        if attrs["kind"] == "dismiss" and not attrs.get("membership_id"):
+            raise serializers.ValidationError("A dismissal request needs membership_id.")
+        return attrs
+
+
+class RequestDecisionSerializer(serializers.Serializer[dict[str, Any]]):
+    note = serializers.CharField(max_length=500, required=False, allow_blank=True, default="")
+
+
+def staff_request_to_dict(r: StaffRequestInfo) -> dict[str, Any]:
+    return {
+        "id": str(r.id),
+        "kind": r.kind,
+        "status": r.status,
+        "department": department_to_dict(r.department),
+        "requested_by": {"id": str(r.requested_by), "name": r.requested_by_name},
+        "created_at": r.created_at.isoformat(),
+        "candidate": {
+            "full_name": " ".join(p for p in (r.first_name, r.last_name) if p),
+            "login": r.login or None,
+            "email": r.email,
+            "phone": r.phone,
+            "role": r.role,
+        }
+        if r.kind == "hire"
+        else None,
+        "target": {"membership_id": str(r.target_membership_id), "name": r.target_name}
+        if r.target_membership_id
+        else None,
+        "reason": r.reason,
+        "decided_by": r.decided_by_name,
+        "decided_at": r.decided_at.isoformat() if r.decided_at else None,
+        "decision_note": r.decision_note,
+        "result_membership_id": str(r.result_membership_id) if r.result_membership_id else None,
+    }
 
 
 def company_to_dict(c: Company) -> dict[str, Any]:

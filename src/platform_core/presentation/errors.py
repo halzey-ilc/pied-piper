@@ -16,8 +16,9 @@ from rest_framework import exceptions, status
 from rest_framework.response import Response
 from rest_framework.views import exception_handler as drf_exception_handler
 
-from platform_core.application.context import current_request_id
+from platform_core.application.context import current_request_id, current_tenant
 from platform_core.domain.tenancy import TenantNotFoundError
+from platform_core.infrastructure.tenancy.services import error_recorder
 from shared.domain.errors import (
     AccessDeniedError,
     ConflictError,
@@ -70,10 +71,34 @@ def api_exception_handler(exc: Exception, context: dict[str, Any]) -> Response:
         "unhandled_api_exception",
         extra={"view": type(context.get("view")).__name__, "exc_type": type(exc).__name__},
     )
+    _record_error(exc, context)
     return Response(
         error_body("internal_error", "An internal error occurred."),
         status=status.HTTP_500_INTERNAL_SERVER_ERROR,
     )
+
+
+def _record_error(exc: Exception, context: dict[str, Any]) -> None:
+    """Leave a record for the platform administrator; never fails the response."""
+    recorder = error_recorder()
+    if recorder is None:
+        return
+    view = context.get("view")
+    request = context.get("request")
+    match = getattr(request, "resolver_match", None)
+    tenant = current_tenant()
+    try:
+        recorder.record(
+            component=type(view).__module__.split(".presentation")[0] if view else "unknown",
+            view=type(view).__name__ if view else "unknown",
+            method=getattr(request, "method", "") or "",
+            route=(match.route if match is not None and match.route else "unmatched"),
+            exception_type=type(exc).__name__,
+            request_id=current_request_id(),
+            tenant_slug=tenant.slug if tenant else None,
+        )
+    except Exception:  # recording is best effort: the client still gets a clean 500
+        logger.warning("error_record_failed", exc_info=True)
 
 
 # Django-level handlers for non-DRF views (configured in config/urls.py).
