@@ -439,3 +439,18 @@ def test_support_requests_from_a_company_to_the_platform(
 
     mine = _ok(director.get("/api/v1/support/tickets/"))["results"]
     assert mine[0]["status"] == "in_progress" and "internal_note" not in mine[0]
+
+
+def test_a_connected_company_starts_with_the_standard_pipeline(
+    tenants: dict[str, Any],
+) -> None:
+    from modules.sales_pipeline.composition import ensure_starter_pipeline
+    from modules.sales_pipeline.infrastructure.repository import DjangoPipelineRepository
+    from platform_core.infrastructure.tenancy.services import system_tenant_scope
+
+    with system_tenant_scope("acme") as tenant:
+        assert ensure_starter_pipeline(tenant.db_alias) is True
+        assert ensure_starter_pipeline(tenant.db_alias) is False  # a retry adds nothing
+        (pipeline,) = DjangoPipelineRepository(tenant.db_alias).list_all()
+    assert pipeline.is_default
+    assert [s.kind.value for s in pipeline.stages][-2:] == ["won", "lost"]

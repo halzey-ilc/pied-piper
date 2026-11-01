@@ -29,6 +29,7 @@ from modules.platform_admin.application.ports import (
 )
 from modules.platform_admin.domain.support import ErrorStatus, TicketKind, TicketStatus
 from modules.platform_admin.infrastructure.models import ErrorEvent, SupportTicket
+from modules.sales_pipeline.composition import ensure_starter_pipeline
 from modules.subscriptions.domain.plan import PlanCode
 from modules.subscriptions.domain.subscription import (
     EXPIRY_WARNING_DAYS,
@@ -39,6 +40,7 @@ from modules.subscriptions.infrastructure.models import SubscriptionRecord
 from modules.subscriptions.infrastructure.repository import _to_domain
 from modules.tenant_registry.application.provisioning import ProvisionTenantCommand
 from modules.tenant_registry.composition import build_provision_tenant
+from platform_core.infrastructure.tenancy.services import system_tenant_scope
 
 DB = "default"
 _DIRECTOR_ROLES = (Role.OWNER.value, Role.DIRECTOR.value, Role.ADMIN.value)
@@ -280,6 +282,9 @@ class DjangoTenantProvisioner:
         build_provision_tenant().execute(
             ProvisionTenantCommand(organization_id=company_id, slug=slug, requested_by=requested_by)
         )
+        # Starter settings in the company's own database: the standard sales pipeline.
+        with system_tenant_scope(slug) as tenant:
+            ensure_starter_pipeline(tenant.db_alias)
 
 
 def _error(row: ErrorEvent) -> ErrorRecord:

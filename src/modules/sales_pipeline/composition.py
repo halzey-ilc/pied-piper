@@ -7,6 +7,7 @@ from modules.sales_pipeline.application.custom_field_service import CustomFieldS
 from modules.sales_pipeline.application.deal_service import DealService
 from modules.sales_pipeline.application.loss_reason_service import LossReasonService
 from modules.sales_pipeline.application.pipeline_service import PipelineService
+from modules.sales_pipeline.domain.pipeline import Pipeline, StageDefinition, StageKind
 from modules.sales_pipeline.infrastructure.customer_lookup import DjangoCustomerLookup
 from modules.sales_pipeline.infrastructure.repository import (
     DjangoCustomFieldRepository,
@@ -60,3 +61,28 @@ def custom_field_service() -> CustomFieldService:
         uow=DjangoUnitOfWork(alias),
         audit=DjangoAuditLog(alias),
     )
+
+
+# The pipeline a newly connected company starts with; the director can change it later.
+_STARTER_STAGES = (
+    ("Новый", 10, "open"),
+    ("Квалификация", 30, "open"),
+    ("Предложение", 60, "open"),
+    ("Выиграна", 100, "won"),
+    ("Проиграна", 0, "lost"),
+)
+
+
+def ensure_starter_pipeline(alias: str) -> bool:
+    """Give a company without pipelines the standard one (platform onboarding). Idempotent."""
+    repository = DjangoPipelineRepository(alias)
+    if repository.list_all():
+        return False
+    repository.add(
+        Pipeline.create(
+            name="Основная воронка",
+            stages=[StageDefinition(n, p, StageKind(k)) for n, p, k in _STARTER_STAGES],
+            is_default=True,
+        )
+    )
+    return True
