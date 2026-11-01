@@ -19,6 +19,7 @@ from modules.activities.application.ports import (
     ActivityFilter,
     ActivityRepository,
     ActivityVisibility,
+    MemberDirectory,
     SubjectChecker,
 )
 from modules.activities.domain.activity import (
@@ -33,7 +34,12 @@ from modules.audit.application.ports import AuditLog
 from modules.audit.domain.entry import AuditEntry
 from platform_core.application.ports import EventOutbox
 from shared.application.ports import UnitOfWork
-from shared.domain.errors import AccessDeniedError, ConflictError, NotFoundError
+from shared.domain.errors import (
+    AccessDeniedError,
+    ConflictError,
+    DomainValidationError,
+    NotFoundError,
+)
 from shared.domain.events import DomainEvent
 
 AGGREGATE = "activity"
@@ -96,6 +102,7 @@ class ActivityService:
         self,
         repository: ActivityRepository,
         subjects: SubjectChecker,
+        members: MemberDirectory,
         uow: UnitOfWork,
         outbox: EventOutbox,
         audit: AuditLog,
@@ -103,6 +110,7 @@ class ActivityService:
     ) -> None:
         self._repo = repository
         self._subjects = subjects
+        self._members = members
         self._uow = uow
         self._outbox = outbox
         self._audit = audit
@@ -144,8 +152,15 @@ class ActivityService:
         # sales (TEAM) or director/admin (ALL) may assign them to others.
         if assignee != principal.user_id and scope is Scope.OWN:
             raise AccessDeniedError("You can only assign tasks to yourself.")
+        if assignee != principal.user_id and not self._members.is_active_member(assignee):
+            raise DomainValidationError("The assignee is not an active member of this company.")
         with self._uow:
-            if not self._subjects.exists(command.subject.type, command.subject.id):
+            if not self._subjects.exists(command.subject.type, command.subject.id) or (
+                # A deal outside the caller's scope is treated as missing, so its
+                # open-task cap cannot be used up by people who cannot see it.
+                command.subject.type is SubjectType.DEAL
+                and not self._subjects.deal_visible_to(principal, command.subject.id)
+            ):
                 raise NotFoundError(
                     f"The {command.subject.type.value} this task refers to was not found."
                 )

@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from typing import Protocol
 from uuid import UUID
 
+from modules.access_control.domain.rbac import Principal
 from modules.activities.domain.activity import (
     Activity,
     ActivityKind,
@@ -52,3 +53,13 @@ class SubjectChecker(Protocol):
     """Verifies the customer or deal an activity is attached to exists in this tenant."""
 
     def exists(self, subject_type: SubjectType, subject_id: UUID) -> bool: ...
+
+    def deal_visible_to(self, principal: Principal, deal_id: UUID) -> bool:
+        """Whether the deal exists and the caller may see it (sales pipeline rules)."""
+        ...
+
+
+class MemberDirectory(Protocol):
+    """Who belongs to the active company (tasks may only be assigned to its members)."""
+
+    def is_active_member(self, user_id: UUID) -> bool: ...

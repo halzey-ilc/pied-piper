@@ -295,3 +295,43 @@ def test_cross_tenant_isolation(
     assert client_for(alice, "acme").get(f"/api/v1/activities/{bob_note}/").status_code == 404
     assert ActivityRecord.objects.using("tenant_globex").count() == 1
     assert ActivityRecord.objects.using("tenant_acme").count() == 0
+
+
+def test_task_on_a_deal_requires_seeing_the_deal(
+    make_user: Callable[..., Any],
+    tenants: dict[str, TenantFixture],
+    client_for: Callable[..., APIClient],
+) -> None:
+    owner = client_for(make_user("owner", tenant=tenants["acme"]), "acme")
+    rep = client_for(make_user("rep", tenant=tenants["acme"], role=Role.SALES_REP), "acme")
+    owners_deal = _deal(owner)
+    assert rep.get(f"/api/v1/sales/deals/{owners_deal}/").status_code == 404
+
+    # A rep cannot attach tasks to a deal outside their scope (nor use up its open-task cap).
+    for title in ("t1", "t2"):
+        denied = _log(rep, kind="task", subject_type="deal", subject_id=owners_deal, title=title)
+        assert denied.status_code == 404, denied.content
+    assert ActivityRecord.objects.using("tenant_acme").count() == 0
+    created = _log(owner, kind="task", subject_type="deal", subject_id=owners_deal, title="Mine")
+    assert created.status_code == 201, created.content
+
+
+def test_task_assignee_must_be_an_active_member(
+    make_user: Callable[..., Any],
+    tenants: dict[str, TenantFixture],
+    client_for: Callable[..., APIClient],
+) -> None:
+    owner = client_for(make_user("owner", tenant=tenants["acme"]), "acme")
+    outsider = make_user("outsider", tenant=tenants["globex"])
+    did = _deal(owner)
+
+    response = _log(
+        owner,
+        kind="task",
+        subject_type="deal",
+        subject_id=did,
+        title="For someone else's employee",
+        assignee_user_id=str(outsider.id),
+    )
+    assert response.status_code == 400, response.content
+    assert ActivityRecord.objects.using("tenant_acme").count() == 0
