@@ -65,6 +65,7 @@ def _deal_to_domain(row: DealRecord) -> Deal:
         loss_reason_id=row.loss_reason_id,
         created_at=row.created_at,
         version=row.version,
+        updated_at=row.updated_at,
     )
 
 

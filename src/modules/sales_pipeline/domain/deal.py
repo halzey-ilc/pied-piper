@@ -137,6 +137,8 @@ class Deal:
     loss_reason_id: UUID | None = None
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     version: int = 1
+    # Last write to the record (set by persistence); None until the deal is stored.
+    updated_at: datetime | None = None
 
     @classmethod
     def open(

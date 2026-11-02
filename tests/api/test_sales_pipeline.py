@@ -711,3 +711,17 @@ def test_deal_detail_hides_customer_the_caller_cannot_view(
     assert detail["customer"] is None
     assert detail["owner"]["id"] == str(rep_user.id)
     assert detail["owner"]["name"] == "rep"
+
+
+def test_deal_exposes_updated_at(
+    make_user: Callable[..., Any],
+    tenants: dict[str, TenantFixture],
+    client_for: Callable[..., APIClient],
+) -> None:
+    client = client_for(make_user("owner", tenant=tenants["acme"]), "acme")
+    _pipeline(client)
+    deal_id = _deal(client)["id"]
+    detail = client.get(f"/api/v1/sales/deals/{deal_id}/").json()
+    assert detail["updated_at"] is not None
+    listed = client.get("/api/v1/sales/deals/?ordering=-updated_at").json()["results"][0]
+    assert listed["updated_at"] == detail["updated_at"]

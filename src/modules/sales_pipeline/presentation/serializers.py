@@ -197,6 +197,7 @@ class DealReadSerializer(serializers.Serializer[dict[str, Any]]):
     loss_reason_id = serializers.UUIDField(read_only=True, allow_null=True)
     version = serializers.IntegerField(read_only=True)
     created_at = serializers.DateTimeField(read_only=True)
+    updated_at = serializers.DateTimeField(read_only=True, allow_null=True)
 
 
 class DealCustomerSerializer(serializers.Serializer[dict[str, Any]]):
@@ -268,6 +269,7 @@ def deal_to_dict(deal: Deal) -> dict[str, Any]:
         "loss_reason_id": str(deal.loss_reason_id) if deal.loss_reason_id else None,
         "version": deal.version,
         "created_at": deal.created_at.isoformat(),
+        "updated_at": deal.updated_at.isoformat() if deal.updated_at else None,
     }
 
 
