@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Protocol
 from uuid import UUID
 
-from modules.access_control.domain.rbac import Principal
-from modules.leads.domain.lead import Lead, LeadStatus
+from modules.access_control.domain.rbac import MemberRef, Principal
+from modules.leads.domain.lead import Lead, LeadSource, LeadStatus
 
 
 @dataclass(frozen=True, slots=True)
@@ -14,6 +15,21 @@ class LeadVisibility:
 
     owner_user_id: UUID | None = None
     team_ids: frozenset[UUID] = field(default_factory=frozenset)
+
+
+LEAD_ORDERING = frozenset({"name", "created_at"})
+
+
+@dataclass(frozen=True, slots=True)
+class LeadFilter:
+    status: LeadStatus | None = None
+    search: str | None = None  # name, e-mail, phone digits
+    owner_user_id: UUID | None = None
+    source: LeadSource | None = None
+    created_since: datetime | None = None  # inclusive
+    created_until: datetime | None = None  # exclusive
+    # One of LEAD_ORDERING, optionally prefixed with "-"; default newest first.
+    ordering: str | None = None
 
 
 class LeadRepository(Protocol):
@@ -26,15 +42,10 @@ class LeadRepository(Protocol):
         ...
 
     def list_visible(
-        self,
-        visibility: LeadVisibility,
-        *,
-        status: LeadStatus | None,
-        limit: int,
-        offset: int,
+        self, visibility: LeadVisibility, filters: LeadFilter, *, limit: int, offset: int
     ) -> list[Lead]: ...
 
-    def count(self, visibility: LeadVisibility, *, status: LeadStatus | None) -> int: ...
+    def count(self, visibility: LeadVisibility, filters: LeadFilter) -> int: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,3 +80,13 @@ class CustomerCreation(Protocol):
     def create(
         self, principal: Principal, *, name: str, email: str | None, phone: str | None
     ) -> UUID: ...
+
+    def existing(self, principal: Principal, customer_id: UUID) -> UUID:
+        """An existing customer the caller may see and that is not archived (else 404/409)."""
+        ...
+
+
+class MemberDirectory(Protocol):
+    """Active members of the company (a lead can be handed only to one of them)."""
+
+    def active_member(self, user_id: UUID) -> MemberRef | None: ...

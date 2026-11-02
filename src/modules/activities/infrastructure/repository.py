@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from typing import Any
 from uuid import UUID
 
 from django.db.models import F, Q, QuerySet
@@ -67,6 +68,18 @@ class DjangoActivityRepository:
             qs = qs.filter(subject_type=filters.subject.type.value, subject_id=filters.subject.id)
         if filters.task_status is not None:
             qs = qs.filter(task_status=filters.task_status.value)
+        if filters.assignee_user_id is not None:
+            qs = qs.filter(assignee_user_id=filters.assignee_user_id)
+        if filters.priority is not None:
+            qs = qs.filter(priority=filters.priority.value)
+        if filters.due_from is not None:
+            qs = qs.filter(due_date__gte=filters.due_from)
+        if filters.due_to is not None:
+            qs = qs.filter(due_date__lte=filters.due_to)
+        if filters.overdue_before is not None:
+            qs = qs.filter(kind="task", task_status="open", due_date__lt=filters.overdue_before)
+        if filters.no_due_date:
+            qs = qs.filter(kind="task", due_date__isnull=True)
         return qs
 
     def add(self, activity: Activity) -> None:
@@ -122,16 +135,15 @@ class DjangoActivityRepository:
             raise ConflictError("Activity was modified by someone else; reload and retry.")
 
     def hand_over_open_tasks(self, from_user: UUID, to_user: UUID, team_id: UUID | None) -> int:
-        """Move every open task of a leaving member to another member (bulk, versioned)."""
+        """Move every open task of a leaving member to another member (bulk, versioned).
+        ``team_id`` None keeps each task's own team (a recipient without a department)."""
+        changes: dict[str, Any] = {"assignee_user_id": to_user, "owner_user_id": to_user}
+        if team_id is not None:
+            changes["team_id"] = team_id
         return (
             self._qs()
             .filter(kind="task", task_status="open", assignee_user_id=from_user)
-            .update(
-                assignee_user_id=to_user,
-                owner_user_id=to_user,
-                team_id=team_id,
-                version=F("version") + 1,
-            )
+            .update(**changes, version=F("version") + 1)
         )
 
     def count_open_tasks_for_subject(self, subject: SubjectRef) -> int:

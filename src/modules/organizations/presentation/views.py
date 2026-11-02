@@ -209,6 +209,7 @@ class StaffCreateOptionsView(_Scoped):
                 ),
                 # direct: the director creates accounts; request: a head of sales asks the director
                 "mode": options["mode"],
+                "can_create_directly": options["can_create_directly"],
             }
         )
 

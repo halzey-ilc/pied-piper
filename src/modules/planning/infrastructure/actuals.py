@@ -5,9 +5,9 @@ Definitions (also in docs/API_CONTRACT.md, «Планы»):
 =================== ======================================== ============================
 metric              formula                                  source
 =================== ======================================== ============================
-monthly_sales       deals whose FIRST non-refund payment     payments (seller, team)
-                    falls in the month (same rule as the
-                    head-of-sales cabinet)
+monthly_sales       deals whose FIRST non-refund payment     payments (seller):
+                    falls in the month (each new deal is a   payments.sales
+                    sale), credited to its seller
 monthly_turnover    payments in the month minus refunds,     payments, company currency
                     company currency only                    only
 weekly_leads        leads created in the week                leads (owner, team)
@@ -30,12 +30,20 @@ from typing import Any
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
-from django.db.models import Case, DecimalField, F, Min, QuerySet, Sum, When
+from django.db.models import Case, Count, DecimalField, F, QuerySet, Sum, When
+from django.db.models.functions import TruncDate
 
 from modules.activities.infrastructure.models import ActivityRecord
 from modules.leads.infrastructure.models import LeadRecord
 from modules.payments.infrastructure.models import PaymentRecord
+from modules.payments.infrastructure.sales import deal_sales
 from modules.planning.domain.plan import PlanMetric
+
+_SIGNED = Case(
+    When(is_refund=True, then=-F("amount")),
+    default=F("amount"),
+    output_field=DecimalField(max_digits=18, decimal_places=2),
+)
 
 
 class DjangoPlanActuals:
@@ -71,6 +79,57 @@ class DjangoPlanActuals:
         )
         return Decimal(_scoped(calls, "owner_user_id", user_ids).count())
 
+    def actual_by_day(
+        self,
+        metric: PlanMetric,
+        start: date,
+        end: date,
+        *,
+        user_ids: frozenset[UUID] | None,
+        currency: str,
+        timezone: str,
+    ) -> dict[date, Decimal]:
+        out: dict[date, Decimal] = {}
+        if metric is PlanMetric.MONTHLY_SALES:
+            for sale in deal_sales(self.using, start, end, sellers=user_ids):
+                out[sale.paid_on] = out.get(sale.paid_on, Decimal(0)) + 1
+            return out
+        if metric is PlanMetric.MONTHLY_TURNOVER:
+            rows = (
+                self._payments(start, end, user_ids)
+                .filter(currency=currency)
+                .values("paid_on")
+                .annotate(value=Sum(_SIGNED))
+            )
+            return {row["paid_on"]: row["value"] or Decimal(0) for row in rows}
+        if metric is PlanMetric.WEEKLY_PREPAYMENTS:
+            rows = (
+                self._payments(start, end, user_ids)
+                .filter(kind="prepayment", is_refund=False)
+                .values("paid_on")
+                .annotate(value=Count("id"))
+            )
+            return {row["paid_on"]: Decimal(row["value"]) for row in rows}
+        since, until = _instant_bounds(start, end, timezone)
+        zone = ZoneInfo(timezone)
+        if metric is PlanMetric.WEEKLY_LEADS:
+            qs: QuerySet[Any] = LeadRecord.objects.using(self.using).filter(
+                created_at__gte=since, created_at__lt=until
+            )
+            field = "created_at"
+        else:
+            qs = ActivityRecord.objects.using(self.using).filter(
+                kind="call", occurred_at__gte=since, occurred_at__lt=until
+            )
+            field = "occurred_at"
+        rows = (
+            _scoped(qs, "owner_user_id", user_ids)
+            .annotate(day=TruncDate(field, tzinfo=zone))
+            .values("day")
+            .annotate(value=Count("id"))
+        )
+        return {row["day"]: Decimal(row["value"]) for row in rows}
+
     def _payments(
         self, start: date, end: date, user_ids: frozenset[UUID] | None
     ) -> QuerySet[PaymentRecord]:
@@ -80,11 +139,7 @@ class DjangoPlanActuals:
     def _turnover(
         self, start: date, end: date, user_ids: frozenset[UUID] | None, currency: str
     ) -> Decimal:
-        signed = Case(
-            When(is_refund=True, then=-F("amount")),
-            default=F("amount"),
-            output_field=DecimalField(max_digits=18, decimal_places=2),
-        )
+        signed = _SIGNED
         total = (
             self._payments(start, end, user_ids)
             .filter(currency=currency)
@@ -93,30 +148,7 @@ class DjangoPlanActuals:
         return total or Decimal("0.00")
 
     def _sales(self, start: date, end: date, user_ids: frozenset[UUID] | None) -> int:
-        payments = PaymentRecord.objects.using(self.using).filter(
-            is_refund=False, deal_id__isnull=False
-        )
-        firsts = (
-            payments.values("deal_id")
-            .annotate(first=Min("paid_on"))
-            .filter(first__gte=start, first__lte=end)
-        )
-        deal_ids = [row["deal_id"] for row in firsts]
-        # The sale belongs to whoever took the deal's first payment.
-        seen: set[UUID | None] = set()
-        count = 0
-        rows = (
-            payments.filter(deal_id__in=deal_ids)
-            .order_by("deal_id", "paid_on", "created_at")
-            .values("deal_id", "seller_user_id")
-        )
-        for row in rows:
-            if row["deal_id"] in seen:
-                continue
-            seen.add(row["deal_id"])
-            if user_ids is None or row["seller_user_id"] in user_ids:
-                count += 1
-        return count
+        return len(deal_sales(self.using, start, end, sellers=user_ids))
 
 
 def _scoped[Q: QuerySet[Any]](qs: Q, user_field: str, user_ids: frozenset[UUID] | None) -> Q:

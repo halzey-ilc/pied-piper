@@ -5,6 +5,7 @@ from django.db.models import Q
 
 from modules.planning.domain.absence import AbsenceKind
 from modules.planning.domain.plan import PlanMetric, PlanScope
+from modules.planning.domain.work_session import WorkSessionStatus
 
 
 class PlanRecord(models.Model):
@@ -81,3 +82,36 @@ class AbsenceRecord(models.Model):
 
     def __str__(self) -> str:
         return f"{self.user_id}: {self.kind} {self.start_date}..{self.end_date}"
+
+
+class WorkSessionRecord(models.Model):
+    """A member's declared working session (start/stop), in the tenant's own database."""
+
+    id = models.UUIDField(primary_key=True, editable=False)
+    user_id = models.UUIDField()
+    team_id = models.UUIDField(null=True, blank=True)
+    started_at = models.DateTimeField()
+    status = models.CharField(
+        max_length=12, choices=[(s.value, s.name.title()) for s in WorkSessionStatus]
+    )
+    ended_at = models.DateTimeField(null=True, blank=True)
+    settled_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField()
+
+    class Meta:
+        db_table = "planning_work_session"
+        constraints = [
+            # At most one open session per member, whatever the races.
+            models.UniqueConstraint(
+                fields=["user_id"],
+                condition=Q(status="open"),
+                name="work_session_one_open_per_user",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["user_id", "started_at"], name="work_session_user_idx"),
+            models.Index(fields=["status", "started_at"], name="work_session_status_idx"),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.user_id}: {self.status} {self.started_at}"

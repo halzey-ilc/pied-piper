@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, time, timedelta
 from typing import Any
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
 from drf_spectacular.utils import OpenApiExample, OpenApiParameter, extend_schema
 from rest_framework import status
@@ -36,7 +37,9 @@ from modules.meetings.presentation.serializers import (
     ParticipantResponseSerializer,
     meeting_to_dict,
 )
+from modules.organizations.composition import company_settings
 from platform_core.presentation.tenancy import TenantScopedAPIView
+from shared.domain.errors import DomainValidationError
 
 _TENANT_HEADER = OpenApiParameter(
     "X-Tenant",
@@ -140,13 +143,37 @@ class MeetingListCreateView(_Scoped):
         subject_type = request.query_params.get("subject_type")
         subject_id = _as_uuid(request.query_params.get("subject_id"))
         upcoming = request.query_params.get("upcoming") == "true"
+        q = request.query_params
+        try:
+            # Period in the company's local days: [date_from 00:00, date_to + 1 day 00:00).
+            zone = ZoneInfo(str(company_settings(self.tenant.tenant_id)["timezone"]))
+            starts_from = (
+                datetime.combine(date.fromisoformat(q["date_from"]), time.min, tzinfo=zone)
+                if q.get("date_from")
+                else None
+            )
+            starts_to = (
+                datetime.combine(
+                    date.fromisoformat(q["date_to"]) + timedelta(days=1), time.min, tzinfo=zone
+                )
+                if q.get("date_to")
+                else None
+            )
+            owner = UUID(q["owner_id"]) if q.get("owner_id") else None
+        except ValueError as exc:
+            raise DomainValidationError("owner_id must be a UUID, dates YYYY-MM-DD.") from exc
         filters = MeetingFilter(
             status=MeetingStatus(status_value) if status_value in valid else None,
             subject_type=SubjectType(subject_type)
             if subject_type in {s.value for s in SubjectType}
             else None,
             subject_id=subject_id,
-            starts_after=datetime.now(UTC) if upcoming else None,
+            starts_after=max(
+                (t for t in (datetime.now(UTC) if upcoming else None, starts_from) if t),
+                default=None,
+            ),
+            starts_before=starts_to,
+            owner_user_id=owner,
         )
         page = meeting_service().list_meetings(
             self.principal(), filters, limit=limit, offset=offset

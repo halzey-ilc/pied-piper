@@ -175,6 +175,14 @@ class PlatformStore(Protocol):
         self, company_id: UUID, *, name: str | None, is_active: bool | None
     ) -> None: ...
 
+    def director_login(self, company_id: UUID, user_id: UUID) -> str | None:
+        """Login of an ACTIVE director of this company; None for anyone else."""
+        ...
+
+    def set_temporary_password(self, user_id: UUID, password: str) -> None:
+        """Store the hash, require a change at next sign-in, revoke sessions and reset links."""
+        ...
+
 
 class TenantProvisioner(Protocol):
     """Creates, migrates and activates the company's own database (idempotent)."""

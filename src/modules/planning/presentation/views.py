@@ -1,8 +1,10 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime, time, timedelta
 from enum import StrEnum
+from typing import Any
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
 from drf_spectacular.utils import OpenApiParameter, extend_schema
 from rest_framework import status
@@ -13,9 +15,10 @@ from modules.access_control.domain.rbac import Principal, Role
 from modules.organizations.composition import company_settings
 from modules.planning.application.ports import AbsenceFilter, PlanFilter
 from modules.planning.application.service import CreateAbsence, SetPlan
-from modules.planning.composition import planning_service
+from modules.planning.composition import planning_service, work_session_service
 from modules.planning.domain.absence import AbsenceKind
 from modules.planning.domain.plan import PlanMetric, PlanScope
+from modules.planning.domain.work_session import MAX_OPEN, WorkSession, WorkSessionStatus
 from modules.planning.presentation.serializers import (
     AbsenceCreateSerializer,
     AbsenceListSerializer,
@@ -30,6 +33,7 @@ from modules.planning.presentation.serializers import (
     progress_to_dict,
 )
 from platform_core.presentation.tenancy import TenantScopedAPIView
+from shared.domain.errors import DomainValidationError
 
 _TENANT_HEADER = OpenApiParameter(
     "X-Tenant",
@@ -94,7 +98,9 @@ class PlanProgressView(_Scoped):
             "whose first payment falls in the month; monthly_turnover — payments minus "
             "refunds in the company currency; weekly_leads — leads created; "
             "weekly_prepayments — prepayments received (count); daily_calls — logged calls. "
-            "A department plan counts its current members' results."
+            "A department plan counts its current members' results. `remaining` = target "
+            "minus actual (not below 0); `?daily=true` adds the cumulative actual per day "
+            "up to today (one query set per day: use with a narrow filter)."
         ),
         parameters=[_TENANT_HEADER, _LIMIT, _OFFSET],
         responses=None,
@@ -108,8 +114,16 @@ class PlanProgressView(_Scoped):
             metric=_enum(PlanMetric, q.get("metric")),
             period=q.get("period") or None,
         )
-        page = planning_service().progress(self.principal(), filters, limit=limit, offset=offset)
-        currency = company_settings(self.membership.tenant_id)["currency"]
+        settings = company_settings(self.membership.tenant_id)
+        today = datetime.now(ZoneInfo(settings["timezone"])).date()
+        page = planning_service().progress(
+            self.principal(),
+            filters,
+            limit=limit,
+            offset=offset,
+            daily_until=today if q.get("daily") == "true" else None,
+        )
+        currency = settings["currency"]
         return Response(
             {"count": page.total, "results": [progress_to_dict(p, currency) for p in page.items]}
         )
@@ -248,3 +262,104 @@ def _as_date(value: str | None) -> date | None:
         return date.fromisoformat(value)
     except ValueError:
         return None
+
+
+def work_session_to_dict(session: WorkSession) -> dict[str, Any]:
+    return {
+        "id": str(session.id),
+        "user_id": str(session.user_id),
+        "team_id": str(session.team_id) if session.team_id else None,
+        "status": session.status.value,
+        "started_at": session.started_at.isoformat(),
+        # Only for an explicitly stopped session; "unconfirmed" ones have no known end.
+        "ended_at": session.ended_at.isoformat() if session.ended_at else None,
+        "duration_seconds": session.duration_seconds,
+        "settled_at": session.settled_at.isoformat() if session.settled_at else None,
+    }
+
+
+_WS_TAGS = ["Working time"]
+
+
+class WorkSessionStartView(_Scoped):
+    @extend_schema(
+        tags=_WS_TAGS,
+        operation_id="work_sessions_start",
+        summary="Start my working session",
+        description=(
+            "Declares the start of work (not the login). 409 if a session is already open. "
+            f"A session left open longer than {int(MAX_OPEN.total_seconds() // 3600)} h is "
+            "marked `unconfirmed` (end unknown, not counted) before a new one starts."
+        ),
+        parameters=[_TENANT_HEADER],
+        request=None,
+        responses=None,
+    )
+    def post(self, request: Request) -> Response:
+        session = work_session_service().start(self.principal())
+        return Response(work_session_to_dict(session), status=status.HTTP_201_CREATED)
+
+
+class WorkSessionStopView(_Scoped):
+    @extend_schema(
+        tags=_WS_TAGS,
+        operation_id="work_sessions_stop",
+        summary="Stop my working session",
+        description="Closes the open session with its end time and duration; 409 if none.",
+        parameters=[_TENANT_HEADER],
+        request=None,
+        responses=None,
+    )
+    def post(self, request: Request) -> Response:
+        return Response(work_session_to_dict(work_session_service().stop(self.principal())))
+
+
+class WorkSessionCurrentView(_Scoped):
+    @extend_schema(
+        tags=_WS_TAGS,
+        operation_id="work_sessions_current",
+        summary="My open working session",
+        description="`{session: {...} | null}`.",
+        parameters=[_TENANT_HEADER],
+        responses=None,
+    )
+    def get(self, request: Request) -> Response:
+        session = work_session_service().current(self.principal())
+        return Response({"session": work_session_to_dict(session) if session else None})
+
+
+class WorkSessionListView(_Scoped):
+    @extend_schema(
+        tags=_WS_TAGS,
+        operation_id="work_sessions_list",
+        summary="Working sessions history",
+        description=(
+            "Everyone sees their own; a head of sales also their department's members; the "
+            "director the whole company (403 for anyone else's id). Filters: user_id, "
+            "status (open | closed | unconfirmed), date_from / date_to (company-local days "
+            "of the start). Newest first."
+        ),
+        parameters=[_TENANT_HEADER, _LIMIT, _OFFSET],
+        responses=None,
+    )
+    def get(self, request: Request) -> Response:
+        limit, offset = self._paging(request)
+        q = request.query_params
+        zone = ZoneInfo(company_settings(self.membership.tenant_id)["timezone"])
+        try:
+            start = date.fromisoformat(q["date_from"]) if q.get("date_from") else None
+            end = date.fromisoformat(q["date_to"]) if q.get("date_to") else None
+        except ValueError as exc:
+            raise DomainValidationError("Dates are YYYY-MM-DD.") from exc
+        items, total = work_session_service().history(
+            self.principal(),
+            user_id=_uuid(q.get("user_id")),
+            status=_enum(WorkSessionStatus, q.get("status")),
+            started_from=datetime.combine(start, time.min, tzinfo=zone) if start else None,
+            started_before=(
+                datetime.combine(end + timedelta(days=1), time.min, tzinfo=zone) if end else None
+            ),
+            limit=limit,
+            offset=offset,
+        )
+        return Response({"count": total, "results": [work_session_to_dict(w) for w in items]})

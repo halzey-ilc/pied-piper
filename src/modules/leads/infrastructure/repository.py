@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import re
 from uuid import UUID
 
 from django.db import IntegrityError, transaction
 from django.db.models import F, Q, QuerySet
 
-from modules.leads.application.ports import LeadVisibility
+from modules.leads.application.ports import LEAD_ORDERING, LeadFilter, LeadVisibility
 from modules.leads.domain.lead import Lead, LeadSource, LeadStatus
 from modules.leads.infrastructure.models import LeadRecord
 from shared.domain.errors import ConflictError
@@ -78,6 +79,8 @@ class DjangoLeadRepository:
                 email=str(lead.email) if lead.email else None,
                 phone=str(lead.phone) if lead.phone else None,
                 status=lead.status.value,
+                owner_user_id=lead.owner_user_id,
+                team_id=lead.team_id,
                 disqualify_reason=lead.disqualify_reason,
                 converted_customer_id=lead.converted_customer_id,
                 version=F("version") + 1,
@@ -86,17 +89,34 @@ class DjangoLeadRepository:
         if updated != 1:
             raise ConflictError("Lead was modified by someone else; reload and retry.")
 
-    def list_visible(
-        self, visibility: LeadVisibility, *, status: LeadStatus | None, limit: int, offset: int
-    ) -> list[Lead]:
+    def _filtered(self, visibility: LeadVisibility, filters: LeadFilter) -> QuerySet[LeadRecord]:
         qs = self._visible(visibility)
-        if status is not None:
-            qs = qs.filter(status=status.value)
-        rows = qs.order_by("-created_at", "id")[offset : offset + limit]
+        if filters.status is not None:
+            qs = qs.filter(status=filters.status.value)
+        if filters.owner_user_id is not None:
+            qs = qs.filter(owner_user_id=filters.owner_user_id)
+        if filters.source is not None:
+            qs = qs.filter(source=filters.source.value)
+        if filters.created_since is not None:
+            qs = qs.filter(created_at__gte=filters.created_since)
+        if filters.created_until is not None:
+            qs = qs.filter(created_at__lt=filters.created_until)
+        if filters.search:
+            condition = Q(name__icontains=filters.search) | Q(email__icontains=filters.search)
+            digits = re.sub(r"\D", "", filters.search)
+            if digits:
+                condition |= Q(phone__icontains=digits)
+            qs = qs.filter(condition)
+        return qs
+
+    def list_visible(
+        self, visibility: LeadVisibility, filters: LeadFilter, *, limit: int, offset: int
+    ) -> list[Lead]:
+        ordering = filters.ordering or "-created_at"
+        if ordering.lstrip("-") not in LEAD_ORDERING:
+            ordering = "-created_at"
+        rows = self._filtered(visibility, filters).order_by(ordering, "id")[offset : offset + limit]
         return [_to_domain(row) for row in rows]
 
-    def count(self, visibility: LeadVisibility, *, status: LeadStatus | None) -> int:
-        qs = self._visible(visibility)
-        if status is not None:
-            qs = qs.filter(status=status.value)
-        return qs.count()
+    def count(self, visibility: LeadVisibility, filters: LeadFilter) -> int:
+        return self._filtered(visibility, filters).count()

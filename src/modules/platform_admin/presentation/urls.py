@@ -6,6 +6,7 @@ from modules.platform_admin.presentation.views import (
     PlatformCompanyDetailView,
     PlatformCompanyPaymentsView,
     PlatformCompanySubscriptionView,
+    PlatformDirectorCredentialsView,
     PlatformErrorDetailView,
     PlatformErrorsView,
     PlatformOverviewView,
@@ -24,6 +25,11 @@ urlpatterns = [
         "companies/<uuid:company_id>/",
         PlatformCompanyDetailView.as_view(),
         name="platform-company",
+    ),
+    path(
+        "companies/<uuid:company_id>/directors/<uuid:user_id>/credentials/",
+        PlatformDirectorCredentialsView.as_view(),
+        name="platform-director-credentials",
     ),
     path(
         "companies/<uuid:company_id>/subscription/",

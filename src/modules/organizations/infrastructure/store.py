@@ -2,16 +2,20 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Any
 from uuid import UUID
 
 from django.contrib.auth import get_user_model
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.db.models import Q
 from django.utils import timezone
 
+from modules.identity.infrastructure.sessions import revoke_credentials
 from modules.organizations.application.ports import (
     Company,
+    DepartmentHeadTakenError,
     DepartmentInfo,
     NewAccount,
     NewStaffRequest,
@@ -19,6 +23,7 @@ from modules.organizations.application.ports import (
     StaffRequestInfo,
 )
 from modules.organizations.infrastructure.models import (
+    HEAD_OF_SALES_ROLES,
     Department,
     Membership,
     Organization,
@@ -52,6 +57,17 @@ def _member(row: Membership) -> StaffMember:
         created_by=row.created_by,
         created_at=row.created_at,
     )
+
+
+@contextmanager
+def _head_guard() -> Iterator[None]:
+    """Turn the one-head-per-department constraint into the business error (a race lost)."""
+    try:
+        yield
+    except IntegrityError as exc:
+        if "membership_one_active_head_per_department" in str(exc):
+            raise DepartmentHeadTakenError() from None
+        raise
 
 
 def _name(user: Any) -> str:
@@ -260,13 +276,14 @@ class DjangoOrganizationStore(DjangoStaffRequestMixin):
             )
             user.set_password(password)
             user.save(using=DB)
-            row = Membership.objects.using(DB).create(
-                user=user,
-                organization_id=company_id,
-                role=account.role,
-                department_id=account.department_id,
-                created_by=account.created_by,
-            )
+            with _head_guard():
+                row = Membership.objects.using(DB).create(
+                    user=user,
+                    organization_id=company_id,
+                    role=account.role,
+                    department_id=account.department_id,
+                    created_by=account.created_by,
+                )
         return _member(self._members(company_id).get(id=row.id))
 
     def update_member(
@@ -286,10 +303,24 @@ class DjangoOrganizationStore(DjangoStaffRequestMixin):
         elif clear_department:
             changes["department_id"] = None
         if changes:
-            Membership.objects.using(DB).filter(
-                organization_id=company_id, id=membership_id
-            ).update(**changes)
+            with transaction.atomic(using=DB), _head_guard():
+                Membership.objects.using(DB).filter(
+                    organization_id=company_id, id=membership_id
+                ).update(**changes)
         return _member(self._members(company_id).get(id=membership_id))
+
+    def active_head(
+        self, company_id: UUID, department_id: UUID, exclude_membership: UUID | None = None
+    ) -> UUID | None:
+        rows = Membership.objects.using(DB).filter(
+            organization_id=company_id,
+            department_id=department_id,
+            is_active=True,
+            role__in=HEAD_OF_SALES_ROLES,
+        )
+        if exclude_membership is not None:
+            rows = rows.exclude(id=exclude_membership)
+        return rows.values_list("id", flat=True).first()
 
     def deactivate(self, company_id: UUID, membership_id: UUID) -> StaffMember:
         with transaction.atomic(using=DB):
@@ -303,11 +334,13 @@ class DjangoOrganizationStore(DjangoStaffRequestMixin):
             )
             # One company per person: the account itself stops signing in.
             get_user_model().objects.using(DB).filter(id=row.user_id).update(is_active=False)
+            revoke_credentials(row.user_id)
         return _member(self._members(company_id).get(id=membership_id))
 
     def set_temporary_password(self, company_id: UUID, membership_id: UUID, password: str) -> None:
         row = self._members(company_id).get(id=membership_id)
         user: Any = row.user
-        user.set_password(password)
+        user.set_password(password)  # the previous password stops working at once
         user.must_change_password = True
         user.save(using=DB, update_fields=["password", "must_change_password"])
+        revoke_credentials(user.id)  # signed-in sessions and reset links end too

@@ -134,13 +134,23 @@ class ActivityListCreateView(_Scoped):
             offset = max(int(request.query_params.get("offset", 0)), 0)
         except ValueError:
             limit, offset = 50, 0
-        filters = ActivityFilter(
-            kind=_enum(ActivityKind, request.query_params.get("kind")),
-            subject=_subject_filter(request),
-            task_status=_enum(TaskStatus, request.query_params.get("task_status")),
-        )
-        page = activity_service().timeline(self.principal(), filters, limit=limit, offset=offset)
+        q = request.query_params
         today = self.company_today()
+        try:
+            filters = ActivityFilter(
+                kind=_enum(ActivityKind, q.get("kind")),
+                subject=_subject_filter(request),
+                task_status=_enum(TaskStatus, q.get("task_status")),
+                assignee_user_id=UUID(q["assignee_id"]) if q.get("assignee_id") else None,
+                priority=_enum(TaskPriority, q.get("priority")),
+                due_from=date.fromisoformat(q["due_from"]) if q.get("due_from") else None,
+                due_to=date.fromisoformat(q["due_to"]) if q.get("due_to") else None,
+                overdue_before=today if q.get("overdue") == "true" else None,
+                no_due_date=q.get("no_due_date") == "true",
+            )
+        except ValueError as exc:
+            raise DomainValidationError("assignee_id must be a UUID, dates YYYY-MM-DD.") from exc
+        page = activity_service().timeline(self.principal(), filters, limit=limit, offset=offset)
         return Response(
             {"count": page.total, "results": [activity_to_dict(a, today) for a in page.items]}
         )

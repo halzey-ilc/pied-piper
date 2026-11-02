@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from datetime import date, datetime, time, timedelta
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
 from drf_spectacular.utils import OpenApiExample, OpenApiParameter, extend_schema
 from rest_framework import status
@@ -8,12 +10,14 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 
 from modules.access_control.domain.rbac import Principal, Role
+from modules.leads.application.ports import LeadFilter
 from modules.leads.application.service import CaptureLead, UpdateLead
 from modules.leads.composition import lead_service
 from modules.leads.domain.lead import LeadSource, LeadStatus
 from modules.leads.presentation.serializers import (
     ConversionResultSerializer,
     DuplicatesListSerializer,
+    LeadAssignSerializer,
     LeadConvertSerializer,
     LeadCreateSerializer,
     LeadDisqualifySerializer,
@@ -27,6 +31,8 @@ from modules.organizations.composition import company_settings
 from modules.sales_pipeline.application.deal_service import OpenDeal
 from modules.sales_pipeline.composition import deal_service
 from platform_core.presentation.tenancy import TenantScopedAPIView
+from shared.domain.errors import DomainValidationError
+from shared.infrastructure.unit_of_work import DjangoUnitOfWork
 
 _TENANT_HEADER = OpenApiParameter(
     "X-Tenant",
@@ -75,7 +81,18 @@ class LeadListCreateView(LeadBaseView):
             "Filter by `status` and page with `limit`/`offset`. Visibility follows your "
             "role (own / team / all)."
         ),
-        parameters=[_TENANT_HEADER, _STATUS, _LIMIT, _OFFSET],
+        parameters=[
+            _TENANT_HEADER,
+            _STATUS,
+            OpenApiParameter("search", str, description="Name, e-mail or phone digits."),
+            OpenApiParameter("owner_id", str, description="Responsible user id."),
+            OpenApiParameter("source", str, description="Lead source."),
+            OpenApiParameter("created_from", str, description="YYYY-MM-DD (company day)."),
+            OpenApiParameter("created_to", str, description="YYYY-MM-DD (company day)."),
+            OpenApiParameter("ordering", str, description="name | created_at, '-' descending."),
+            _LIMIT,
+            _OFFSET,
+        ],
         responses=LeadListSerializer,
     )
     def get(self, request: Request) -> Response:
@@ -84,11 +101,41 @@ class LeadListCreateView(LeadBaseView):
             offset = max(int(request.query_params.get("offset", 0)), 0)
         except ValueError:
             limit, offset = 50, 0
-        status_value = request.query_params.get("status")
+        q = request.query_params
+        status_value = q.get("status")
         valid = {s.value for s in LeadStatus}
         lead_status = LeadStatus(status_value) if status_value in valid else None
+        source_value = q.get("source")
+        # Company-local days: [created_from 00:00, created_to + 1 day 00:00).
+        zone = ZoneInfo(str(company_settings(self.tenant.tenant_id)["timezone"]))
+        try:
+            filters = LeadFilter(
+                status=lead_status,
+                search=(q.get("search") or "").strip() or None,
+                owner_user_id=UUID(q["owner_id"]) if q.get("owner_id") else None,
+                source=LeadSource(source_value) if source_value else None,
+                created_since=(
+                    datetime.combine(date.fromisoformat(q["created_from"]), time.min, tzinfo=zone)
+                    if q.get("created_from")
+                    else None
+                ),
+                created_until=(
+                    datetime.combine(
+                        date.fromisoformat(q["created_to"]) + timedelta(days=1),
+                        time.min,
+                        tzinfo=zone,
+                    )
+                    if q.get("created_to")
+                    else None
+                ),
+                ordering=q.get("ordering") or None,
+            )
+        except ValueError as exc:
+            raise DomainValidationError(
+                "owner_id must be a UUID, source a known source, dates YYYY-MM-DD."
+            ) from exc
         page = lead_service().list_leads(
-            self.principal(), status=lead_status, limit=limit, offset=offset
+            self.principal(), limit=limit, offset=offset, filters=filters
         )
         return Response(
             {"count": page.total, "results": [lead_to_dict(lead) for lead in page.items]}
@@ -212,10 +259,11 @@ class LeadConvertView(LeadBaseView):
         operation_id="leads_convert",
         summary="Convert a lead to a customer",
         description=(
-            "Converts a qualified lead into a customer and returns the new customer id. "
-            "Idempotent: converting an already-converted lead returns the existing customer "
-            "without creating a duplicate. Requires the leads.convert and customers.create "
-            "permissions."
+            "Converts a qualified lead into a new customer, or links it to an existing one "
+            "(`customer_id`, e.g. a confirmed duplicate) without creating a second card. "
+            "Optionally opens a deal in the same transaction. Idempotent: an already-converted "
+            "lead returns its customer and opens no further deal. The lead and its history "
+            "are kept."
         ),
         parameters=[_TENANT_HEADER],
         request=LeadConvertSerializer,
@@ -226,23 +274,29 @@ class LeadConvertView(LeadBaseView):
         serializer.is_valid(raise_exception=True)
         create_deal = serializer.validated_data.get("create_deal")
         principal = self.principal()
-        result = lead_service().convert(principal, lead_id)
         deal_id: str | None = None
-        if create_deal is not None:
-            currency = (
-                create_deal.get("currency") or company_settings(self.tenant.tenant_id)["currency"]
+        # One transaction: a failed deal leaves the lead unconverted, not half-done.
+        with DjangoUnitOfWork(self.tenant.db_alias):
+            result = lead_service().convert(
+                principal, lead_id, serializer.validated_data.get("customer_id")
             )
-            deal = deal_service().open_deal(
-                principal,
-                OpenDeal(
-                    title=create_deal["title"],
-                    amount=create_deal["amount"],
-                    currency=currency,
-                    pipeline_id=create_deal.get("pipeline_id"),
-                    customer_id=result.customer_id,
-                ),
-            )
-            deal_id = str(deal.id)
+            # A repeated call returns the first result and does not open another deal.
+            if create_deal is not None and not result.already_converted:
+                currency = (
+                    create_deal.get("currency")
+                    or company_settings(self.tenant.tenant_id)["currency"]
+                )
+                deal = deal_service().open_deal(
+                    principal,
+                    OpenDeal(
+                        title=create_deal["title"],
+                        amount=create_deal["amount"],
+                        currency=currency,
+                        pipeline_id=create_deal.get("pipeline_id"),
+                        customer_id=result.customer_id,
+                    ),
+                )
+                deal_id = str(deal.id)
         return Response(
             {
                 "lead": lead_to_dict(result.lead),
@@ -271,3 +325,51 @@ class LeadDuplicatesView(LeadBaseView):
         return Response(
             {"count": len(candidates), "results": [duplicate_to_dict(c) for c in candidates]}
         )
+
+
+class LeadAssignView(LeadBaseView):
+    @extend_schema(
+        tags=_TAGS,
+        operation_id="leads_assign",
+        summary="Change the responsible member",
+        description=(
+            "A manager cannot hand leads over; a head of sales within their department; a "
+            "director to any active member. Not for converted leads (409)."
+        ),
+        parameters=[_TENANT_HEADER],
+        request=LeadAssignSerializer,
+        responses=LeadReadSerializer,
+    )
+    def post(self, request: Request, lead_id: UUID) -> Response:
+        serializer = LeadAssignSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        lead = lead_service().assign(
+            self.principal(), lead_id, serializer.validated_data["owner_user_id"]
+        )
+        return Response(lead_to_dict(lead))
+
+
+class LeadHistoryView(LeadBaseView):
+    @extend_schema(
+        tags=_TAGS,
+        operation_id="leads_history",
+        summary="Lead change history",
+        description=(
+            "Audited changes, newest first: lead.captured|updated|qualified|disqualified|"
+            "converted|reassigned with actor, time and changed field names (no values)."
+        ),
+        parameters=[_TENANT_HEADER],
+        responses=None,
+    )
+    def get(self, request: Request, lead_id: UUID) -> Response:
+        entries = lead_service().history(self.principal(), lead_id)
+        results = [
+            {
+                "action": e.action,
+                "occurred_at": e.occurred_at.isoformat(),
+                "actor_user_id": str(e.actor_user_id) if e.actor_user_id else None,
+                "changed_fields": list(e.changed_fields),
+            }
+            for e in entries
+        ]
+        return Response({"count": len(results), "results": results})

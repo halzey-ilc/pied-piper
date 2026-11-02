@@ -190,24 +190,31 @@ def test_head_of_sales_cabinet_and_staff_are_their_department(
     assert str(company["rep_south"].id) not in board.content.decode()
 
 
-def test_hiring_and_dismissal_are_the_directors(
+def test_heads_of_sales_hire_and_dismiss_managers_of_their_department_only(
     company: dict[str, Any], client_for: Callable[..., APIClient]
 ) -> None:
     rop = client_for(company["rop_north"], "acme")
     director = client_for(company["director"], "acme")
-    assert (
-        rop.post(
-            "/api/v1/staff/", {"first_name": "New", "role": "sales_rep"}, format="json"
-        ).status_code
-        == 403
-    )
-    membership = Membership.objects.get(user=company["rep_north"])
-    assert rop.post(f"/api/v1/staff/{membership.id}/deactivate/").status_code == 403
-
-    hired = director.post(
+    for role in ("director", "head_of_sales", "viewer"):
+        assert (
+            rop.post("/api/v1/staff/", {"first_name": "X", "role": role}, format="json").status_code
+            == 403
+        )
+    hired = rop.post(
         "/api/v1/staff/",
-        {"first_name": "New", "role": "sales_rep", "department_id": company["north"]},
+        {"first_name": "New", "role": "sales_rep", "department_id": company["south"]},
         format="json",
     )
     assert hired.status_code == 201, hired.content
-    assert director.post(f"/api/v1/staff/{membership.id}/deactivate/").status_code == 200
+    assert hired.json()["member"]["department"]["id"] == company["north"]
+
+    # Their own manager: yes. Another department's manager, a peer, the director: no.
+    north_rep = Membership.objects.get(user=company["rep_north"])
+    for outsider in ("rep_south", "rop_south", "director"):
+        membership = Membership.objects.get(user=company[outsider])
+        assert rop.post(f"/api/v1/staff/{membership.id}/deactivate/").status_code == 404
+        assert Membership.objects.get(id=membership.id).is_active
+    assert rop.post(f"/api/v1/staff/{north_rep.id}/deactivate/").status_code == 200
+
+    south_rep = Membership.objects.get(user=company["rep_south"])
+    assert director.post(f"/api/v1/staff/{south_rep.id}/deactivate/").status_code == 200

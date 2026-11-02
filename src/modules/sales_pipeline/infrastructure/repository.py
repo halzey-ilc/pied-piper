@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from typing import Any
 from uuid import UUID
 
 from django.db import transaction
@@ -267,6 +268,21 @@ class DjangoDealRepository:
         )
         if updated != 1:
             raise ConflictError("Deal was modified by someone else; reload and retry.")
+
+    def hand_over_open_deals(
+        self, from_user: UUID, to_user: UUID, team_id: UUID | None
+    ) -> list[UUID]:
+        """Move the OPEN deals of a leaving member to another member; closed deals keep
+        their owner as history. ``team_id`` None keeps each deal's own team. Returns the
+        ids of the moved deals."""
+        rows = self._qs().select_for_update().filter(owner_user_id=from_user, status="open")
+        ids = list(rows.values_list("id", flat=True))
+        if ids:
+            changes: dict[str, Any] = {"owner_user_id": to_user}
+            if team_id is not None:
+                changes["team_id"] = team_id
+            self._qs().filter(id__in=ids).update(**changes, version=F("version") + 1)
+        return ids
 
     def list_visible(
         self, visibility: DealVisibility, filters: DealFilter, *, limit: int, offset: int

@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from uuid import UUID
+
+from modules.audit.domain.entry import AuditEntry
 from modules.audit.infrastructure.audit_log import DjangoAuditLog
 from modules.organizations.infrastructure.memberships import DjangoMemberDirectory
 from modules.sales_pipeline.application.custom_field_service import CustomFieldService
@@ -91,3 +94,23 @@ def ensure_starter_pipeline(alias: str) -> bool:
         )
     )
     return True
+
+
+def hand_over_open_deals(from_user: UUID, to_user: UUID, to_team: UUID | None, actor: UUID) -> int:
+    """Staff offboarding (called by organizations after the decision): the open deals of a
+    deactivated member go to ``to_user``; each move is audited as ``deal.reassigned``."""
+    alias = require_tenant().db_alias
+    with DjangoUnitOfWork(alias):
+        moved = DjangoDealRepository(alias).hand_over_open_deals(from_user, to_user, to_team)
+        audit = DjangoAuditLog(alias)
+        for deal_id in moved:
+            audit.record(
+                AuditEntry(
+                    actor_user_id=actor,
+                    action="deal.reassigned",
+                    resource_type="deal",
+                    resource_id=str(deal_id),
+                    changed_fields=("owner",),
+                )
+            )
+    return len(moved)

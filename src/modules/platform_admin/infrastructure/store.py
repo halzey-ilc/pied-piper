@@ -13,6 +13,7 @@ from django.db.models import Count, Q, QuerySet
 
 from modules.access_control.domain.rbac import Role
 from modules.audit.infrastructure.models import AuditRecord
+from modules.identity.infrastructure.sessions import revoke_credentials
 from modules.organizations.infrastructure.models import Department, Membership, Organization
 from modules.platform_admin.application.ports import (
     CompanyDetail,
@@ -91,7 +92,33 @@ def _active_users() -> Q:
     return Q(memberships__is_active=True, memberships__user__is_active=True)
 
 
-class DjangoPlatformStore:
+class DjangoDirectorCredentialsMixin:
+    """Part of DjangoPlatformStore: restoring a director's access."""
+
+    def director_login(self, company_id: UUID, user_id: UUID) -> str | None:
+        row = (
+            Membership.objects.using(DB)
+            .filter(
+                organization_id=company_id,
+                user_id=user_id,
+                role__in=_DIRECTOR_ROLES,
+                is_active=True,
+                user__is_active=True,
+            )
+            .select_related("user")
+            .first()
+        )
+        return None if row is None else str(row.user.username)
+
+    def set_temporary_password(self, user_id: UUID, password: str) -> None:
+        user = get_user_model().objects.using(DB).get(id=user_id)
+        user.set_password(password)  # hash only; the previous password stops working
+        user.must_change_password = True
+        user.save(using=DB, update_fields=["password", "must_change_password"])
+        revoke_credentials(user_id)
+
+
+class DjangoPlatformStore(DjangoDirectorCredentialsMixin):
     def _companies(self) -> QuerySet[Organization]:
         return (
             Organization.objects.using(DB)

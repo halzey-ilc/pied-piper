@@ -101,7 +101,13 @@ class PaymentService:
         )
 
     def metrics(
-        self, principal: Principal, *, paid_from: date, paid_to: date, currency: str
+        self,
+        principal: Principal,
+        *,
+        paid_from: date,
+        paid_to: date,
+        currency: str,
+        by_seller: bool = False,
     ) -> SalesMetrics:
         scope = self._policy.require(principal, Permission.PAYMENTS_VIEW)
         visibility = self._visibility(principal, scope)
@@ -116,10 +122,14 @@ class PaymentService:
         )
         return SalesMetrics(
             sales_count=len(sold),
+            new_clients=self._payments.new_clients_count(visibility, paid_from, paid_to),
             turnover=turnover,
             received=received,
             debt=debt,
             currency=currency,
+            by_seller=(
+                self._payments.per_seller(visibility, paid_from, paid_to) if by_seller else None
+            ),
         )
 
     def _visibility(self, principal: Principal, scope: Scope) -> PaymentVisibility:

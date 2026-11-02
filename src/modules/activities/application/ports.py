@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import date
 from typing import Protocol
 from uuid import UUID
 
@@ -10,6 +11,7 @@ from modules.activities.domain.activity import (
     ActivityKind,
     SubjectRef,
     SubjectType,
+    TaskPriority,
     TaskStatus,
 )
 
@@ -27,6 +29,14 @@ class ActivityFilter:
     kind: ActivityKind | None = None
     subject: SubjectRef | None = None
     task_status: TaskStatus | None = None
+    assignee_user_id: UUID | None = None
+    priority: TaskPriority | None = None
+    due_from: date | None = None
+    due_to: date | None = None
+    # Open tasks whose due date is before this day (the company's "today").
+    overdue_before: date | None = None
+    # Tasks without a due date (the "no deadline" group).
+    no_due_date: bool = False
 
 
 class ActivityRepository(Protocol):

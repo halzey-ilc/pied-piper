@@ -13,7 +13,6 @@ from django.db.models import (
     Count,
     DecimalField,
     F,
-    Min,
     Q,
     Sum,
     When,
@@ -24,6 +23,7 @@ from modules.activities.infrastructure.models import ActivityRecord
 from modules.meetings.infrastructure.models import MeetingRecord
 from modules.organizations.infrastructure.models import Membership
 from modules.payments.infrastructure.models import PaymentRecord
+from modules.payments.infrastructure.sales import deal_sales
 from modules.planning.infrastructure.models import AbsenceRecord, PlanRecord
 from modules.team_cabinet.domain.board import Member, RawDay
 
@@ -215,33 +215,10 @@ class DjangoCabinetReader:
     def monthly_sales_counts(
         self, user_ids: list[UUID], month_start: date, month_end: date
     ) -> dict[UUID, int]:
+        """Sales per seller: deals whose first payment fell in the month (payments.sales)."""
         if not user_ids:
             return {}
-        # Deals whose first non-refund payment fell within the month.
-        first_in_month = (
-            PaymentRecord.objects.using(self.using)
-            .filter(is_refund=False, deal_id__isnull=False)
-            .values("deal_id")
-            .annotate(first=Min("paid_on"))
-            .filter(first__gte=month_start, first__lte=month_end)
-        )
-        deal_ids = [row["deal_id"] for row in first_in_month]
         counts: dict[UUID, int] = {}
-        seen: set[UUID] = set()
-        user_set = set(user_ids)
-        # The seller of each deal's earliest non-refund payment gets the sale.
-        rows = (
-            PaymentRecord.objects.using(self.using)
-            .filter(deal_id__in=deal_ids, is_refund=False)
-            .order_by("deal_id", "paid_on", "created_at")
-            .values("deal_id", "seller_user_id")
-        )
-        for row in rows:
-            deal_id = row["deal_id"]
-            if deal_id is None or deal_id in seen:
-                continue
-            seen.add(deal_id)
-            seller = row["seller_user_id"]
-            if seller in user_set:
-                counts[seller] = counts.get(seller, 0) + 1
+        for sale in deal_sales(self.using, month_start, month_end, sellers=user_ids):
+            counts[sale.seller_user_id] = counts.get(sale.seller_user_id, 0) + 1
         return counts

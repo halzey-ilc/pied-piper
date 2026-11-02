@@ -59,8 +59,15 @@ class ConvertDealSerializer(serializers.Serializer[dict[str, Any]]):
 
 
 class LeadConvertSerializer(serializers.Serializer[dict[str, Any]]):
-    # Optionally open a deal for the new customer as part of the conversion.
+    # Link to an existing customer (confirmed duplicate, returning client) instead of
+    # creating a new card.
+    customer_id = serializers.UUIDField(required=False, allow_null=True)
+    # Optionally open a deal for the customer as part of the conversion (first time only).
     create_deal = ConvertDealSerializer(required=False)
+
+
+class LeadAssignSerializer(serializers.Serializer[dict[str, Any]]):
+    owner_user_id = serializers.UUIDField()
 
 
 class ConversionResultSerializer(serializers.Serializer[dict[str, Any]]):
@@ -105,6 +112,7 @@ def lead_to_dict(lead: Lead) -> dict[str, Any]:
         "source": lead.source.value,
         "status": lead.status.value,
         "owner_user_id": str(lead.owner_user_id),
+        "team_id": str(lead.team_id) if lead.team_id else None,
         "disqualify_reason": lead.disqualify_reason,
         "converted_customer_id": (
             str(lead.converted_customer_id) if lead.converted_customer_id else None

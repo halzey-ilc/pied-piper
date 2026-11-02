@@ -231,6 +231,27 @@ class PlatformCompanyDetailView(_Platform):
         return Response(detail_to_dict(detail))
 
 
+class PlatformDirectorCredentialsView(_Platform):
+    @extend_schema(
+        operation_id="platform_director_credentials_issue",
+        tags=_TAGS,
+        summary="Issue new temporary credentials to a director",
+        description=(
+            "For a forgotten password or lost initial credentials. Generates a new temporary "
+            "password (returned once, never retrievable later); the old password, sessions "
+            "and reset links stop working; a password change is required at sign-in. 404 "
+            "if the user is not an active director of this company."
+        ),
+        request=None,
+        responses=OpenApiTypes.OBJECT,
+    )
+    def post(self, request: Request, company_id: UUID, user_id: UUID) -> Response:
+        login, password = platform_admin_service().issue_director_credentials(
+            self.actor(), company_id, user_id
+        )
+        return Response({"login": login, "temporary_password": password})
+
+
 class PlatformCompanySubscriptionView(_Platform):
     @extend_schema(
         operation_id="platform_companies_subscription_set",

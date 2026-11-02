@@ -9,7 +9,7 @@ managed by the director, or by a head of sales for their own department.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 from uuid import UUID
 
@@ -62,6 +62,9 @@ class PlanProgress:
     end: date
     actual: Decimal | None  # None: not computable from the records the CRM keeps
     percent: Decimal | None  # actual / target * 100, one decimal; None if target is 0
+    remaining: Decimal | None  # target - actual, never below 0; None without an actual
+    # Cumulative actual per day up to today (only when requested): (day, actual so far).
+    daily: tuple[tuple[date, Decimal], ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -172,7 +175,13 @@ class PlanningService:
         )
 
     def progress(
-        self, principal: Principal, filters: PlanFilter, *, limit: int, offset: int
+        self,
+        principal: Principal,
+        filters: PlanFilter,
+        *,
+        limit: int,
+        offset: int,
+        daily_until: date | None = None,
     ) -> ProgressPage:
         """Plan vs actual for the plans the caller may see (same scope rules as the list).
 
@@ -180,12 +189,28 @@ class PlanningService:
         their department's and its members', the director everything.
         """
         page = self.list_plans(principal, filters, limit=limit, offset=offset)
-        return ProgressPage(items=[self._progress(plan) for plan in page.items], total=page.total)
+        return ProgressPage(
+            items=[self._progress(plan, daily_until) for plan in page.items], total=page.total
+        )
 
-    def _progress(self, plan: Plan) -> PlanProgress:
+    def _actual(self, plan: Plan, start: date, end: date) -> Decimal | None:
+        if self._actuals is None:
+            return None
+        return self._actuals.actual(
+            plan.metric,
+            start,
+            end,
+            user_ids=self._contributors(plan),
+            currency=self._currency,
+            timezone=self._timezone,
+        )
+
+    def _progress(self, plan: Plan, daily_until: date | None = None) -> PlanProgress:
         start, end = period_dates(plan.metric, plan.period)
-        actual = (
-            self._actuals.actual(
+        actual = self._actual(plan, start, end)
+        daily: list[tuple[date, Decimal]] = []
+        if daily_until is not None and actual is not None and self._actuals is not None:
+            by_day = self._actuals.actual_by_day(
                 plan.metric,
                 start,
                 end,
@@ -193,15 +218,27 @@ class PlanningService:
                 currency=self._currency,
                 timezone=self._timezone,
             )
-            if self._actuals is not None
-            else None
-        )
+            running = Decimal(0)
+            day = start
+            while day <= min(end, daily_until):
+                running += by_day.get(day, Decimal(0))
+                daily.append((day, running))
+                day += timedelta(days=1)
         percent = (
             (actual / plan.target * 100).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)
             if actual is not None and plan.target > 0
             else None
         )
-        return PlanProgress(plan=plan, start=start, end=end, actual=actual, percent=percent)
+        remaining = max(plan.target - actual, Decimal(0)) if actual is not None else None
+        return PlanProgress(
+            plan=plan,
+            start=start,
+            end=end,
+            actual=actual,
+            percent=percent,
+            remaining=remaining,
+            daily=tuple(daily),
+        )
 
     def _contributors(self, plan: Plan) -> frozenset[UUID] | None:
         """Whose results count: the manager, the department's current members, or everyone."""

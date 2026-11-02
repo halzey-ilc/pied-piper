@@ -269,6 +269,26 @@ class PlatformAdminService:
             self._record(actor, action, company_id, changed)
         return self.company(actor, company_id)
 
+    def issue_director_credentials(
+        self, actor: PlatformActor, company_id: UUID, user_id: UUID
+    ) -> tuple[str, str]:
+        """Restore a director's access: a NEW temporary password (shown once), never the old one.
+
+        The previous password, signed-in sessions and unused reset links stop working; the
+        director must change the password at the next sign-in. Covers both a forgotten
+        password and lost initial credentials. Returns (login, temporary password).
+        """
+        _require(actor)
+        password = self._passwords()
+        with self._uow:
+            self.company(actor, company_id)
+            login = self._store.director_login(company_id, user_id)
+            if login is None:
+                raise NotFoundError("No active director with this id in the company.")
+            self._store.set_temporary_password(user_id, password)
+            self._record(actor, "platform.director_credentials_issued", company_id, ("password",))
+        return login, password
+
     def set_subscription(
         self, actor: PlatformActor, company_id: UUID, terms: Terms
     ) -> CompanyDetail:

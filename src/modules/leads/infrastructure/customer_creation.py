@@ -12,6 +12,7 @@ from uuid import UUID
 from modules.access_control.domain.rbac import Principal
 from modules.customers.application.service import CreateCustomer
 from modules.customers.composition import customer_service
+from modules.customers.domain.customer import CustomerArchivedError
 
 
 class CustomersCustomerCreation:
@@ -21,4 +22,10 @@ class CustomersCustomerCreation:
         customer = customer_service().create(
             principal, CreateCustomer(name=name, email=email, phone=phone)
         )
+        return customer.id
+
+    def existing(self, principal: Principal, customer_id: UUID) -> UUID:
+        customer = customer_service().get(principal, customer_id)  # 404 if not visible
+        if customer.is_archived:
+            raise CustomerArchivedError("The customer is archived; restore it first.")
         return customer.id

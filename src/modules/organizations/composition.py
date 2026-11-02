@@ -19,6 +19,7 @@ from modules.organizations.application.service import OrganizationService
 from modules.organizations.infrastructure.memberships import DjangoMemberDirectory
 from modules.organizations.infrastructure.models import Membership
 from modules.organizations.infrastructure.store import DjangoOrganizationStore
+from modules.sales_pipeline.composition import hand_over_open_deals
 from platform_core.application.context import require_tenant
 from shared.infrastructure.unit_of_work import DjangoUnitOfWork
 
@@ -29,20 +30,25 @@ def temporary_password() -> str:
 
 
 class _TaskHandover:
-    """WorkHandover adapter: the activities module moves the open tasks."""
+    """WorkHandover adapter: open tasks (activities) and open deals (sales) move together,
+    in one transaction of the company's database."""
 
     def __init__(self, tenant_id: UUID) -> None:
         self.tenant_id = tenant_id
 
     def hand_over(self, from_user: UUID, to_user: UUID, actor: UUID) -> int:
-
         members = DjangoMemberDirectory(self.tenant_id)
         recipient = members.active_member(to_user)
         if recipient is None:
-            # The intended recipient left meanwhile: the deciding director takes the tasks.
+            # The intended recipient left meanwhile: the deciding director takes the work.
             to_user, recipient = actor, members.active_member(actor)
+        # A recipient without a department (the director) keeps the records' own team, so
+        # the department's head of sales still sees them.
         team = recipient.department_id if recipient is not None else None
-        return hand_over_open_tasks(from_user, to_user, team, actor)
+        with DjangoUnitOfWork(require_tenant().db_alias):
+            tasks = hand_over_open_tasks(from_user, to_user, team, actor)
+            deals = hand_over_open_deals(from_user, to_user, team, actor)
+        return tasks + deals
 
 
 def organization_service() -> OrganizationService:

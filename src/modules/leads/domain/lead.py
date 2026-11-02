@@ -185,6 +185,17 @@ class Lead:
         self.version += 1
         return LeadDisqualified(lead_id=self.id)
 
+    def assign(self, owner_user_id: UUID, team_id: UUID | None) -> bool:
+        """Hand the lead to another responsible member (their department becomes its team)."""
+        if self.status is LeadStatus.CONVERTED:
+            raise LeadStateError("A converted lead is handled through its customer.")
+        if owner_user_id == self.owner_user_id and team_id == self.team_id:
+            return False
+        self.owner_user_id = owner_user_id
+        self.team_id = team_id
+        self.version += 1
+        return True
+
     def convert(self, customer_id: UUID) -> LeadConverted:
         if self.status is not LeadStatus.QUALIFIED:
             raise LeadStateError("Only a qualified lead can be converted.")

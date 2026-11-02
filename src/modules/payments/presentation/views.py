@@ -208,9 +208,13 @@ class PaymentMetricsView(_Scoped):
         summary="Sales metrics for a period",
         description=(
             "Distinct figures for a period (default: the current month in the company "
-            "timezone): sales_count (deals whose first payment fell in the period), turnover "
+            "timezone): sales_count (deals whose first payment fell in the period; each new "
+            "deal is a sale), new_clients (clients whose first payment ever fell in it), "
+            "turnover "
             "(their total value), received (money received, refunds subtracted) and debt "
-            "(outstanding on those deals). Never collapsed into one number."
+            "(outstanding on those deals). Never collapsed into one number. "
+            "`group_by=seller` adds `by_seller` (sales and new clients per seller) for any "
+            "period: day, week or month via `paid_from`/`paid_to`."
         ),
         parameters=[_TENANT_HEADER, _PAID_FROM, _PAID_TO],
         responses=SalesMetricsSerializer,
@@ -225,6 +229,7 @@ class PaymentMetricsView(_Scoped):
             paid_from=paid_from,
             paid_to=paid_to,
             currency=str(settings["currency"]),
+            by_seller=request.query_params.get("group_by") == "seller",
         )
         return Response(metrics_to_dict(metrics))
 

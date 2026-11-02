@@ -548,6 +548,11 @@ CELERY_BEAT_SCHEDULE = {
         "task": "reports.compute_daily_kpis",
         "schedule": crontab(hour=1, minute=0),
     },
+    # Working sessions nobody stopped become "unconfirmed" (no invented end time).
+    "settle-stale-work-sessions": {
+        "task": "reports.settle_stale_work_sessions",
+        "schedule": crontab(minute=7),
+    },
     # AI operations digests for users with findings; does nothing while AI is off.
     "daily-ai-operations-digests": {
         "task": "integrations.ai_daily_digests",

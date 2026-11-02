@@ -69,11 +69,14 @@ class PaymentFilter:
 class SalesMetrics:
     """Distinct sales figures for a period (spec §2.4), never collapsed into one."""
 
-    sales_count: int  # unique deals whose first payment fell in the period
+    sales_count: int  # SALES: deals whose first payment fell in the period (payments.sales)
+    new_clients: int  # clients whose first payment ever fell in the period (counted once)
     turnover: Decimal  # total value of those sold deals
     received: Decimal  # money actually received in the period (refunds subtracted)
     debt: Decimal  # outstanding on the sold deals (turnover minus their receipts)
     currency: str
+    # Per seller (only when requested): seller id -> (sales, new clients).
+    by_seller: dict[UUID, tuple[int, int]] | None = None
 
 
 class PaymentRepository(Protocol):
@@ -98,7 +101,20 @@ class PaymentRepository(Protocol):
     def sold_deal_ids(
         self, visibility: PaymentVisibility, paid_from: date, paid_to: date
     ) -> list[UUID]:
-        """Deals whose first non-refund payment fell within the range."""
+        """Sales: deals whose first non-refund payment fell within the range and that are
+        not fully refunded (each deal once)."""
+        ...
+
+    def new_clients_count(
+        self, visibility: PaymentVisibility, paid_from: date, paid_to: date
+    ) -> int:
+        """Clients whose first payment ever falls in the range (each client once)."""
+        ...
+
+    def per_seller(
+        self, visibility: PaymentVisibility, paid_from: date, paid_to: date
+    ) -> dict[UUID, tuple[int, int]]:
+        """Seller id -> (sales, new clients) for the range, same definitions as above."""
         ...
 
     def received_by_deal(self, deal_ids: list[UUID]) -> dict[UUID, Decimal]:

@@ -183,14 +183,24 @@ def test_company_onboarding_from_platform_to_manager(admin: APIClient, provision
         rops[name] = _sign_in(name, rop["temporary_password"], "acme")
     rop_north, rop_south = rops["rop.north"], rops["rop.south"]
 
-    # A head of sales cannot create accounts directly...
-    assert (
+    # A head of sales creates a manager of their own department directly...
+    direct = _ok(
         rop_north.post(
-            "/api/v1/staff/", {"first_name": "X", "role": "sales_rep"}, format="json"
-        ).status_code
-        == 403
+            "/api/v1/staff/",
+            {"first_name": "Aibek", "role": "sales_rep", "login": "aibek", "department_id": south},
+            format="json",
+        ),
+        201,
     )
-    # ...cannot ask for a director, another head of sales or an admin...
+    assert direct["member"]["department"]["id"] == north
+    # ...cannot create or ask for a director, another head of sales or an admin...
+    for role in ("director", "head_of_sales", "owner", "admin", "viewer"):
+        assert (
+            rop_north.post(
+                "/api/v1/staff/", {"first_name": "X", "role": role}, format="json"
+            ).status_code
+            == 403
+        )
     for role in ("director", "head_of_sales", "owner", "admin", "viewer"):
         asked = rop_north.post(
             "/api/v1/staff/requests/",
@@ -454,3 +464,57 @@ def test_a_connected_company_starts_with_the_standard_pipeline(
         (pipeline,) = DjangoPipelineRepository(tenant.db_alias).list_all()
     assert pipeline.is_default
     assert [s.kind.value for s in pipeline.stages][-2:] == ["won", "lost"]
+
+
+def test_platform_admin_issues_new_director_credentials(
+    admin: APIClient,
+    provisioner: None,
+    make_user: Callable[..., Any],
+    client_for: Callable[..., APIClient],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    created = _connect(admin, "acme")
+    company_id = created["company"]["id"]
+    first_password = created["director"]["temporary_password"]
+    director = _sign_in("dir.acme", first_password, "acme")
+    director_id = _ok(director.get("/api/v1/me/"))["id"]
+    refresh = (
+        APIClient()
+        .post(
+            "/api/v1/auth/token/", {"username": "dir.acme", "password": NEW_PASSWORD}, format="json"
+        )
+        .json()["refresh"]
+    )
+
+    url = f"/api/v1/platform/companies/{company_id}/directors/{director_id}/credentials/"
+    issued = _ok(admin.post(url))
+    assert issued["login"] == "dir.acme"
+    new_password = issued["temporary_password"]
+    assert new_password not in (first_password, NEW_PASSWORD)
+    user = get_user_model().objects.get(username="dir.acme")
+    assert user.must_change_password is True and user.check_password(new_password)
+    # Old passwords and the signed-in session no longer work; the secret is not logged.
+    for old in (first_password, NEW_PASSWORD):
+        denied = APIClient().post(
+            "/api/v1/auth/token/", {"username": "dir.acme", "password": old}, format="json"
+        )
+        assert denied.status_code == 401
+    stale = APIClient().post("/api/v1/auth/token/refresh/", {"refresh": refresh}, format="json")
+    assert stale.status_code == 401
+    assert new_password not in caplog.text
+    # The new temporary password works and must be changed first.
+    _sign_in("dir.acme", new_password, "acme")
+    card = _ok(admin.get(f"/api/v1/platform/companies/{company_id}/"))
+    assert "platform.director_credentials_issued" in {h["action"] for h in card["history"]}
+    assert new_password not in str(card)
+
+    # Only an active director of THIS company, only by the platform administrator.
+    other = make_user("someone", tenant=None)
+    assert (
+        admin.post(
+            f"/api/v1/platform/companies/{company_id}/directors/{other.id}/credentials/"
+        ).status_code
+        == 404
+    )
+    # A director is never a platform administrator.
+    assert client_for(user, None).post(url).status_code == 403

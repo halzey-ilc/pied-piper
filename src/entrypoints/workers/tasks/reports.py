@@ -2,6 +2,7 @@
 
 - ``reports.process_report`` renders one queued report off the request path.
 - ``reports.compute_daily_kpis`` snapshots today's KPIs for every active tenant.
+- ``reports.settle_stale_work_sessions`` marks forgotten working sessions unconfirmed.
 Both are thin adapters over application services.
 """
 
@@ -13,6 +14,7 @@ from uuid import UUID
 
 from celery import shared_task
 
+from modules.planning.composition import work_session_service
 from modules.reporting.composition import report_service
 from modules.sales_kpi.composition import snapshot_writer
 from modules.sales_kpi.domain.kpi import Period
@@ -43,3 +45,17 @@ def compute_daily_kpis() -> dict[str, int]:
             continue
         tenants += 1
     return {"tenants": tenants}
+
+
+@shared_task(base=ResilientTask, name="reports.settle_stale_work_sessions", ignore_result=True)
+def settle_stale_work_sessions() -> dict[str, int]:
+    """Working sessions nobody stopped become ``unconfirmed`` in every active tenant
+    (end unknown, never back-dated). Idempotent: an already settled session is skipped."""
+    settled = 0
+    for locator in tenant_directory().list_routable():
+        try:
+            with system_tenant_scope(locator.slug):
+                settled += work_session_service().expire_stale()
+        except Exception:
+            logger.exception("work_session_settle_failed", extra={"tenant_slug": locator.slug})
+    return {"settled": settled}

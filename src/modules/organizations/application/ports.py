@@ -5,6 +5,8 @@ from datetime import datetime
 from typing import Protocol
 from uuid import UUID
 
+from shared.domain.errors import ConflictError
+
 
 @dataclass(frozen=True, slots=True)
 class Company:
@@ -145,6 +147,12 @@ class OrganizationStore(Protocol):
         """Store a hash only and require a change at next sign-in."""
         ...
 
+    def active_head(
+        self, company_id: UUID, department_id: UUID, exclude_membership: UUID | None = None
+    ) -> UUID | None:
+        """Membership id of the department's active head of sales, if any."""
+        ...
+
     def add_request(self, company_id: UUID, request: NewStaffRequest) -> StaffRequestInfo: ...
 
     def staff_request(self, company_id: UUID, request_id: UUID) -> StaffRequestInfo | None: ...
@@ -169,8 +177,21 @@ class OrganizationStore(Protocol):
         ...
 
 
+class DepartmentHeadTakenError(ConflictError):
+    """A department has at most one active head of sales."""
+
+    code = "department_has_head"
+    default = (
+        "This department already has an active head of sales. "
+        "Create a separate department for a second one."
+    )
+
+    def __init__(self, message: str | None = None) -> None:
+        super().__init__(message or self.default)
+
+
 class WorkHandover(Protocol):
-    """Hands a deactivated member's open tasks to another member (company database)."""
+    """Hands a deactivated member's open tasks and open deals to another member."""
 
     def hand_over(self, from_user: UUID, to_user: UUID, actor: UUID) -> int: ...
 

@@ -88,7 +88,12 @@ class PaymentRecordListSerializer(serializers.Serializer[dict[str, Any]]):
 
 
 class SalesMetricsSerializer(serializers.Serializer[dict[str, Any]]):
-    sales_count = serializers.IntegerField(read_only=True)
+    sales_count = serializers.IntegerField(
+        read_only=True, help_text="Deals whose first payment fell in the period"
+    )
+    new_clients = serializers.IntegerField(
+        read_only=True, help_text="Clients whose first payment ever fell in the period"
+    )
     turnover = serializers.DecimalField(max_digits=18, decimal_places=2, read_only=True)
     received = serializers.DecimalField(max_digits=18, decimal_places=2, read_only=True)
     debt = serializers.DecimalField(max_digits=18, decimal_places=2, read_only=True)
@@ -115,10 +120,23 @@ def payment_to_dict(payment: Payment) -> dict[str, Any]:
 def metrics_to_dict(metrics: SalesMetrics) -> dict[str, Any]:
     return {
         "sales_count": metrics.sales_count,
+        "new_clients": metrics.new_clients,
         "turnover": str(metrics.turnover),
         "received": str(metrics.received),
         "debt": str(metrics.debt),
         "currency": metrics.currency,
+        **(
+            {
+                "by_seller": [
+                    {"seller_user_id": str(seller), "sales_count": sales, "new_clients": clients}
+                    for seller, (sales, clients) in sorted(
+                        metrics.by_seller.items(), key=lambda item: str(item[0])
+                    )
+                ]
+            }
+            if metrics.by_seller is not None
+            else {}
+        ),
     }
 
 

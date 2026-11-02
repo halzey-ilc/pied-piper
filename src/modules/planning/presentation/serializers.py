@@ -131,4 +131,7 @@ def progress_to_dict(progress: PlanProgress, currency: str) -> dict[str, Any]:
         "currency": currency if unit == "money" else None,
         "actual": str(progress.actual) if progress.actual is not None else None,
         "percent": str(progress.percent) if progress.percent is not None else None,
+        "remaining": str(progress.remaining) if progress.remaining is not None else None,
+        # Only with ?daily=true: cumulative actual per day, up to today.
+        "daily": [{"date": d.isoformat(), "actual": str(v)} for d, v in progress.daily],
     }

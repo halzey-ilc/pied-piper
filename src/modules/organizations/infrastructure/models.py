@@ -50,6 +50,9 @@ class Department(models.Model):
         return self.name
 
 
+HEAD_OF_SALES_ROLES = (Role.HEAD_OF_SALES.value, Role.MANAGER.value)
+
+
 class Membership(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = models.ForeignKey(
@@ -74,6 +77,13 @@ class Membership(models.Model):
             # One person, one company: a second company needs a separate account.
             models.UniqueConstraint(
                 fields=["user"], condition=Q(is_active=True), name="membership_one_active_per_user"
+            ),
+            # One active head of sales per department ("manager" is the legacy value of
+            # the same role). Enforced by the database, so concurrent requests cannot race.
+            models.UniqueConstraint(
+                fields=["department"],
+                condition=Q(is_active=True, role__in=HEAD_OF_SALES_ROLES),
+                name="membership_one_active_head_per_department",
             ),
         ]
         indexes = [models.Index(fields=["organization", "department"], name="membership_dept_idx")]

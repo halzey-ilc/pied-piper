@@ -93,3 +93,16 @@ class PlanActuals(Protocol):
         currency: str,
         timezone: str,
     ) -> Decimal | None: ...
+
+    def actual_by_day(
+        self,
+        metric: PlanMetric,
+        start: date,
+        end: date,
+        *,
+        user_ids: frozenset[UUID] | None,
+        currency: str,
+        timezone: str,
+    ) -> dict[date, Decimal]:
+        """The same result split by the day it happened (one pass, for daily progress)."""
+        ...

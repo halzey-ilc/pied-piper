@@ -102,6 +102,8 @@ class DjangoMeetingRepository:
             qs = qs.filter(scheduled_start__gte=filters.starts_after)
         if filters.starts_before is not None:
             qs = qs.filter(scheduled_start__lt=filters.starts_before)
+        if filters.owner_user_id is not None:
+            qs = qs.filter(owner_user_id=filters.owner_user_id)
         return qs
 
     def add(self, meeting: Meeting) -> None:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, time, timedelta
+from zoneinfo import ZoneInfo
 
 from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import OpenApiExample, OpenApiParameter, extend_schema
@@ -8,7 +9,9 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 
 from modules.access_control.domain.rbac import Principal, Role
-from modules.sales_kpi.composition import analytics_service
+from modules.organizations.composition import company_settings
+from modules.sales_kpi.application.crm_counts import GroupBy
+from modules.sales_kpi.composition import analytics_service, crm_counts_service
 from modules.sales_kpi.domain.kpi import Period
 from platform_core.presentation.tenancy import TenantScopedAPIView
 from shared.domain.errors import DomainValidationError
@@ -134,6 +137,67 @@ class KpiHistoryView(_Scoped):
                         "computed_at": s.computed_at.isoformat(),
                     }
                     for s in snapshots
+                ],
+            }
+        )
+
+
+class CrmCountsView(_Scoped):
+    @extend_schema(
+        tags=_TAGS,
+        operation_id="analytics_crm_counts",
+        summary="Lead and customer counts",
+        description=(
+            "Totals and records created in the period, separately for leads and customers "
+            "(never summed): `group_by=company` (default), `department` (record team) or "
+            "`user` (responsible member). Scope follows the caller's role: the director "
+            "counts the company, a head of sales their own and their department's records, "
+            "a manager their own. Period: `date_from`/`date_to` (company-local days, "
+            "inclusive; default: the current month). `customers_active` excludes archived."
+        ),
+        parameters=[
+            _TENANT_HEADER,
+            OpenApiParameter("date_from", str, description="YYYY-MM-DD"),
+            OpenApiParameter("date_to", str, description="YYYY-MM-DD"),
+            OpenApiParameter("group_by", str, description="company | department | user"),
+        ],
+        responses=OpenApiTypes.OBJECT,
+    )
+    def get(self, request: Request) -> Response:
+        q = request.query_params
+        zone = ZoneInfo(company_settings(self.membership.tenant_id)["timezone"])
+        today = datetime.now(zone).date()
+        try:
+            start = (
+                date.fromisoformat(q["date_from"]) if q.get("date_from") else today.replace(day=1)
+            )
+            end = date.fromisoformat(q["date_to"]) if q.get("date_to") else today
+            group_by = GroupBy(q.get("group_by") or "company")
+        except ValueError as exc:
+            raise DomainValidationError(
+                "Dates are YYYY-MM-DD; group_by is company, department or user."
+            ) from exc
+        rows = crm_counts_service().counts(
+            self.principal(),
+            since=datetime.combine(start, time.min, tzinfo=zone),
+            until=datetime.combine(end + timedelta(days=1), time.min, tzinfo=zone),
+            group_by=group_by,
+        )
+        return Response(
+            {
+                "date_from": start.isoformat(),
+                "date_to": end.isoformat(),
+                "group_by": group_by.value,
+                "results": [
+                    {
+                        "group_id": str(r.group_id) if r.group_id else None,
+                        "leads_total": r.leads_total,
+                        "leads_new": r.leads_new,
+                        "customers_total": r.customers_total,
+                        "customers_active": r.customers_active,
+                        "customers_new": r.customers_new,
+                    }
+                    for r in rows
                 ],
             }
         )

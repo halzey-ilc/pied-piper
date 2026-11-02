@@ -87,6 +87,14 @@ def company(
     tenants: dict[str, TenantFixture],
     client_for: Callable[..., APIClient],
 ) -> dict[str, Any]:
+    return two_department_company(make_user, tenants, client_for)
+
+
+def two_department_company(
+    make_user: Callable[..., Any],
+    tenants: dict[str, TenantFixture],
+    client_for: Callable[..., APIClient],
+) -> dict[str, Any]:
     """acme: a director, departments North and South (a head of sales and a manager
     each), a viewer, the standard pipeline."""
     acme = tenants["acme"]
@@ -518,7 +526,7 @@ def test_scenario_f_subscription_access_and_confirmed_revenue(
 # --- G: offboarding -----------------------------------------------------------------------------
 
 
-def test_scenario_g_dismissal_keeps_history_and_hands_over_open_tasks(
+def test_scenario_g_dismissal_keeps_history_and_hands_over_open_work(
     company: dict[str, Any],
 ) -> None:
     c, users = company["c"], company["users"]
@@ -529,6 +537,16 @@ def test_scenario_g_dismissal_keeps_history_and_hands_over_open_tasks(
     open_b = _ok(_task(c["rep_north"], other_deal["id"], "Send contract"), 201)
     done = _ok(_task(c["rep_north"], other_deal["id"], "Intro call"), 201)
     _ok(c["rep_north"].post(f"/api/v1/activities/{done['id']}/complete/"))
+    won = _deal(c["rep_north"], "Already won")
+    _ok(c["rep_north"].post(f"/api/v1/sales/deals/{won['id']}/win/"))
+    note = _ok(
+        c["rep_north"].post(
+            "/api/v1/activities/",
+            {"kind": "note", "subject_type": "deal", "subject_id": deal["id"], "body": "Met"},
+            format="json",
+        ),
+        201,
+    )
 
     membership = Membership.objects.get(user=rep)
     request = _ok(
@@ -560,19 +578,18 @@ def test_scenario_g_dismissal_keeps_history_and_hands_over_open_tasks(
     for task_id in (open_a["id"], open_b["id"]):
         assert rows.get(id=task_id).assignee_user_id == rop.id  # handed to the requester
     assert rows.get(id=done["id"]).assignee_user_id == rep.id  # history unchanged
-    kept = _ok(c["director"].get(f"/api/v1/sales/deals/{deal['id']}/"))
+    assert rows.get(id=note["id"]).owner_user_id == rep.id  # authorship unchanged
+    # Open deals go to the requester (audited); a closed deal keeps its owner.
+    for open_deal in (deal, other_deal):
+        moved = _ok(c["director"].get(f"/api/v1/sales/deals/{open_deal['id']}/"))
+        assert moved["owner_user_id"] == str(rop.id)
+        history = _ok(c["director"].get(f"/api/v1/sales/deals/{open_deal['id']}/history/"))
+        assert history["results"][0]["action"] == "deal.reassigned"
+    kept = _ok(c["director"].get(f"/api/v1/sales/deals/{won['id']}/"))
     assert kept["owner_user_id"] == str(rep.id)
-    # The director hands the deal over explicitly.
-    _ok(
-        c["director"].post(
-            f"/api/v1/sales/deals/{deal['id']}/assign/",
-            {"owner_user_id": str(rop.id)},
-            format="json",
-        )
-    )
     # Nobody hands work to the deactivated member any more.
     refused = c["director"].post(
-        f"/api/v1/sales/deals/{other_deal['id']}/assign/",
+        f"/api/v1/sales/deals/{deal['id']}/assign/",
         {"owner_user_id": str(rep.id)},
         format="json",
     )

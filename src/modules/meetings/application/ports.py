@@ -22,6 +22,7 @@ class MeetingFilter:
     subject_id: UUID | None = None
     starts_after: datetime | None = None
     starts_before: datetime | None = None
+    owner_user_id: UUID | None = None  # the responsible member (host)
 
 
 class MeetingRepository(Protocol):

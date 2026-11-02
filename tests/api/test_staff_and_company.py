@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from typing import Any
+from uuid import UUID
 
 import pytest
 from django.contrib.auth import get_user_model
@@ -122,31 +123,32 @@ def test_head_of_sales_manages_only_their_department(
     hos.save()
     hos_client = client_for(hos, "acme")
 
-    # Hiring is the director's decision: a head of sales cannot create accounts at all.
-    for role in ("sales_rep", "director", "head_of_sales"):
+    # A head of sales creates managers of their own department directly, never higher roles.
+    for role in ("director", "head_of_sales", "owner", "admin", "viewer"):
         assert (
             hos_client.post(
                 "/api/v1/staff/", {"first_name": "X", "role": role}, format="json"
             ).status_code
             == 403
         )
-    # ...only request a hire into their own department, which the director approves.
     options = _ok(hos_client.get("/api/v1/staff/create-options/"))
-    assert options["mode"] == "request"
+    assert options["mode"] == "request" and options["can_create_directly"] is True
     assert options["fixed_department_id"] == sales
     assert set(options["creatable_roles"]) == {"sales_rep", "lead_caller"}
-    rep = _create(director, first_name="Rep", role="sales_rep", department_id=sales)
+    # A department sent by the head of sales is ignored: the manager joins their own.
+    rep = _create(hos_client, first_name="Rep", role="sales_rep", department_id=other)
+    assert rep["member"]["department"]["id"] == sales
+    assert _user(rep).check_password(rep["temporary_password"])
+    assert _user(rep).must_change_password is True
 
     outsider = _create(director, first_name="Out", role="sales_rep", department_id=other)
     visible = {m["id"] for m in _ok(hos_client.get("/api/v1/staff/"))["results"]}
     assert rep["member"]["id"] in visible and outsider["member"]["id"] not in visible
-    # Dismissal is the director's decision too, inside or outside the department.
-    for member in (rep, outsider):
-        assert (
-            hos_client.post(f"/api/v1/staff/{member['member']['id']}/deactivate/").status_code
-            == 403
-        )
-    assert _user(rep).memberships.get().is_active
+    # Another department's people and the head of sales' peers are out of reach.
+    assert (
+        hos_client.post(f"/api/v1/staff/{outsider['member']['id']}/deactivate/").status_code == 404
+    )
+    assert _user(outsider).memberships.get().is_active
     # Moving between departments is the director's call.
     move = hos_client.patch(
         f"/api/v1/staff/{rep['member']['id']}/", {"department_id": other}, format="json"
@@ -155,6 +157,9 @@ def test_head_of_sales_manages_only_their_department(
 
     reset = _ok(hos_client.post(f"/api/v1/staff/{rep['member']['id']}/reset-password/"))
     assert _user(rep).check_password(reset["temporary_password"])
+    # ...and dismisses a manager of their own department directly.
+    _ok(hos_client.post(f"/api/v1/staff/{rep['member']['id']}/deactivate/"))
+    assert not _user(rep).memberships.get().is_active
 
 
 def test_deactivation_blocks_access_and_keeps_history(
@@ -340,3 +345,67 @@ def test_backfill_gives_old_records_their_department(
     Membership.objects.filter(user=rep).update(department=dept)
     call_command("assign_record_teams", "--tenant", "acme")
     assert DealRecord.objects.using("tenant_acme").get(id=old["id"]).team_id == dept.id
+
+
+def test_one_active_head_of_sales_per_department(
+    make_user: Callable[..., Any],
+    tenants: dict[str, TenantFixture],
+    client_for: Callable[..., APIClient],
+) -> None:
+    director = client_for(make_user("owner", tenant=tenants["acme"]), "acme")
+    sales, other = _department(director, "Sales"), _department(director, "Other")
+    head = _create(director, first_name="Head", role="head_of_sales", department_id=sales)
+
+    second = director.post(
+        "/api/v1/staff/",
+        {"first_name": "Second", "role": "head_of_sales", "department_id": sales},
+        format="json",
+    )
+    assert second.status_code == 409
+    assert second.json()["error"]["code"] == "department_has_head"
+    assert "separate department" in second.json()["error"]["message"]
+
+    # Promotion and transfer are refused the same way.
+    rep = _create(director, first_name="Rep", role="sales_rep", department_id=sales)
+    promote = director.patch(
+        f"/api/v1/staff/{rep['member']['id']}/", {"role": "head_of_sales"}, format="json"
+    )
+    assert promote.status_code == 409
+    other_head = _create(director, first_name="Other", role="head_of_sales", department_id=other)
+    move = director.patch(
+        f"/api/v1/staff/{other_head['member']['id']}/", {"department_id": sales}, format="json"
+    )
+    assert move.status_code == 409
+    # Re-saving the current head is not a conflict with itself.
+    _ok(
+        director.patch(
+            f"/api/v1/staff/{head['member']['id']}/", {"department_id": sales}, format="json"
+        )
+    )
+    # Once the head leaves, the department can get a new one.
+    _ok(director.post(f"/api/v1/staff/{head['member']['id']}/deactivate/"))
+    _ok(
+        director.patch(
+            f"/api/v1/staff/{rep['member']['id']}/", {"role": "head_of_sales"}, format="json"
+        )
+    )
+
+
+def test_the_database_refuses_a_second_head_even_when_the_check_is_raced(
+    make_user: Callable[..., Any],
+    tenants: dict[str, TenantFixture],
+    client_for: Callable[..., APIClient],
+) -> None:
+    """Two requests that both pass the service check: the constraint decides."""
+    from modules.organizations.application.ports import DepartmentHeadTakenError
+    from modules.organizations.infrastructure.store import DjangoOrganizationStore
+
+    director = client_for(make_user("owner", tenant=tenants["acme"]), "acme")
+    sales = _department(director, "Sales")
+    _create(director, first_name="Head", role="head_of_sales", department_id=sales)
+    rep = _create(director, first_name="Rep", role="sales_rep", department_id=sales)
+    with pytest.raises(DepartmentHeadTakenError):
+        DjangoOrganizationStore().update_member(
+            tenants["acme"].org.id, UUID(rep["member"]["id"]), role="head_of_sales"
+        )
+    assert Membership.objects.get(id=rep["member"]["id"]).role == "sales_rep"

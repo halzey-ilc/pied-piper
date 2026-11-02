@@ -10,7 +10,6 @@ from django.db.models import (
     Case,
     DecimalField,
     F,
-    Min,
     Q,
     QuerySet,
     Sum,
@@ -20,6 +19,7 @@ from django.db.models import (
 from modules.payments.application.ports import PaymentFilter, PaymentVisibility
 from modules.payments.domain.payment import Payment, PaymentKind
 from modules.payments.infrastructure.models import PaymentRecord
+from modules.payments.infrastructure.sales import deal_sales, new_clients
 from shared.domain.value_objects import Money
 
 # Signed amount: a refund subtracts from received money.
@@ -126,17 +126,40 @@ class DjangoPaymentRepository:
         total = qs.aggregate(total=Sum(_SIGNED))["total"]
         return total if total is not None else Decimal(0)
 
+    @staticmethod
+    def _restrict(visibility: PaymentVisibility) -> Q | None:
+        if visibility.owner_user_id is None:
+            return None
+        restrict = Q(owner_user_id=visibility.owner_user_id)
+        if visibility.team_ids:
+            restrict |= Q(team_id__in=visibility.team_ids)
+        return restrict
+
     def sold_deal_ids(
         self, visibility: PaymentVisibility, paid_from: date, paid_to: date
     ) -> list[UUID]:
-        rows = (
-            self._visible(visibility)
-            .filter(is_refund=False, deal_id__isnull=False)
-            .values("deal_id")
-            .annotate(first_paid=Min("paid_on"))
-            .filter(first_paid__gte=paid_from, first_paid__lte=paid_to)
-        )
-        return [row["deal_id"] for row in rows]
+        """Sales of the range (payments.infrastructure.sales.deal_sales)."""
+        sales = deal_sales(self.using, paid_from, paid_to, restrict=self._restrict(visibility))
+        return [sale.deal_id for sale in sales]
+
+    def new_clients_count(
+        self, visibility: PaymentVisibility, paid_from: date, paid_to: date
+    ) -> int:
+        """Clients whose first payment ever falls in the range (counted once)."""
+        return len(new_clients(self.using, paid_from, paid_to, restrict=self._restrict(visibility)))
+
+    def per_seller(
+        self, visibility: PaymentVisibility, paid_from: date, paid_to: date
+    ) -> dict[UUID, tuple[int, int]]:
+        restrict = self._restrict(visibility)
+        out: dict[UUID, tuple[int, int]] = {}
+        for sale in deal_sales(self.using, paid_from, paid_to, restrict=restrict):
+            sales, clients = out.get(sale.seller_user_id, (0, 0))
+            out[sale.seller_user_id] = (sales + 1, clients)
+        for client in new_clients(self.using, paid_from, paid_to, restrict=restrict):
+            sales, clients = out.get(client.seller_user_id, (0, 0))
+            out[client.seller_user_id] = (sales, clients + 1)
+        return out
 
     def received_by_deal(self, deal_ids: list[UUID]) -> dict[UUID, Decimal]:
         if not deal_ids:

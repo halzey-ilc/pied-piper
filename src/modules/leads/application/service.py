@@ -13,20 +13,24 @@ from modules.access_control.domain.rbac import (
     Principal,
     ResourceOwnership,
     Scope,
+    check_assignable,
 )
-from modules.audit.application.ports import AuditLog
+from modules.audit.application.ports import AuditLog, AuditTrail
 from modules.audit.domain.entry import AuditEntry
 from modules.leads.application.ports import (
+    LEAD_ORDERING,
     CustomerCreation,
     DuplicateCandidate,
     DuplicateFinder,
+    LeadFilter,
     LeadRepository,
     LeadVisibility,
+    MemberDirectory,
 )
 from modules.leads.domain.lead import Lead, LeadSource, LeadStatus
 from platform_core.application.ports import EventOutbox
 from shared.application.ports import UnitOfWork
-from shared.domain.errors import ConflictError, NotFoundError
+from shared.domain.errors import ConflictError, DomainValidationError, NotFoundError
 
 AGGREGATE = "lead"
 
@@ -74,8 +78,12 @@ class LeadService:
         audit: AuditLog,
         customers: CustomerCreation,
         duplicates: DuplicateFinder | None = None,
+        members: MemberDirectory | None = None,
+        trail: AuditTrail | None = None,
         policy: AccessPolicy | None = None,
     ) -> None:
+        self._members = members
+        self._trail = trail
         self._repo = repository
         self._uow = uow
         self._outbox = outbox
@@ -95,14 +103,49 @@ class LeadService:
         return lead
 
     def list_leads(
-        self, principal: Principal, *, status: LeadStatus | None, limit: int, offset: int
+        self,
+        principal: Principal,
+        *,
+        status: LeadStatus | None = None,
+        limit: int,
+        offset: int,
+        filters: LeadFilter | None = None,
     ) -> LeadPage:
         scope = self._policy.require(principal, Permission.LEADS_VIEW)
         visibility = self._visibility(principal, scope)
+        filters = filters or LeadFilter(status=status)
+        if filters.ordering and filters.ordering.lstrip("-") not in LEAD_ORDERING:
+            raise DomainValidationError(
+                f"ordering must be one of {sorted(LEAD_ORDERING)} (optionally with '-')."
+            )
         return LeadPage(
-            items=self._repo.list_visible(visibility, status=status, limit=limit, offset=offset),
-            total=self._repo.count(visibility, status=status),
+            items=self._repo.list_visible(visibility, filters, limit=limit, offset=offset),
+            total=self._repo.count(visibility, filters),
         )
+
+    def history(self, principal: Principal, lead_id: UUID) -> list[AuditEntry]:
+        """Audited changes of the lead (field names only), newest first; kept after conversion."""
+        self.get(principal, lead_id)
+        return [] if self._trail is None else self._trail.entries_for(AGGREGATE, str(lead_id))
+
+    def assign(self, principal: Principal, lead_id: UUID, owner_user_id: UUID) -> Lead:
+        """Hand a lead to another member: a manager cannot, a head of sales within their
+        department, a director to any active member of the company."""
+        with self._uow:
+            lead = self.get(principal, lead_id)
+            scope = self._policy.require(principal, Permission.LEADS_UPDATE, _ownership(lead))
+            member = (
+                self._members.active_member(owner_user_id)
+                if self._members is not None and owner_user_id != principal.user_id
+                else None
+            )
+            check_assignable(principal, scope, owner_user_id, member, what="leads")
+            team_id = member.department_id if member is not None else principal.department_id
+            version = lead.version
+            if lead.assign(owner_user_id, team_id):
+                self._repo.save(lead, expected_version=version)
+                self._record(principal, "lead.reassigned", lead, ("owner",))
+        return lead
 
     def find_duplicates(self, principal: Principal, lead_id: UUID) -> list[DuplicateCandidate]:
         """Candidate duplicates (other leads and existing customers) that share this
@@ -148,9 +191,20 @@ class LeadService:
             lead = self._load_for_write(principal, command.lead_id, Permission.LEADS_UPDATE)
             self._check_version(lead, command.expected_version)
             version = lead.version
+            before = (lead.name, lead.email, lead.phone)
             if lead.update_details(name=command.name, email=command.email, phone=command.phone):
                 self._repo.save(lead, expected_version=version)
-                self._record(principal, "lead.updated", lead)
+                changed = tuple(
+                    name
+                    for name, old, new in zip(
+                        ("name", "email", "phone"),
+                        before,
+                        (lead.name, lead.email, lead.phone),
+                        strict=True,
+                    )
+                    if old != new
+                )
+                self._record(principal, "lead.updated", lead, changed)
         return lead
 
     def qualify(self, principal: Principal, lead_id: UUID) -> Lead:
@@ -173,23 +227,30 @@ class LeadService:
             self._record(principal, "lead.disqualified", lead)
         return lead
 
-    def convert(self, principal: Principal, lead_id: UUID) -> ConversionResult:
-        """Convert a qualified lead into a customer. Idempotent: a lead already
-        converted returns its existing customer id without creating a duplicate.
+    def convert(
+        self, principal: Principal, lead_id: UUID, customer_id: UUID | None = None
+    ) -> ConversionResult:
+        """Convert a qualified lead into a NEW customer, or link it to an EXISTING one
+        (``customer_id``: a confirmed duplicate, a returning client) without creating a
+        second card. Idempotent: a lead already converted returns its customer and does
+        nothing else. The lead and its history stay (status ``converted``).
 
-        The customer is created through the customers context on the same tenant
-        database, so both writes commit together (nested transaction)."""
+        Writes go through the customers context on the same tenant database, so the
+        customer and the converted lead commit together (nested transaction)."""
         with self._uow:
             lead = self._load_for_write(principal, lead_id, Permission.LEADS_CONVERT)
             if lead.status is LeadStatus.CONVERTED and lead.converted_customer_id is not None:
                 return ConversionResult(lead, lead.converted_customer_id, already_converted=True)
             version = lead.version
-            customer_id = self._customers.create(
-                principal,
-                name=lead.name,
-                email=str(lead.email) if lead.email else None,
-                phone=str(lead.phone) if lead.phone else None,
-            )
+            if customer_id is not None:
+                customer_id = self._customers.existing(principal, customer_id)
+            else:
+                customer_id = self._customers.create(
+                    principal,
+                    name=lead.name,
+                    email=str(lead.email) if lead.email else None,
+                    phone=str(lead.phone) if lead.phone else None,
+                )
             event = lead.convert(customer_id)
             self._repo.save(lead, expected_version=version)
             self._outbox.add(event, aggregate_type=AGGREGATE, aggregate_id=str(lead.id))
@@ -207,12 +268,15 @@ class LeadService:
         if expected_version is not None and expected_version != lead.version:
             raise ConflictError("Lead was modified by someone else; reload and retry.")
 
-    def _record(self, principal: Principal, action: str, lead: Lead) -> None:
+    def _record(
+        self, principal: Principal, action: str, lead: Lead, fields: tuple[str, ...] = ()
+    ) -> None:
         self._audit.record(
             AuditEntry(
                 actor_user_id=principal.user_id,
                 action=action,
                 resource_type=AGGREGATE,
                 resource_id=str(lead.id),
+                changed_fields=fields,
             )
         )
