@@ -49,6 +49,15 @@ _TENANT_HEADER = OpenApiParameter(
     description="Short name (slug) of your company, e.g. `demo`. Get it from GET /api/v1/me/.",
     examples=[OpenApiExample("Demo tenant", value="demo")],
 )
+_OUTCOME_REQUIRED = OpenApiParameter(
+    "outcome_required",
+    bool,
+    OpenApiParameter.QUERY,
+    description="true: scheduled meetings that have already ended, i.e. still need an outcome.",
+)
+_SEARCH = OpenApiParameter(
+    "search", str, OpenApiParameter.QUERY, description="Text in the title, description or location."
+)
 _STATUS = OpenApiParameter(
     "status",
     str,
@@ -127,6 +136,8 @@ class MeetingListCreateView(_Scoped):
             _SUBJECT_TYPE,
             _SUBJECT_ID,
             _UPCOMING,
+            _OUTCOME_REQUIRED,
+            _SEARCH,
             _LIMIT,
             _OFFSET,
         ],
@@ -174,6 +185,8 @@ class MeetingListCreateView(_Scoped):
             ),
             starts_before=starts_to,
             owner_user_id=owner,
+            ended_before=datetime.now(UTC) if q.get("outcome_required") == "true" else None,
+            search=(q.get("search") or "").strip()[:100] or None,
         )
         page = meeting_service().list_meetings(
             self.principal(), filters, limit=limit, offset=offset

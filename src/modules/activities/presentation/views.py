@@ -77,6 +77,9 @@ _TASK_STATUS = OpenApiParameter(
     description="Filter tasks by status.",
     enum=[s.value for s in TaskStatus],
 )
+_SEARCH = OpenApiParameter(
+    "search", str, OpenApiParameter.QUERY, description="Text in the title or body."
+)
 _LIMIT = OpenApiParameter(
     "limit", int, OpenApiParameter.QUERY, description="Page size 1-200 (default 50)."
 )
@@ -123,6 +126,7 @@ class ActivityListCreateView(_Scoped):
             _SUBJECT_TYPE,
             _SUBJECT_ID,
             _TASK_STATUS,
+            _SEARCH,
             _LIMIT,
             _OFFSET,
         ],
@@ -147,6 +151,7 @@ class ActivityListCreateView(_Scoped):
                 due_to=date.fromisoformat(q["due_to"]) if q.get("due_to") else None,
                 overdue_before=today if q.get("overdue") == "true" else None,
                 no_due_date=q.get("no_due_date") == "true",
+                search=(q.get("search") or "").strip()[:100] or None,
             )
         except ValueError as exc:
             raise DomainValidationError("assignee_id must be a UUID, dates YYYY-MM-DD.") from exc

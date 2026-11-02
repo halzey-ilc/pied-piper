@@ -80,6 +80,8 @@ class DjangoActivityRepository:
             qs = qs.filter(kind="task", task_status="open", due_date__lt=filters.overdue_before)
         if filters.no_due_date:
             qs = qs.filter(kind="task", due_date__isnull=True)
+        if filters.search:
+            qs = qs.filter(Q(title__icontains=filters.search) | Q(body__icontains=filters.search))
         return qs
 
     def add(self, activity: Activity) -> None:

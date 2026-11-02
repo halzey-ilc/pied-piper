@@ -37,6 +37,8 @@ class ActivityFilter:
     overdue_before: date | None = None
     # Tasks without a due date (the "no deadline" group).
     no_due_date: bool = False
+    # Case-insensitive text in the title or body.
+    search: str | None = None
 
 
 class ActivityRepository(Protocol):

@@ -298,7 +298,7 @@ class DealService:
             deal = self._load_for_write(principal, deal_id)
             version = deal.version
             from_stage = deal.stage_id
-            event = deal.reopen(deal.stage_id)
+            event = deal.reopen(self._reopen_stage(deal))
             self._deals.save(deal, expected_version=version)
             self._record_stage_change(principal, deal, from_stage)
             self._emit(event, deal)
@@ -306,6 +306,24 @@ class DealService:
         return deal
 
     # --- helpers ------------------------------------------------------------
+
+    def _reopen_stage(self, deal: Deal) -> UUID:
+        """Where a reopened deal continues: the last open stage it was on (by stage history),
+        else the first active open stage of its pipeline. A closed deal stands on a won/lost
+        stage; leaving it there would show an open deal as "lost"."""
+        pipeline = self._pipelines.get(deal.pipeline_id)
+        if pipeline is None:
+            return deal.stage_id
+        ordered = sorted(pipeline.stages, key=lambda s: s.position)
+        open_ids = [s.id for s in ordered if s.kind is StageKind.OPEN and s.is_active]
+        if deal.stage_id in open_ids:
+            return deal.stage_id
+        history = self._stage_changes.list_for_deal(deal.id) if self._stage_changes else []
+        for change in reversed(history):
+            for candidate in (change.to_stage_id, change.from_stage_id):
+                if candidate in open_ids:
+                    return candidate
+        return open_ids[0] if open_ids else deal.stage_id
 
     def _close(
         self,

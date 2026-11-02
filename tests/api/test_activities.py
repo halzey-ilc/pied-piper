@@ -447,3 +447,25 @@ def test_director_assigns_across_teams_with_several_heads_of_sales(
 
     assert _assign(director_client, cid, rep1).status_code == 201
     assert _assign(director_client, cid, rep2).status_code == 201
+
+
+def test_search_tasks_by_text(
+    make_user: Callable[..., Any],
+    tenants: dict[str, TenantFixture],
+    client_for: Callable[..., APIClient],
+) -> None:
+    client = client_for(make_user("owner", tenant=tenants["acme"]), "acme")
+    cid = _customer(client)
+    _log(client, kind="task", subject_type="customer", subject_id=cid, title="Send the contract")
+    _log(
+        client,
+        kind="task",
+        subject_type="customer",
+        subject_id=cid,
+        title="Call back",
+        body="Ask about the CONTRACT",
+    )
+    _log(client, kind="task", subject_type="customer", subject_id=cid, title="Unrelated")
+    found = client.get("/api/v1/activities/?kind=task&search=contract").json()
+    assert found["count"] == 2
+    assert {a["title"] for a in found["results"]} == {"Send the contract", "Call back"}

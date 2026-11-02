@@ -229,3 +229,40 @@ def test_cross_tenant_isolation(
     assert client_for(alice, "acme").get(f"/api/v1/meetings/{bob_meeting}/").status_code == 404
     assert MeetingRecord.objects.using("tenant_globex").get().title == "Globex mtg"
     assert MeetingRecord.objects.using("tenant_acme").count() == 0
+
+
+def test_outcome_required_and_search_filters(
+    make_user: Callable[..., Any],
+    tenants: dict[str, TenantFixture],
+    client_for: Callable[..., APIClient],
+) -> None:
+    client = client_for(make_user("owner", tenant=tenants["acme"]), "acme")
+    past = _schedule(
+        client,
+        title="Demo for Acme",
+        scheduled_start="2020-01-01T10:00:00Z",
+        scheduled_end="2020-01-01T11:00:00Z",
+    ).json()
+    held = _schedule(
+        client,
+        title="Held one",
+        scheduled_start="2020-01-02T10:00:00Z",
+        scheduled_end="2020-01-02T11:00:00Z",
+    ).json()
+    assert (
+        client.post(
+            f"/api/v1/meetings/{held['id']}/outcome/", {"outcome": "held"}, format="json"
+        ).status_code
+        == 200
+    )
+    future = _schedule(client, title="Future call").json()
+
+    pending = client.get("/api/v1/meetings/?outcome_required=true").json()
+    assert [m["id"] for m in pending["results"]] == [past["id"]]
+    assert pending["count"] == 1
+
+    found = client.get("/api/v1/meetings/?search=acme").json()
+    assert [m["id"] for m in found["results"]] == [past["id"]]
+    assert future["id"] not in [
+        m["id"] for m in client.get("/api/v1/meetings/?search=demo").json()["results"]
+    ]

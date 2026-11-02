@@ -108,6 +108,43 @@ def test_lose_and_reopen(
     assert reopened.status_code == 200 and reopened.json()["status"] == "open"
 
 
+def test_reopen_returns_to_last_open_stage(
+    make_user: Callable[..., Any],
+    tenants: dict[str, TenantFixture],
+    client_for: Callable[..., APIClient],
+) -> None:
+    client = client_for(make_user("owner", tenant=tenants["acme"]), "acme")
+    stages = [
+        {"name": "New", "kind": "open"},
+        {"name": "Proposal", "kind": "open"},
+        {"name": "Won", "kind": "won"},
+        {"name": "Lost", "kind": "lost"},
+    ]
+    response = client.post(
+        "/api/v1/sales/pipelines/",
+        {"name": "Two open", "is_default": True, "stages": stages},
+        format="json",
+    )
+    assert response.status_code == 201, response.content
+    by_name = {s["name"]: s["id"] for s in response.json()["stages"]}
+    deal_id = _deal(client)["id"]
+    moved = client.post(
+        f"/api/v1/sales/deals/{deal_id}/stage/", {"stage_id": by_name["Proposal"]}, format="json"
+    )
+    assert moved.status_code == 200, moved.content
+    lost = client.post(
+        f"/api/v1/sales/deals/{deal_id}/stage/",
+        {"stage_id": by_name["Lost"], "reason": "budget"},
+        format="json",
+    )
+    assert lost.status_code == 200 and lost.json()["status"] == "lost"
+    reopened = client.post(f"/api/v1/sales/deals/{deal_id}/reopen/", {}, format="json")
+    assert reopened.status_code == 200
+    # The reopened deal continues where it was, not on the "Lost" stage.
+    assert reopened.json()["status"] == "open"
+    assert reopened.json()["stage_id"] == by_name["Proposal"]
+
+
 def test_open_deal_uses_default_pipeline_when_omitted(
     make_user: Callable[..., Any],
     tenants: dict[str, TenantFixture],

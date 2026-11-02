@@ -23,6 +23,10 @@ class MeetingFilter:
     starts_after: datetime | None = None
     starts_before: datetime | None = None
     owner_user_id: UUID | None = None  # the responsible member (host)
+    # Still scheduled although it ended before this moment: the outcome is missing.
+    ended_before: datetime | None = None
+    # Case-insensitive text in the title, description or location.
+    search: str | None = None
 
 
 class MeetingRepository(Protocol):
