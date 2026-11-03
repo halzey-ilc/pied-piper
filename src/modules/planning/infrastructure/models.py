@@ -20,6 +20,8 @@ class PlanRecord(models.Model):
     )
     period = models.CharField(max_length=10)  # YYYY-MM, YYYY-Www or YYYY-MM-DD
     target = models.DecimalField(max_digits=16, decimal_places=2)
+    # ISO code of a money plan (monthly_turnover); null for count plans.
+    currency = models.CharField(max_length=3, null=True, blank=True)  # noqa: DJ001
     created_at = models.DateTimeField()
     updated_at = models.DateTimeField()
 

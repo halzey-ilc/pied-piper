@@ -14,7 +14,7 @@ from rest_framework.response import Response
 from modules.access_control.domain.rbac import Principal, Role
 from modules.organizations.composition import company_settings
 from modules.planning.application.ports import AbsenceFilter, PlanFilter
-from modules.planning.application.service import CreateAbsence, SetPlan
+from modules.planning.application.service import CreateAbsence, DistributePlan, PlanPart, SetPlan
 from modules.planning.composition import planning_service, work_session_service
 from modules.planning.domain.absence import AbsenceKind
 from modules.planning.domain.plan import PlanMetric, PlanScope
@@ -24,6 +24,7 @@ from modules.planning.presentation.serializers import (
     AbsenceListSerializer,
     AbsenceReadSerializer,
     PlanChangeListSerializer,
+    PlanDistributeSerializer,
     PlanListSerializer,
     PlanReadSerializer,
     PlanSetSerializer,
@@ -179,9 +180,44 @@ class PlanListSetView(_Scoped):
                 metric=PlanMetric(data["metric"]),
                 period=data["period"],
                 target=data["target"],
+                currency=data.get("currency") or None,
             ),
         )
         return Response(plan_to_dict(plan))
+
+
+class PlanDistributeView(_Scoped):
+    @extend_schema(
+        tags=_TAGS,
+        operation_id="planning_plans_distribute",
+        summary="Distribute the company plan between departments",
+        description=(
+            "Director only. Sets the department plans of one metric and period in a single "
+            "transaction; the parts must add up exactly to the company plan of that metric and "
+            "period (400 otherwise, 400 if there is no company plan yet). Money parts use the "
+            "company plan's currency. Each department plan keeps its change history; "
+            "departments not listed keep their plans."
+        ),
+        parameters=[_TENANT_HEADER],
+        request=PlanDistributeSerializer,
+        responses={200: PlanListSerializer},
+    )
+    def post(self, request: Request) -> Response:
+        serializer = PlanDistributeSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        plans = planning_service().distribute_plan(
+            self.principal(),
+            DistributePlan(
+                metric=PlanMetric(data["metric"]),
+                period=data["period"],
+                parts=tuple(
+                    PlanPart(department_id=part["department_id"], target=part["target"])
+                    for part in data["parts"]
+                ),
+            ),
+        )
+        return Response({"count": len(plans), "results": [plan_to_dict(p) for p in plans]})
 
 
 class PlanHistoryView(_Scoped):

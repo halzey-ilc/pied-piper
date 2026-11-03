@@ -74,12 +74,16 @@ class DepartmentRoster(Protocol):
 
     def members_of(self, department_id: UUID | None) -> frozenset[UUID]: ...
 
+    def active_departments(self) -> frozenset[UUID]:
+        """Ids of the company's active sales departments."""
+        ...
+
 
 class PlanActuals(Protocol):
     """Actual results of a plan metric over a period, from the company's own records.
 
     ``user_ids`` limits to these members' results (one manager, or a department's current
-    members); None = the whole company. Money is summed only in the company ``currency``.
+    members); None = the whole company. Money is summed only in ``currency`` (the plan's).
     Returns None when the metric cannot be computed.
     """
 

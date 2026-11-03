@@ -28,7 +28,7 @@ from modules.planning.application.ports import (
 from modules.planning.domain.absence import Absence, AbsenceKind
 from modules.planning.domain.plan import Plan, PlanChange, PlanMetric, PlanScope, period_dates
 from shared.application.ports import UnitOfWork
-from shared.domain.errors import AccessDeniedError, NotFoundError
+from shared.domain.errors import AccessDeniedError, DomainValidationError, NotFoundError
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,6 +38,24 @@ class SetPlan:
     metric: PlanMetric
     period: str
     target: Decimal
+    # Money plans only; None = the company currency (or the plan's current one).
+    currency: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class PlanPart:
+    department_id: UUID
+    target: Decimal
+
+
+@dataclass(frozen=True, slots=True)
+class DistributePlan:
+    """Split the company plan of (metric, period) between departments: the parts must add
+    up to the company target. Department plans change only through this explicit call."""
+
+    metric: PlanMetric
+    period: str
+    parts: tuple[PlanPart, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -112,42 +130,89 @@ class PlanningService:
             raise AccessDeniedError("Only a director sets company or department plans.")
         if command.scope is PlanScope.USER and scope is not Scope.ALL:
             self._require_in_department(principal, command.scope_id)
+        if command.scope is PlanScope.DEPARTMENT and (
+            command.scope_id not in self._roster.active_departments()
+        ):
+            raise NotFoundError("Department not found.")
         with self._uow:
-            existing = self._plans.find(
-                command.scope, command.scope_id, command.metric, command.period
+            return self._upsert(principal, command)
+
+    def distribute_plan(self, principal: Principal, command: DistributePlan) -> list[Plan]:
+        """Director only: set every listed department's plan in one transaction, provided
+        the parts add up exactly to the company plan of the same metric and period. Each
+        department plan keeps its own change history; the money currency follows the
+        company plan."""
+        scope = self._policy.require(principal, Permission.PLANS_MANAGE)
+        if scope is not Scope.ALL:
+            raise AccessDeniedError("Only a director distributes the company plan.")
+        company = self._plans.find(PlanScope.COMPANY, None, command.metric, command.period)
+        if company is None:
+            raise DomainValidationError("Set the company plan for this period first.")
+        departments = self._roster.active_departments()
+        ids = [part.department_id for part in command.parts]
+        if len(set(ids)) != len(ids):
+            raise DomainValidationError("Each department may appear only once.")
+        if any(department_id not in departments for department_id in ids):
+            raise NotFoundError("Department not found.")
+        if any(part.target < Decimal(0) for part in command.parts):
+            raise DomainValidationError("Plan target must not be negative.")
+        total = sum((part.target for part in command.parts), Decimal(0))
+        if total != company.target:
+            raise DomainValidationError(
+                f"The parts add up to {total}, the company plan is {company.target}."
             )
-            if existing is None:
-                plan = Plan.create(
-                    scope=command.scope,
-                    scope_id=command.scope_id,
-                    metric=command.metric,
-                    period=command.period,
-                    target=command.target,
+        with self._uow:
+            return [
+                self._upsert(
+                    principal,
+                    SetPlan(
+                        scope=PlanScope.DEPARTMENT,
+                        scope_id=part.department_id,
+                        metric=command.metric,
+                        period=command.period,
+                        target=part.target,
+                        currency=company.currency,
+                    ),
                 )
-                self._plans.add(plan)
-                self._plans.add_change(
-                    PlanChange.record(
-                        plan_id=plan.id,
-                        author_user_id=principal.user_id,
-                        old_target=None,
-                        new_target=plan.target,
-                    )
+                for part in command.parts
+            ]
+
+    def _upsert(self, principal: Principal, command: SetPlan) -> Plan:
+        """Create the plan or change its target/currency, recording history (inside a UoW)."""
+        existing = self._plans.find(command.scope, command.scope_id, command.metric, command.period)
+        if existing is None:
+            plan = Plan.create(
+                scope=command.scope,
+                scope_id=command.scope_id,
+                metric=command.metric,
+                period=command.period,
+                target=command.target,
+                currency=command.currency or self._currency,
+            )
+            self._plans.add(plan)
+            self._plans.add_change(
+                PlanChange.record(
+                    plan_id=plan.id,
+                    author_user_id=principal.user_id,
+                    old_target=None,
+                    new_target=plan.target,
                 )
-                self._record(principal, "plan.created", plan.id)
-                return plan
-            old_target = existing.target
-            if existing.set_target(command.target):
-                self._plans.save(existing)
-                self._plans.add_change(
-                    PlanChange.record(
-                        plan_id=existing.id,
-                        author_user_id=principal.user_id,
-                        old_target=old_target,
-                        new_target=existing.target,
-                    )
+            )
+            self._record(principal, "plan.created", plan.id)
+            return plan
+        old_target = existing.target
+        if existing.set_target(command.target, command.currency):
+            self._plans.save(existing)
+            self._plans.add_change(
+                PlanChange.record(
+                    plan_id=existing.id,
+                    author_user_id=principal.user_id,
+                    old_target=old_target,
+                    new_target=existing.target,
                 )
-                self._record(principal, "plan.updated", existing.id)
-            return existing
+            )
+            self._record(principal, "plan.updated", existing.id)
+        return existing
 
     def list_plans(
         self, principal: Principal, filters: PlanFilter, *, limit: int, offset: int
@@ -201,7 +266,7 @@ class PlanningService:
             start,
             end,
             user_ids=self._contributors(plan),
-            currency=self._currency,
+            currency=plan.currency or self._currency,
             timezone=self._timezone,
         )
 
@@ -215,7 +280,7 @@ class PlanningService:
                 start,
                 end,
                 user_ids=self._contributors(plan),
-                currency=self._currency,
+                currency=plan.currency or self._currency,
                 timezone=self._timezone,
             )
             running = Decimal(0)

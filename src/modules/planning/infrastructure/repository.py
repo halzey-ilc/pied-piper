@@ -20,6 +20,7 @@ def _plan_to_domain(row: PlanRecord) -> Plan:
         target=row.target,
         created_at=row.created_at,
         updated_at=row.updated_at,
+        currency=row.currency,
     )
 
 
@@ -84,6 +85,7 @@ class DjangoPlanRepository:
             metric=plan.metric.value,
             period=plan.period,
             target=plan.target,
+            currency=plan.currency,
             created_at=plan.created_at,
             updated_at=plan.updated_at,
         )
@@ -103,7 +105,9 @@ class DjangoPlanRepository:
         return None if row is None else _plan_to_domain(row)
 
     def save(self, plan: Plan) -> None:
-        self._qs().filter(id=plan.id).update(target=plan.target, updated_at=plan.updated_at)
+        self._qs().filter(id=plan.id).update(
+            target=plan.target, currency=plan.currency, updated_at=plan.updated_at
+        )
 
     def list_all(self, filters: PlanFilter, *, limit: int, offset: int) -> list[Plan]:
         rows = self._filtered(filters).order_by("-period", "scope")[offset : offset + limit]

@@ -2,6 +2,7 @@ from django.urls import path
 
 from modules.planning.presentation.views import (
     AbsenceListCreateView,
+    PlanDistributeView,
     PlanHistoryView,
     PlanListSetView,
     PlanProgressView,
@@ -14,6 +15,7 @@ from modules.planning.presentation.views import (
 urlpatterns = [
     path("plans/", PlanListSetView.as_view(), name="plan-list"),
     path("plans/progress/", PlanProgressView.as_view(), name="plan-progress"),
+    path("plans/distribute/", PlanDistributeView.as_view(), name="plan-distribute"),
     path("plans/<uuid:plan_id>/history/", PlanHistoryView.as_view(), name="plan-history"),
     path("work-sessions/", WorkSessionListView.as_view(), name="work-session-list"),
     path("work-sessions/start/", WorkSessionStartView.as_view(), name="work-session-start"),

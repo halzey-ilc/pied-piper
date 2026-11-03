@@ -18,6 +18,7 @@ from uuid import UUID, uuid4
 from shared.domain.errors import DomainValidationError
 
 _MONTH_RE = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
+_CURRENCY_RE = re.compile(r"^[A-Z]{3}$")
 _WEEK_RE = re.compile(r"^\d{4}-W(0[1-9]|[1-4]\d|5[0-3])$")
 
 
@@ -42,6 +43,21 @@ _GRANULARITY: dict[PlanMetric, str] = {
     PlanMetric.WEEKLY_PREPAYMENTS: "week",
     PlanMetric.DAILY_CALLS: "day",
 }
+
+
+# Metrics measured in money: their plan carries a currency and its actual counts only
+# payments in that currency (no conversion).
+MONEY_METRICS = frozenset({PlanMetric.MONTHLY_TURNOVER})
+
+
+def plan_currency(metric: PlanMetric, currency: str | None) -> str | None:
+    """The currency a plan of ``metric`` stores: a 3-letter code for money, None otherwise."""
+    if metric not in MONEY_METRICS:
+        return None
+    code = (currency or "").strip().upper()
+    if not _CURRENCY_RE.match(code):
+        raise DomainValidationError("Currency must be a 3-letter code, e.g. KGS or USD.")
+    return code
 
 
 def period_granularity(metric: PlanMetric) -> str:
@@ -92,6 +108,8 @@ class Plan:
     target: Decimal
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    # Money plans only (MONEY_METRICS); None for count plans.
+    currency: str | None = None
 
     @classmethod
     def create(
@@ -102,6 +120,7 @@ class Plan:
         metric: PlanMetric,
         period: str,
         target: Decimal,
+        currency: str | None = None,
     ) -> Plan:
         if scope is PlanScope.COMPANY and scope_id is not None:
             raise DomainValidationError("A company plan has no scope_id.")
@@ -116,14 +135,18 @@ class Plan:
             metric=metric,
             period=_validate_period(metric, period),
             target=target,
+            currency=plan_currency(metric, currency),
         )
 
-    def set_target(self, target: Decimal) -> bool:
+    def set_target(self, target: Decimal, currency: str | None = None) -> bool:
+        """Change the target (and, for a money plan, the currency); False if nothing changed."""
         if target < Decimal(0):
             raise DomainValidationError("Plan target must not be negative.")
-        if target == self.target:
+        new_currency = plan_currency(self.metric, currency or self.currency)
+        if target == self.target and new_currency == self.currency:
             return False
         self.target = target
+        self.currency = new_currency
         self.updated_at = datetime.now(UTC)
         return True
 

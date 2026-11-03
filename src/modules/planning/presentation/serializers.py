@@ -18,6 +18,20 @@ class PlanSetSerializer(serializers.Serializer[dict[str, Any]]):
     metric = serializers.ChoiceField(choices=[m.value for m in PlanMetric])
     period = serializers.CharField(max_length=10)
     target = serializers.DecimalField(max_digits=16, decimal_places=2, min_value=Decimal(0))
+    # Money plans (monthly_turnover): ISO code; omitted = the company currency
+    # (or the plan's current currency when it already exists). Ignored for count plans.
+    currency = serializers.CharField(max_length=3, required=False, allow_null=True)
+
+
+class PlanPartSerializer(serializers.Serializer[dict[str, Any]]):
+    department_id = serializers.UUIDField()
+    target = serializers.DecimalField(max_digits=16, decimal_places=2, min_value=Decimal(0))
+
+
+class PlanDistributeSerializer(serializers.Serializer[dict[str, Any]]):
+    metric = serializers.ChoiceField(choices=[m.value for m in PlanMetric])
+    period = serializers.CharField(max_length=10)
+    parts = PlanPartSerializer(many=True)
 
 
 class PlanReadSerializer(serializers.Serializer[dict[str, Any]]):
@@ -27,6 +41,7 @@ class PlanReadSerializer(serializers.Serializer[dict[str, Any]]):
     metric = serializers.CharField(read_only=True)
     period = serializers.CharField(read_only=True)
     target = serializers.DecimalField(max_digits=16, decimal_places=2, read_only=True)
+    currency = serializers.CharField(read_only=True, allow_null=True)
     created_at = serializers.DateTimeField(read_only=True)
     updated_at = serializers.DateTimeField(read_only=True)
 
@@ -83,6 +98,7 @@ def plan_to_dict(plan: Plan) -> dict[str, Any]:
         "metric": plan.metric.value,
         "period": plan.period,
         "target": str(plan.target),
+        "currency": plan.currency,
         "created_at": plan.created_at.isoformat(),
         "updated_at": plan.updated_at.isoformat(),
     }
@@ -128,7 +144,8 @@ def progress_to_dict(progress: PlanProgress, currency: str) -> dict[str, Any]:
         "period_start": progress.start.isoformat(),
         "period_end": progress.end.isoformat(),
         "unit": unit,
-        "currency": currency if unit == "money" else None,
+        # A money plan reports in its own currency (older plans without one: the company's).
+        "currency": (progress.plan.currency or currency) if unit == "money" else None,
         "actual": str(progress.actual) if progress.actual is not None else None,
         "percent": str(progress.percent) if progress.percent is not None else None,
         "remaining": str(progress.remaining) if progress.remaining is not None else None,

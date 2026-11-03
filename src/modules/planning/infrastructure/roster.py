@@ -5,6 +5,7 @@ from __future__ import annotations
 from uuid import UUID
 
 from modules.organizations.composition import active_member_departments
+from modules.organizations.infrastructure.models import Department
 
 
 class DjangoDepartmentRoster:
@@ -19,4 +20,11 @@ class DjangoDepartmentRoster:
             user_id
             for user_id, _, member_department in active_member_departments(self.tenant_id)
             if member_department == department_id
+        )
+
+    def active_departments(self) -> frozenset[UUID]:
+        return frozenset(
+            Department.objects.using("default")
+            .filter(organization_id=self.tenant_id, is_active=True)
+            .values_list("id", flat=True)
         )
