@@ -55,3 +55,21 @@ class NotificationPreferenceRecord(models.Model):
 
     def __str__(self) -> str:
         return str(self.user_id)
+
+
+class DailyReportRunRecord(models.Model):
+    """Marker: the company's morning/evening report for a company-local day was sent."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    kind = models.CharField(max_length=10)  # morning | evening
+    local_date = models.DateField()
+    completed_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "notifications_daily_report_run"
+        constraints = [
+            models.UniqueConstraint(fields=["kind", "local_date"], name="daily_report_run_unique"),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.kind}:{self.local_date}"

@@ -18,6 +18,7 @@ from __future__ import annotations
 import re
 from collections.abc import Callable
 from dataclasses import replace
+from datetime import time
 from uuid import UUID
 from zoneinfo import available_timezones
 
@@ -97,10 +98,24 @@ class OrganizationService:
         country: str | None = None,
         currency: str | None = None,
         timezone: str | None = None,
+        morning_report_enabled: bool | None = None,
+        morning_report_time: time | None = None,
+        evening_report_enabled: bool | None = None,
+        evening_report_time: time | None = None,
     ) -> Company:
         self._policy.require(principal, Permission.COMPANY_SETTINGS_MANAGE)
         current = self._store.company(principal.tenant_id)
         changes: dict[str, str] = {}
+        if morning_report_time is not None:
+            morning_report_time = _report_time(morning_report_time, "morning_report_time")
+        if evening_report_time is not None:
+            evening_report_time = _report_time(evening_report_time, "evening_report_time")
+        reports = {
+            "morning_report_enabled": morning_report_enabled,
+            "morning_report_time": morning_report_time,
+            "evening_report_enabled": evening_report_enabled,
+            "evening_report_time": evening_report_time,
+        }
         if name is not None:
             changes["name"] = _clean(name, "name", 200)
         if country is not None:
@@ -121,10 +136,27 @@ class OrganizationService:
             country=changes.get("country", current.country),
             currency=changes.get("currency", current.currency),
             timezone=changes.get("timezone", current.timezone),
+            morning_report_enabled=(
+                current.morning_report_enabled
+                if morning_report_enabled is None
+                else morning_report_enabled
+            ),
+            morning_report_time=(
+                current.morning_report_time if morning_report_time is None else morning_report_time
+            ),
+            evening_report_enabled=(
+                current.evening_report_enabled
+                if evening_report_enabled is None
+                else evening_report_enabled
+            ),
+            evening_report_time=(
+                current.evening_report_time if evening_report_time is None else evening_report_time
+            ),
         )
         with self._uow:
             self._store.save_company(updated)
-            self._record(principal, "company.updated", "company", str(current.id), tuple(changes))
+            fields = (*changes, *(k for k, v in reports.items() if v is not None))
+            self._record(principal, "company.updated", "company", str(current.id), fields)
         return updated
 
     # --- departments ------------------------------------------------------------
@@ -664,6 +696,13 @@ class OrganizationService:
                 changed_fields=fields,
             )
         )
+
+
+def _report_time(value: time, field: str) -> time:
+    """A report time of day in whole minutes, company-local (the beat runs every 5 minutes)."""
+    if value.tzinfo is not None:
+        raise DomainValidationError(f"{field} must be a local time of day, e.g. 09:00.")
+    return value.replace(second=0, microsecond=0)
 
 
 def _clean(value: str, field: str, limit: int) -> str:

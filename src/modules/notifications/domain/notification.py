@@ -21,6 +21,8 @@ class NotificationCategory(StrEnum):
     SYSTEM = "system"
     AI = "ai"
     TASK = "task"  # deadline reminders, overdue alerts and escalations
+    REPORT = "report"  # automatic morning and evening reports
+    INACTIVITY = "inactivity"  # head of sales: managers with no activity during the day
 
 
 def _clean(text: str, *, label: str, max_length: int, required: bool) -> str:

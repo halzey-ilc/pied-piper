@@ -21,6 +21,24 @@ class CompanySerializer(serializers.Serializer[dict[str, Any]]):
     timezone = serializers.CharField(
         max_length=64, required=False, help_text="IANA name, e.g. Asia/Bishkek"
     )
+    morning_report_enabled = serializers.BooleanField(
+        required=False, help_text="Send the morning in-app report (default on)"
+    )
+    morning_report_time = serializers.TimeField(
+        required=False,
+        format="%H:%M",
+        input_formats=["%H:%M"],
+        help_text="Company-local time of the morning report, HH:MM (default 09:00)",
+    )
+    evening_report_enabled = serializers.BooleanField(
+        required=False, help_text="Send the evening in-app report (default on)"
+    )
+    evening_report_time = serializers.TimeField(
+        required=False,
+        format="%H:%M",
+        input_formats=["%H:%M"],
+        help_text="Company-local time of the evening report, HH:MM (default 19:00)",
+    )
 
 
 class DepartmentSerializer(serializers.Serializer[dict[str, Any]]):
@@ -137,6 +155,10 @@ def company_to_dict(c: Company) -> dict[str, Any]:
         "country": c.country,
         "currency": c.currency,
         "timezone": c.timezone,
+        "morning_report_enabled": c.morning_report_enabled,
+        "morning_report_time": f"{c.morning_report_time:%H:%M}",
+        "evening_report_enabled": c.evening_report_enabled,
+        "evening_report_time": f"{c.evening_report_time:%H:%M}",
     }
 
 

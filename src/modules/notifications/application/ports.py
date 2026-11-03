@@ -1,10 +1,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 from typing import Protocol
 from uuid import UUID
 
+from modules.notifications.domain.daily_reports import (
+    EveningFigures,
+    MorningFigures,
+    ReportKind,
+    StaffMember,
+)
 from modules.notifications.domain.deadlines import TaskDeadline
 from modules.notifications.domain.notification import Notification, NotificationCategory
 from modules.notifications.domain.preferences import NotificationPreferences
@@ -56,3 +62,32 @@ class DepartmentHeads(Protocol):
     def head_of(self, user_id: UUID) -> UUID | None:
         """User id of the active head of sales of the user's department, if any."""
         ...
+
+
+class ReportRoster(Protocol):
+    def staff(self) -> list[StaffMember]:
+        """Active members of the (active) company with active accounts, with product roles,
+        display names and departments. Dismissed/inactive members are not listed."""
+        ...
+
+
+class DailyFiguresSource(Protocol):
+    """Read-only day figures per user from the company's database (company-local day)."""
+
+    def absent(self, user_ids: list[UUID], day: date) -> set[UUID]: ...
+
+    def morning(
+        self, user_ids: list[UUID], *, day: date, now: datetime
+    ) -> dict[UUID, MorningFigures]: ...
+
+    def evening(
+        self, user_ids: list[UUID], *, day: date, now: datetime
+    ) -> dict[UUID, EveningFigures]: ...
+
+
+class ReportRuns(Protocol):
+    """Per-company markers of reports already sent for a company-local day."""
+
+    def done(self, day: date) -> set[ReportKind]: ...
+
+    def mark_done(self, kind: ReportKind, day: date) -> None: ...

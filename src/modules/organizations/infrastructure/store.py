@@ -208,6 +208,10 @@ class DjangoOrganizationStore(DjangoStaffRequestMixin):
             country=row.country,
             currency=row.currency,
             timezone=row.timezone,
+            morning_report_enabled=row.morning_report_enabled,
+            morning_report_time=row.morning_report_time,
+            evening_report_enabled=row.evening_report_enabled,
+            evening_report_time=row.evening_report_time,
         )
 
     def save_company(self, company: Company) -> None:
@@ -216,6 +220,10 @@ class DjangoOrganizationStore(DjangoStaffRequestMixin):
             country=company.country,
             currency=company.currency,
             timezone=company.timezone,
+            morning_report_enabled=company.morning_report_enabled,
+            morning_report_time=company.morning_report_time,
+            evening_report_enabled=company.evening_report_enabled,
+            evening_report_time=company.evening_report_time,
         )
 
     def departments(self, company_id: UUID) -> list[DepartmentInfo]:

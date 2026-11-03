@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import time
 
 from django.conf import settings
 from django.db import models
@@ -20,6 +21,11 @@ class Organization(models.Model):
     country = models.CharField(max_length=2, default="KG")  # ISO 3166-1 alpha-2
     currency = models.CharField(max_length=3, default="KGS")  # ISO 4217, default for new deals
     timezone = models.CharField(max_length=64, default="Asia/Bishkek")  # IANA name
+    # Automatic in-app reports (company-local time of day, see notifications.daily_reports).
+    morning_report_enabled = models.BooleanField(default=True)
+    morning_report_time = models.TimeField(default=time(9, 0))
+    evening_report_enabled = models.BooleanField(default=True)
+    evening_report_time = models.TimeField(default=time(19, 0))
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

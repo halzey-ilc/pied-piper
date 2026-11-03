@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, time
 from typing import Protocol
 from uuid import UUID
 
@@ -16,6 +16,11 @@ class Company:
     country: str
     currency: str
     timezone: str
+    # Automatic morning/evening reports: on/off and company-local time of day.
+    morning_report_enabled: bool = True
+    morning_report_time: time = time(9, 0)
+    evening_report_enabled: bool = True
+    evening_report_time: time = time(19, 0)
 
 
 @dataclass(frozen=True, slots=True)

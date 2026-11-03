@@ -59,7 +59,7 @@ class CompanyView(_Scoped):
     @extend_schema(
         tags=_TAGS,
         operation_id="company_get",
-        summary="Your company: name, country, currency, timezone",
+        summary="Your company: name, country, currency, timezone, report schedule",
         parameters=[_TENANT_HEADER],
         responses=CompanySerializer,
     )
@@ -72,7 +72,9 @@ class CompanyView(_Scoped):
         summary="Change company settings",
         description=(
             "Requires company.settings.manage (director). The timezone defines day, week and "
-            "month boundaries of every report; the currency is the default for new deals."
+            "month boundaries of every report; the currency is the default for new deals. "
+            "`morning_report_*` / `evening_report_*` turn the automatic in-app morning and "
+            "evening reports on/off and set their company-local time (HH:MM)."
         ),
         parameters=[_TENANT_HEADER],
         request=CompanySerializer,

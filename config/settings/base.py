@@ -569,6 +569,12 @@ CELERY_BEAT_SCHEDULE = {
         "task": "notifications.task_deadlines",
         "schedule": crontab(minute="*/15"),
     },
+    # Morning/evening in-app reports and inactivity alerts at each company's local time
+    # (idempotent: one report per user per local day).
+    "daily-reports": {
+        "task": "notifications.daily_reports",
+        "schedule": crontab(minute="*/5"),
+    },
     # AI operations digests for users with findings; does nothing while AI is off.
     "daily-ai-operations-digests": {
         "task": "integrations.ai_daily_digests",
