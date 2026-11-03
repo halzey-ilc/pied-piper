@@ -52,6 +52,8 @@ class DealLookup(Protocol):
 class PaymentVisibility:
     owner_user_id: UUID | None = None
     team_ids: frozenset[UUID] = field(default_factory=frozenset)
+    # Narrow to one department (the record team), on top of the role's visibility.
+    department_id: UUID | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,6 +77,9 @@ class SalesMetrics:
     received: Decimal  # money actually received in the period (refunds subtracted)
     debt: Decimal  # outstanding on the sold deals (turnover minus their receipts)
     currency: str
+    # Prepayments received in the period (kind=prepayment, refunds excluded): count and sum.
+    prepayments_count: int = 0
+    prepayments_amount: Decimal = Decimal(0)
     # Per seller (only when requested): seller id -> (sales, new clients).
     by_seller: dict[UUID, tuple[int, int]] | None = None
 
@@ -103,6 +108,12 @@ class PaymentRepository(Protocol):
     ) -> list[UUID]:
         """Sales: deals whose first non-refund payment fell within the range and that are
         not fully refunded (each deal once)."""
+        ...
+
+    def prepayments(
+        self, visibility: PaymentVisibility, paid_from: date, paid_to: date
+    ) -> tuple[int, Decimal]:
+        """Prepayments (not refunds) paid in the range: how many and their total."""
         ...
 
     def new_clients_count(

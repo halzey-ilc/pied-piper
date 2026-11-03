@@ -44,6 +44,8 @@ class TaskType(StrEnum):
     MEETING = "meeting"
     FOLLOW_UP = "follow_up"
     OTHER = "other"
+    # A "work on mistakes" package item the head of sales hands a manager (TZ «Разбор»).
+    REVIEW = "review"
 
 
 class TaskPriority(StrEnum):

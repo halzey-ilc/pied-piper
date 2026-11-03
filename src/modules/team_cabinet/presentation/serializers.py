@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+from datetime import timedelta
+from decimal import Decimal
 from typing import Any
 
 from rest_framework import serializers
 
-from modules.team_cabinet.application.service import TodayBoard
-from modules.team_cabinet.domain.board import DepartmentTotals, ManagerDay
+from modules.team_cabinet.application.service import MemberCard, TeamReport, TodayBoard
+from modules.team_cabinet.domain.board import DayScore, DepartmentTotals, ManagerDay
+from modules.team_cabinet.domain.period import Discipline, PeriodMetrics
 from modules.team_cabinet.domain.plan_fact import PlanFact, PlanFactRow
 
 
@@ -26,6 +29,17 @@ class ManagerDaySerializer(serializers.Serializer[dict[str, Any]]):
     received = serializers.DecimalField(max_digits=18, decimal_places=2, read_only=True)
     open_tasks = serializers.IntegerField(read_only=True)
     overdue_tasks = serializers.IntegerField(read_only=True)
+    meetings_to_confirm = serializers.IntegerField(read_only=True)
+    next_to_confirm_at = serializers.DateTimeField(read_only=True, allow_null=True)
+    meetings_cancelled = serializers.IntegerField(read_only=True)
+    reschedules_without_date = serializers.IntegerField(read_only=True)
+    tasks_due_today = serializers.IntegerField(read_only=True)
+    tasks_done_today = serializers.IntegerField(read_only=True)
+    plan_sales = serializers.DecimalField(
+        max_digits=16, decimal_places=2, read_only=True, allow_null=True
+    )
+    sales_month = serializers.IntegerField(read_only=True)
+    score = serializers.DictField(read_only=True, allow_null=True)
     has_activity = serializers.BooleanField(read_only=True)
     on_absence = serializers.BooleanField(read_only=True)
     status = serializers.CharField(read_only=True)
@@ -69,6 +83,17 @@ def manager_day_to_dict(day: ManagerDay) -> dict[str, Any]:
         "received": str(day.received),
         "open_tasks": day.open_tasks,
         "overdue_tasks": day.overdue_tasks,
+        "meetings_to_confirm": day.meetings_to_confirm,
+        "next_to_confirm_at": day.next_to_confirm_at.isoformat()
+        if day.next_to_confirm_at
+        else None,
+        "meetings_cancelled": day.meetings_cancelled,
+        "reschedules_without_date": day.reschedules_without_date,
+        "tasks_due_today": day.tasks_due_today,
+        "tasks_done_today": day.tasks_done_today,
+        "plan_sales": str(day.plan_sales) if day.plan_sales is not None else None,
+        "sales_month": day.sales_month,
+        "score": score_to_dict(day.score) if day.score else None,
         "has_activity": day.has_activity,
         "on_absence": day.on_absence,
         "status": day.status,
@@ -77,8 +102,27 @@ def manager_day_to_dict(day: ManagerDay) -> dict[str, Any]:
     }
 
 
+def score_to_dict(score: DayScore) -> dict[str, Any]:
+    return {
+        "points": score.points,
+        "grade": score.grade,
+        "result": str(score.result) if score.result is not None else None,
+        "discipline": str(score.discipline),
+        "plan_missing": score.plan_missing,
+    }
+
+
 def totals_to_dict(totals: DepartmentTotals) -> dict[str, Any]:
     return {
+        "meetings_confirmed": totals.meetings_confirmed,
+        "meetings_to_confirm": totals.meetings_to_confirm,
+        "meetings_no_show": totals.meetings_no_show,
+        "meetings_cancelled": totals.meetings_cancelled,
+        "meetings_overdue_outcome": totals.meetings_overdue_outcome,
+        "reschedules_without_date": totals.reschedules_without_date,
+        "open_tasks": totals.open_tasks,
+        "overdue_tasks": totals.overdue_tasks,
+        "tasks_due_today": totals.tasks_due_today,
         "managers": totals.managers,
         "calls": totals.calls,
         "meetings_total": totals.meetings_total,
@@ -141,7 +185,142 @@ def plan_fact_to_dict(plan_fact: PlanFact) -> dict[str, Any]:
         "sales_actual_total": plan_fact.sales_actual_total,
         "received_total": str(plan_fact.received_total),
         "forecast_sales_total": str(plan_fact.forecast_sales_total),
+        "working_days_left": plan_fact.working_days_left,
+        "department_id": str(plan_fact.department_id) if plan_fact.department_id else None,
+        "department_plan_sales": _dec(plan_fact.department_plan_sales),
+        "department_remaining": _dec(plan_fact.department_remaining),
+        "department_per_day_needed": _dec(plan_fact.department_per_day_needed),
+        "department_percent": _dec(plan_fact.department_percent),
         "rows": [plan_fact_row_to_dict(r) for r in plan_fact.rows],
+    }
+
+
+def _dec(value: Decimal | None) -> str | None:
+    return str(value) if value is not None else None
+
+
+def _ratio(value: Decimal | None) -> str | None:
+    return str(value) if value is not None else None
+
+
+def period_to_dict(m: PeriodMetrics) -> dict[str, Any]:
+    return {
+        "meetings_booked": m.meetings_booked,
+        "meetings_held": m.meetings_held,
+        "meetings_no_show": m.meetings_no_show,
+        "meetings_confirmed": m.meetings_confirmed,
+        "meetings_cancelled": m.meetings_cancelled,
+        "calls": m.calls,
+        "stage_changes": m.stage_changes,
+        "payments_count": m.payments_count,
+        "received": str(m.received),
+        "prepayments": m.prepayments,
+        "sales": m.sales,
+        "tasks_done": m.tasks_done,
+        "attendance": _ratio(m.attendance),
+        "meeting_to_sale": _ratio(m.meeting_to_sale),
+    }
+
+
+def discipline_to_dict(d: Discipline) -> dict[str, Any]:
+    return {
+        "meetings_without_outcome": d.meetings_without_outcome,
+        "reschedules_without_date": d.reschedules_without_date,
+        "deals_without_next_step": d.deals_without_next_step,
+        "overdue_tasks": d.overdue_tasks,
+    }
+
+
+def member_card_to_dict(card: MemberCard) -> dict[str, Any]:
+    days = [card.start + timedelta(days=i) for i in range((card.end - card.start).days + 1)]
+    return {
+        "user_id": str(card.member.user_id),
+        "username": card.member.username,
+        "department_id": str(card.member.department_id) if card.member.department_id else None,
+        "date_from": card.start.isoformat(),
+        "date_to": card.end.isoformat(),
+        "current": period_to_dict(card.current),
+        "previous": period_to_dict(card.previous),
+        "department_average": {k: str(v) for k, v in card.department_average.items()},
+        "discipline": discipline_to_dict(card.discipline),
+        "month": card.month,
+        "plan_sales": _dec(card.plan_sales),
+        "month_sales": card.month_sales,
+        "activity": [
+            {
+                "date": day.isoformat(),
+                "calls": card.current.daily.get(day, {}).get("calls", 0),
+                "meetings": card.current.daily.get(day, {}).get("meetings", 0),
+                "stage_changes": card.current.daily.get(day, {}).get("stage_changes", 0),
+                "payments": card.current.daily.get(day, {}).get("payments", 0),
+                "absent": day in card.absent_days,
+            }
+            for day in days
+        ],
+        "days_without_activity": [d.isoformat() for d in card.days_without_activity],
+    }
+
+
+REPORT_COLUMNS = (
+    "username",
+    "meetings_booked",
+    "meetings_held",
+    "meetings_no_show",
+    "meetings_confirmed",
+    "calls",
+    "payments_count",
+    "received",
+    "prepayments",
+    "sales",
+    "tasks_done",
+    "overdue_tasks",
+    "meetings_without_outcome",
+    "deals_without_next_step",
+    "plan_sales",
+    "month_sales",
+)
+
+
+def team_report_to_dict(report: TeamReport) -> dict[str, Any]:
+    rows = []
+    totals = PeriodMetrics()
+    for row in report.rows:
+        m = row.metrics
+        for key in (
+            "meetings_booked",
+            "meetings_held",
+            "meetings_no_show",
+            "meetings_confirmed",
+            "meetings_cancelled",
+            "calls",
+            "stage_changes",
+            "payments_count",
+            "prepayments",
+            "sales",
+            "tasks_done",
+        ):
+            setattr(totals, key, getattr(totals, key) + getattr(m, key))
+        totals.received += m.received
+        rows.append(
+            {
+                "user_id": str(row.member.user_id),
+                "username": row.member.username,
+                "department_id": (
+                    str(row.member.department_id) if row.member.department_id else None
+                ),
+                "product_role": row.member.product_role,
+                **period_to_dict(m),
+                **discipline_to_dict(row.discipline),
+                "plan_sales": _dec(row.plan_sales),
+                "month_sales": row.month_sales,
+            }
+        )
+    return {
+        "date_from": report.start.isoformat(),
+        "date_to": report.end.isoformat(),
+        "department_id": str(report.department_id) if report.department_id else None,
+        "rows": rows,
+        "totals": period_to_dict(totals),
     }
 
 

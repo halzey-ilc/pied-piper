@@ -41,6 +41,22 @@ class DjangoCustomerRepository:
     def __init__(self, using: str) -> None:
         self.using = using
 
+    def hand_over_customers(
+        self, from_user: UUID, to_user: UUID, team_id: UUID | None
+    ) -> list[UUID]:
+        """Move a leaving member's active (not archived) customers to another member.
+        Archived customers keep their owner as history. Returns the ids of the moved ones."""
+        rows = (
+            self._qs().select_for_update().filter(owner_user_id=from_user, archived_at__isnull=True)
+        )
+        ids = list(rows.values_list("id", flat=True))
+        if ids:
+            changes: dict[str, object] = {"owner_user_id": to_user}
+            if team_id is not None:
+                changes["team_id"] = team_id
+            self._qs().filter(id__in=ids).update(**changes, version=F("version") + 1)
+        return ids
+
     def _qs(self) -> QuerySet[CustomerRecord]:
         return CustomerRecord.objects.using(self.using)
 

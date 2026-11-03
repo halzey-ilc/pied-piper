@@ -13,6 +13,7 @@ from modules.activities.domain.activity import (
     SubjectType,
     TaskPriority,
     TaskStatus,
+    TaskType,
 )
 
 
@@ -39,6 +40,7 @@ class ActivityFilter:
     no_due_date: bool = False
     # Case-insensitive text in the title or body.
     search: str | None = None
+    task_type: TaskType | None = None
 
 
 class ActivityRepository(Protocol):

@@ -98,6 +98,10 @@ class SalesMetricsSerializer(serializers.Serializer[dict[str, Any]]):
     received = serializers.DecimalField(max_digits=18, decimal_places=2, read_only=True)
     debt = serializers.DecimalField(max_digits=18, decimal_places=2, read_only=True)
     currency = serializers.CharField(read_only=True)
+    prepayments_count = serializers.IntegerField(
+        read_only=True, help_text="Prepayments received in the period (refunds excluded)"
+    )
+    prepayments_amount = serializers.DecimalField(max_digits=18, decimal_places=2, read_only=True)
 
 
 def payment_to_dict(payment: Payment) -> dict[str, Any]:
@@ -125,6 +129,8 @@ def metrics_to_dict(metrics: SalesMetrics) -> dict[str, Any]:
         "received": str(metrics.received),
         "debt": str(metrics.debt),
         "currency": metrics.currency,
+        "prepayments_count": metrics.prepayments_count,
+        "prepayments_amount": str(metrics.prepayments_amount),
         **(
             {
                 "by_seller": [

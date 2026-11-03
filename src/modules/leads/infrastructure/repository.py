@@ -37,6 +37,28 @@ class DjangoLeadRepository:
     def _qs(self) -> QuerySet[LeadRecord]:
         return LeadRecord.objects.using(self.using)
 
+    def hand_over_open_leads(
+        self, from_user: UUID, to_user: UUID, team_id: UUID | None
+    ) -> list[UUID]:
+        """Move a leaving member's leads that are still being worked (new, qualified) to
+        another member. Converted and unqualified leads keep their owner as history.
+        ``team_id`` None keeps each lead's own team. Returns the ids of the moved leads."""
+        rows = (
+            self._qs()
+            .select_for_update()
+            .filter(
+                owner_user_id=from_user,
+                status__in=[LeadStatus.NEW.value, LeadStatus.QUALIFIED.value],
+            )
+        )
+        ids = list(rows.values_list("id", flat=True))
+        if ids:
+            changes: dict[str, object] = {"owner_user_id": to_user}
+            if team_id is not None:
+                changes["team_id"] = team_id
+            self._qs().filter(id__in=ids).update(**changes, version=F("version") + 1)
+        return ids
+
     def _visible(self, visibility: LeadVisibility) -> QuerySet[LeadRecord]:
         qs = self._qs()
         if visibility.owner_user_id is None:

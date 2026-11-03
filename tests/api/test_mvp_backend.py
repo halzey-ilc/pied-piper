@@ -425,3 +425,86 @@ def test_work_handed_to_the_director_stays_visible_to_the_department(
     row = ActivityRecord.objects.using("tenant_acme").get(id=task["id"])
     assert row.assignee_user_id == users["director"].id
     assert str(row.team_id) == company["north"]
+
+
+def test_dismissal_hands_over_leads_and_customers(company: dict[str, Any]) -> None:
+    c, users = company["c"], company["users"]
+    rep = c["rep_north"]
+    working = _lead(rep, "Working lead", phone="+996555000201")
+    qualified = _lead(rep, "Qualified lead", phone="+996555000202")
+    _ok(rep.post(f"/api/v1/leads/{qualified['id']}/qualify/"))
+    converted = _lead(rep, "Converted lead", phone="+996555000203")
+    _ok(rep.post(f"/api/v1/leads/{converted['id']}/qualify/"))
+    converted_customer = _ok(
+        rep.post(f"/api/v1/leads/{converted['id']}/convert/", {}, format="json")
+    )
+    active = _ok(rep.post("/api/v1/customers/", {"name": "Active client"}, format="json"), 201)
+    archived = _ok(rep.post("/api/v1/customers/", {"name": "Archived client"}, format="json"), 201)
+    _ok(rep.post(f"/api/v1/customers/{archived['id']}/archive/"))
+
+    membership = Membership.objects.get(user=users["rep_north"])
+    _ok(c["rop_north"].post(f"/api/v1/staff/{membership.id}/deactivate/"))
+    rop_id = str(users["rop_north"].id)
+    rep_id = str(users["rep_north"].id)
+
+    rop = c["rop_north"]
+    for lead in (working, qualified):
+        assert _ok(rop.get(f"/api/v1/leads/{lead['id']}/"))["owner_user_id"] == rop_id
+        actions = [
+            e["action"] for e in _ok(rop.get(f"/api/v1/leads/{lead['id']}/history/"))["results"]
+        ]
+        assert "lead.reassigned" in actions
+    # A converted lead is history: it keeps its owner.
+    assert _ok(c["director"].get(f"/api/v1/leads/{converted['id']}/"))["owner_user_id"] == rep_id
+    # Active customers move (the converted lead's new customer too); archived ones keep the owner.
+    assert _ok(rop.get(f"/api/v1/customers/{active['id']}/"))["owner_user_id"] == rop_id
+    customer_id = converted_customer.get("customer_id") or converted_customer["customer"]["id"]
+    assert _ok(rop.get(f"/api/v1/customers/{customer_id}/"))["owner_user_id"] == rop_id
+    kept = _ok(c["director"].get(f"/api/v1/customers/{archived['id']}/"))
+    assert kept["owner_user_id"] == rep_id
+
+
+def test_payment_metrics_per_department_with_prepayments(company: dict[str, Any]) -> None:
+    c = company["c"]
+    north_deal = _deal(
+        c["rep_north"], "North deal", customer_id=_customer(c["rep_north"], "N client")
+    )
+    _pay(c["rep_north"], deal_id=north_deal["id"], amount="100.00")  # prepayment, a sale
+    _pay(c["rep_north"], deal_id=north_deal["id"], amount="40.00", kind="additional")
+    south_deal = _deal(
+        c["rep_south"], "South deal", customer_id=_customer(c["rep_south"], "S client")
+    )
+    _pay(c["rep_south"], deal_id=south_deal["id"], amount="70.00")
+    _pay(c["rep_south"], deal_id=south_deal["id"], amount="70.00", is_refund=True)  # not counted
+
+    director = c["director"]
+    north = _ok(director.get(f"/api/v1/payments/metrics/?department_id={company['north']}"))
+    assert (north["sales_count"], north["prepayments_count"], north["prepayments_amount"]) == (
+        1,
+        1,
+        "100.00",
+    )
+    assert north["received"] == "140.00"
+    south = _ok(director.get(f"/api/v1/payments/metrics/?department_id={company['south']}"))
+    assert (south["sales_count"], south["prepayments_count"], south["prepayments_amount"]) == (
+        0,
+        1,
+        "70.00",
+    )
+    everything = _ok(director.get("/api/v1/payments/metrics/"))
+    assert everything["prepayments_count"] == 2
+
+    # A head of sales sees their own department and is refused another one.
+    assert (
+        _ok(c["rop_north"].get(f"/api/v1/payments/metrics/?department_id={company['north']}"))[
+            "sales_count"
+        ]
+        == 1
+    )
+    assert (
+        c["rop_north"]
+        .get(f"/api/v1/payments/metrics/?department_id={company['south']}")
+        .status_code
+        == 403
+    )
+    assert c["rop_north"].get("/api/v1/payments/metrics/?department_id=nope").status_code == 400

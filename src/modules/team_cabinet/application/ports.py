@@ -6,6 +6,7 @@ from typing import Protocol
 from uuid import UUID
 
 from modules.team_cabinet.domain.board import Member, RawDay
+from modules.team_cabinet.domain.period import Discipline, PeriodMetrics
 
 
 class TeamRoster(Protocol):
@@ -47,4 +48,20 @@ class CabinetReader(Protocol):
     ) -> dict[UUID, int]:
         """Per seller: deals whose first non-refund payment fell in the month and was
         taken by that seller (a sale is credited to the first payment's seller)."""
+        ...
+
+    def department_sales_target(self, department_id: UUID, month: str) -> Decimal | None:
+        """The department's monthly_sales plan target (department-scope plan), if set."""
+        ...
+
+    def period_metrics(
+        self, user_ids: list[UUID], start: date, end: date, *, tz_name: str
+    ) -> dict[UUID, PeriodMetrics]:
+        """Per-user figures over company-local days [start, end]."""
+        ...
+
+    def discipline(
+        self, user_ids: list[UUID], *, now: datetime, today: date
+    ) -> dict[UUID, Discipline]:
+        """Current CRM tails per user."""
         ...

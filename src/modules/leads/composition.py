@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from uuid import UUID
+
+from modules.audit.domain.entry import AuditEntry
 from modules.audit.infrastructure.audit_log import DjangoAuditLog
 from modules.leads.application.service import LeadService
 from modules.leads.infrastructure.customer_creation import CustomersCustomerCreation
@@ -26,3 +29,23 @@ def lead_service() -> LeadService:
         members=DjangoMemberDirectory(tenant.tenant_id),
         trail=DjangoAuditLog(alias),
     )
+
+
+def hand_over_open_leads(from_user: UUID, to_user: UUID, to_team: UUID | None, actor: UUID) -> int:
+    """Staff offboarding: the leads a deactivated member was still working (new, qualified) go
+    to ``to_user``; each move is audited as ``lead.reassigned`` and shows in the lead's history."""
+    alias = require_tenant().db_alias
+    with DjangoUnitOfWork(alias):
+        moved = DjangoLeadRepository(alias).hand_over_open_leads(from_user, to_user, to_team)
+        audit = DjangoAuditLog(alias)
+        for record_id in moved:
+            audit.record(
+                AuditEntry(
+                    actor_user_id=actor,
+                    action="lead.reassigned",
+                    resource_type="lead",
+                    resource_id=str(record_id),
+                    changed_fields=("owner",),
+                )
+            )
+    return len(moved)

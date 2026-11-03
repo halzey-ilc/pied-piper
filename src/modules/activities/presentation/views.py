@@ -152,6 +152,7 @@ class ActivityListCreateView(_Scoped):
                 overdue_before=today if q.get("overdue") == "true" else None,
                 no_due_date=q.get("no_due_date") == "true",
                 search=(q.get("search") or "").strip()[:100] or None,
+                task_type=_enum(TaskType, q.get("task_type")),
             )
         except ValueError as exc:
             raise DomainValidationError("assignee_id must be a UUID, dates YYYY-MM-DD.") from exc

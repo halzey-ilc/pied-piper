@@ -8,6 +8,7 @@ explicitly enabled; by default a manager is RED (one or more red reasons) or GRE
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
 from decimal import Decimal
 from uuid import UUID
 
@@ -40,7 +41,17 @@ class ManagerDay:
     open_tasks: int = 0
     overdue_tasks: int = 0
     reschedules_without_date: int = 0
+    meetings_to_confirm: int = 0  # still scheduled, not confirmed, starting later today
+    next_to_confirm_at: datetime | None = None
+    meetings_cancelled: int = 0
+    tasks_due_today: int = 0
+    tasks_done_today: int = 0
+    # Month figures for the day score (sales plan pro-rated by elapsed days).
+    plan_sales: Decimal | None = None
+    sales_month: int = 0
     on_absence: bool = False
+    # Filled by evaluate_day_score:
+    score: DayScore | None = None
     # Filled by evaluate_traffic_light:
     status: str = "green"
     red_reasons: tuple[str, ...] = ()
@@ -88,6 +99,83 @@ def evaluate_traffic_light(
     day.status = "red" if red else ("yellow" if yellow else "green")
 
 
+@dataclass(frozen=True, slots=True)
+class ScoreThresholds:
+    """Grade bounds of the 0-100 day score (TZ «Кабинет РОПа», «Оценка дня»: a proposal,
+    the owner may tune it). 5 from 90, 4 from 75, 3 from 60, otherwise 2."""
+
+    grade5: int = 90
+    grade4: int = 75
+    grade3: int = 60
+
+
+@dataclass(frozen=True, slots=True)
+class DayScore:
+    """0-100 = result (up to 50) + CRM discipline (up to 50).
+
+    result: sales this month vs the plan pro-rated by elapsed days, capped at 50;
+    None when the manager has no plan — then the score is the discipline part scaled
+    to 100 and ``plan_missing`` is set.
+    discipline: four equal parts (12.5 each) — today's past meetings have an outcome,
+    today's meetings are confirmed, reschedules have a new date, no overdue tasks.
+    """
+
+    points: int
+    grade: int
+    result: Decimal | None
+    discipline: Decimal
+    plan_missing: bool
+
+
+def _ratio(bad: int, total: int) -> Decimal:
+    """Share of the good part (1 when there is nothing to judge)."""
+    if total <= 0:
+        return Decimal(1)
+    return max(Decimal(0), Decimal(total - bad) / Decimal(total))
+
+
+def evaluate_day_score(
+    day: ManagerDay,
+    *,
+    days_elapsed: int,
+    days_total: int,
+    thresholds: ScoreThresholds,
+) -> DayScore:
+    quarter = Decimal("12.5")
+    discipline = quarter * (
+        _ratio(day.meetings_overdue_outcome, day.meetings_total)
+        + (
+            Decimal(day.meetings_confirmed) / Decimal(day.meetings_total)
+            if day.meetings_total
+            else Decimal(1)
+        )
+        + _ratio(day.reschedules_without_date, day.meetings_total + day.reschedules_without_date)
+        + _ratio(day.overdue_tasks, day.open_tasks)
+    )
+    result: Decimal | None = None
+    if day.plan_sales is not None and day.plan_sales > 0 and days_total > 0:
+        expected = day.plan_sales * Decimal(max(days_elapsed, 1)) / Decimal(days_total)
+        result = min(Decimal(50), Decimal(50) * Decimal(day.sales_month) / expected)
+    total = discipline * 2 if result is None else discipline + result
+    points = int(total.quantize(Decimal(1)))
+    grade = (
+        5
+        if points >= thresholds.grade5
+        else 4
+        if points >= thresholds.grade4
+        else 3
+        if points >= thresholds.grade3
+        else 2
+    )
+    return DayScore(
+        points=points,
+        grade=grade,
+        result=None if result is None else result.quantize(Decimal("0.1")),
+        discipline=discipline.quantize(Decimal("0.1")),
+        plan_missing=result is None,
+    )
+
+
 @dataclass(slots=True)
 class DepartmentTotals:
     managers: int = 0
@@ -96,6 +184,15 @@ class DepartmentTotals:
     meetings_held: int = 0
     payments_count: int = 0
     received: Decimal = Decimal(0)
+    meetings_confirmed: int = 0
+    meetings_to_confirm: int = 0
+    meetings_no_show: int = 0
+    meetings_cancelled: int = 0
+    meetings_overdue_outcome: int = 0
+    reschedules_without_date: int = 0
+    open_tasks: int = 0
+    overdue_tasks: int = 0
+    tasks_due_today: int = 0
     red: int = 0
     yellow: int = 0
     green: int = 0
@@ -109,6 +206,15 @@ class DepartmentTotals:
             totals.meetings_held += d.meetings_held
             totals.payments_count += d.payments_count
             totals.received += d.received
+            totals.meetings_confirmed += d.meetings_confirmed
+            totals.meetings_to_confirm += d.meetings_to_confirm
+            totals.meetings_no_show += d.meetings_no_show
+            totals.meetings_cancelled += d.meetings_cancelled
+            totals.meetings_overdue_outcome += d.meetings_overdue_outcome
+            totals.reschedules_without_date += d.reschedules_without_date
+            totals.open_tasks += d.open_tasks
+            totals.overdue_tasks += d.overdue_tasks
+            totals.tasks_due_today += d.tasks_due_today
             totals.red += 1 if d.status == "red" else 0
             totals.yellow += 1 if d.status == "yellow" else 0
             totals.green += 1 if d.status == "green" else 0
@@ -140,3 +246,8 @@ class RawDay:
     open_tasks: int = 0
     overdue_tasks: int = 0
     reschedules_without_date: int = field(default=0)
+    meetings_to_confirm: int = 0
+    next_to_confirm_at: datetime | None = None
+    meetings_cancelled: int = 0
+    tasks_due_today: int = 0
+    tasks_done_today: int = 0

@@ -41,6 +41,36 @@ class PlanFact:
     working_days_total: int
     working_days_elapsed: int
     rows: list[PlanFactRow]
+    # The department's own monthly_sales target (department-scope plan); None if not set
+    # or the board spans the whole company.
+    department_id: UUID | None = None
+    department_plan_sales: Decimal | None = None
+
+    @property
+    def working_days_left(self) -> int:
+        return max(self.working_days_total - self.working_days_elapsed, 0)
+
+    @property
+    def department_remaining(self) -> Decimal | None:
+        if self.department_plan_sales is None:
+            return None
+        return max(self.department_plan_sales - Decimal(self.sales_actual_total), Decimal(0))
+
+    @property
+    def department_per_day_needed(self) -> Decimal | None:
+        remaining = self.department_remaining
+        if remaining is None:
+            return None
+        days = max(self.working_days_left, 1)
+        return (remaining / Decimal(days)).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)
+
+    @property
+    def department_percent(self) -> Decimal | None:
+        if not self.department_plan_sales:
+            return None
+        return (Decimal(self.sales_actual_total) * 100 / self.department_plan_sales).quantize(
+            Decimal("0.1"), rounding=ROUND_HALF_UP
+        )
 
     @property
     def plan_sales_total(self) -> Decimal:

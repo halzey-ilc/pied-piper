@@ -32,6 +32,7 @@ from modules.payments.presentation.serializers import (
     payment_to_dict,
 )
 from platform_core.presentation.tenancy import TenantScopedAPIView
+from shared.domain.errors import DomainValidationError
 
 _TENANT_HEADER = OpenApiParameter(
     "X-Tenant",
@@ -98,6 +99,20 @@ _PAYMENT_KIND = OpenApiParameter(
     description="Filter by kind.",
     enum=[k.value for k in PaymentKind],
 )
+_DEPARTMENT = OpenApiParameter(
+    "department_id", str, OpenApiParameter.QUERY, description="Only this sales department."
+)
+
+
+def _uuid_param(value: str | None) -> UUID | None:
+    if not value:
+        return None
+    try:
+        return UUID(value)
+    except ValueError as exc:
+        raise DomainValidationError("department_id must be a UUID.") from exc
+
+
 _PAID_FROM = OpenApiParameter(
     "paid_from", str, OpenApiParameter.QUERY, description="Paid on/after (YYYY-MM-DD)."
 )
@@ -214,9 +229,11 @@ class PaymentMetricsView(_Scoped):
             "(their total value), received (money received, refunds subtracted) and debt "
             "(outstanding on those deals). Never collapsed into one number. "
             "`group_by=seller` adds `by_seller` (sales and new clients per seller) for any "
-            "period: day, week or month via `paid_from`/`paid_to`."
+            "period: day, week or month via `paid_from`/`paid_to`. `department_id` narrows "
+            "everything to one sales department (a head of sales: only their own, else 403). "
+            "`prepayments_count`/`prepayments_amount`: prepayments paid in the period."
         ),
-        parameters=[_TENANT_HEADER, _PAID_FROM, _PAID_TO],
+        parameters=[_TENANT_HEADER, _PAID_FROM, _PAID_TO, _DEPARTMENT],
         responses=SalesMetricsSerializer,
     )
     def get(self, request: Request) -> Response:
@@ -230,6 +247,7 @@ class PaymentMetricsView(_Scoped):
             paid_to=paid_to,
             currency=str(settings["currency"]),
             by_seller=request.query_params.get("group_by") == "seller",
+            department_id=_uuid_param(request.query_params.get("department_id")),
         )
         return Response(metrics_to_dict(metrics))
 

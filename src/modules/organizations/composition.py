@@ -15,6 +15,8 @@ from modules.access_control.domain.rbac import (
 )
 from modules.activities.composition import hand_over_open_tasks
 from modules.audit.infrastructure.audit_log import DjangoAuditLog
+from modules.customers.composition import hand_over_customers
+from modules.leads.composition import hand_over_open_leads
 from modules.organizations.application.service import OrganizationService
 from modules.organizations.infrastructure.memberships import DjangoMemberDirectory
 from modules.organizations.infrastructure.models import Membership
@@ -30,8 +32,8 @@ def temporary_password() -> str:
 
 
 class _TaskHandover:
-    """WorkHandover adapter: open tasks (activities) and open deals (sales) move together,
-    in one transaction of the company's database."""
+    """WorkHandover adapter: open tasks (activities), open deals (sales), leads still being
+    worked and active customers move together, in one transaction of the company's database."""
 
     def __init__(self, tenant_id: UUID) -> None:
         self.tenant_id = tenant_id
@@ -48,7 +50,9 @@ class _TaskHandover:
         with DjangoUnitOfWork(require_tenant().db_alias):
             tasks = hand_over_open_tasks(from_user, to_user, team, actor)
             deals = hand_over_open_deals(from_user, to_user, team, actor)
-        return tasks + deals
+            leads = hand_over_open_leads(from_user, to_user, team, actor)
+            customers = hand_over_customers(from_user, to_user, team, actor)
+        return tasks + deals + leads + customers
 
 
 def organization_service() -> OrganizationService:

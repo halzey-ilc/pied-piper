@@ -57,6 +57,7 @@ urlpatterns = [
     path("team/", include("modules.team_cabinet.presentation.urls")),
     path("ai/", include("modules.ai_insights.presentation.urls")),
     path("operations/", include("modules.operations.presentation.urls")),
+    path("workspace/", include("modules.workspace.presentation.urls")),
     path("risk/", include("modules.risk.presentation.urls")),
     path("platform/", include("modules.platform_admin.presentation.urls")),
     path("support/tickets/", SupportTicketsView.as_view(), name="support-tickets"),

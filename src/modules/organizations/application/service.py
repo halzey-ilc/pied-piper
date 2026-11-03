@@ -430,13 +430,14 @@ class OrganizationService:
     def _offboard(
         self, principal: Principal, member: StaffMember, *, recipient: UUID
     ) -> StaffMember:
-        """Deactivate an account (sign-in blocked) and hand over its open tasks.
+        """Deactivate an account (sign-in blocked) and hand over its work.
 
-        Rule: open tasks and OPEN deals go to ``recipient`` — the head of sales who requested
-        the dismissal, or whoever deactivated directly (director or head of sales); if that
-        person is no longer active, the deciding director. Closed deals, customers, done
-        tasks, meetings, calls and the audit trail keep their owner and author as history;
-        customers can be handed over explicitly. Nothing is deleted.
+        Rule: open tasks, OPEN deals, leads still being worked (new, qualified) and active
+        customers go to ``recipient`` — the head of sales who requested the dismissal, or
+        whoever deactivated directly (director or head of sales); if that person is no longer
+        active, the deciding director. Closed deals, converted and unqualified leads,
+        archived customers, done tasks, meetings, calls and the audit trail keep their owner
+        and author as history. Nothing is deleted.
 
         Two databases are involved: the account (control plane) and the work (company
         database). Callers make this the LAST step of their transaction, so a failure

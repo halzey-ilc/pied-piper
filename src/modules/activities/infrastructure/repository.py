@@ -46,6 +46,15 @@ def _to_domain(row: ActivityRecord) -> Activity:
     )
 
 
+def _refined(qs: QuerySet[ActivityRecord], filters: ActivityFilter) -> QuerySet[ActivityRecord]:
+    """Optional narrowing by task type and free text."""
+    if filters.task_type is not None:
+        qs = qs.filter(task_type=filters.task_type.value)
+    if filters.search:
+        qs = qs.filter(Q(title__icontains=filters.search) | Q(body__icontains=filters.search))
+    return qs
+
+
 class DjangoActivityRepository:
     def __init__(self, using: str) -> None:
         self.using = using
@@ -80,9 +89,7 @@ class DjangoActivityRepository:
             qs = qs.filter(kind="task", task_status="open", due_date__lt=filters.overdue_before)
         if filters.no_due_date:
             qs = qs.filter(kind="task", due_date__isnull=True)
-        if filters.search:
-            qs = qs.filter(Q(title__icontains=filters.search) | Q(body__icontains=filters.search))
-        return qs
+        return _refined(qs, filters)
 
     def add(self, activity: Activity) -> None:
         self._qs().create(

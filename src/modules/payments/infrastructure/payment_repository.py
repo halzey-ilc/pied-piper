@@ -8,6 +8,7 @@ from uuid import UUID
 
 from django.db.models import (
     Case,
+    Count,
     DecimalField,
     F,
     Q,
@@ -56,6 +57,8 @@ class DjangoPaymentRepository:
 
     def _visible(self, visibility: PaymentVisibility) -> QuerySet[PaymentRecord]:
         qs = self._qs()
+        if visibility.department_id is not None:
+            qs = qs.filter(team_id=visibility.department_id)
         if visibility.owner_user_id is None:
             return qs
         condition = Q(owner_user_id=visibility.owner_user_id)
@@ -128,12 +131,22 @@ class DjangoPaymentRepository:
 
     @staticmethod
     def _restrict(visibility: PaymentVisibility) -> Q | None:
+        department = Q(team_id=visibility.department_id) if visibility.department_id else None
         if visibility.owner_user_id is None:
-            return None
+            return department
         restrict = Q(owner_user_id=visibility.owner_user_id)
         if visibility.team_ids:
             restrict |= Q(team_id__in=visibility.team_ids)
-        return restrict
+        return restrict & department if department is not None else restrict
+
+    def prepayments(
+        self, visibility: PaymentVisibility, paid_from: date, paid_to: date
+    ) -> tuple[int, Decimal]:
+        qs = self._visible(visibility).filter(
+            kind="prepayment", is_refund=False, paid_on__gte=paid_from, paid_on__lte=paid_to
+        )
+        row = qs.aggregate(count=Count("id"), total=Sum("amount"))
+        return row["count"] or 0, row["total"] if row["total"] is not None else Decimal(0)
 
     def sold_deal_ids(
         self, visibility: PaymentVisibility, paid_from: date, paid_to: date

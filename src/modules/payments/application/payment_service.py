@@ -6,7 +6,7 @@ and debt are derived from the individual payment records and the deals' values.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date
 from decimal import Decimal
 from uuid import UUID
@@ -32,7 +32,7 @@ from modules.payments.application.ports import (
 from modules.payments.domain.payment import Payment, PaymentKind, PaymentRegistered
 from platform_core.application.ports import EventOutbox
 from shared.application.ports import UnitOfWork
-from shared.domain.errors import NotFoundError
+from shared.domain.errors import AccessDeniedError, NotFoundError
 from shared.domain.value_objects import Money
 
 AGGREGATE = "payment"
@@ -108,9 +108,18 @@ class PaymentService:
         paid_to: date,
         currency: str,
         by_seller: bool = False,
+        department_id: UUID | None = None,
     ) -> SalesMetrics:
         scope = self._policy.require(principal, Permission.PAYMENTS_VIEW)
         visibility = self._visibility(principal, scope)
+        if department_id is not None:
+            # A head of sales narrows only within their own department; the director any.
+            if scope is not Scope.ALL and department_id not in principal.team_ids:
+                raise AccessDeniedError("You can only see your own department.")
+            visibility = replace(visibility, department_id=department_id)
+        prepayments_count, prepayments_amount = self._payments.prepayments(
+            visibility, paid_from, paid_to
+        )
         received = self._payments.received_total(visibility, paid_from, paid_to)
         sold = self._payments.sold_deal_ids(visibility, paid_from, paid_to)
         values = self._deal_values.values(sold)
@@ -127,6 +136,8 @@ class PaymentService:
             received=received,
             debt=debt,
             currency=currency,
+            prepayments_count=prepayments_count,
+            prepayments_amount=prepayments_amount,
             by_seller=(
                 self._payments.per_seller(visibility, paid_from, paid_to) if by_seller else None
             ),
