@@ -150,11 +150,18 @@ def test_outcome_no_show_held_and_reschedule(
 ) -> None:
     client = client_for(make_user("owner", tenant=tenants["acme"]), "acme")
 
-    # no_show
+    # no_show needs its reason (requirement 5.13)
     m1 = _schedule(client).json()["id"]
-    r1 = client.post(
+    bare = client.post(
         f"/api/v1/meetings/{m1}/outcome/",
         {"outcome": "no_show", "comment": "did not come"},
+        format="json",
+    )
+    assert bare.status_code == 400
+    assert bare.json()["error"]["code"] == "no_show_reason_required"
+    r1 = client.post(
+        f"/api/v1/meetings/{m1}/outcome/",
+        {"outcome": "no_show", "comment": "did not come", "reason": "no answer"},
         format="json",
     )
     assert r1.status_code == 200 and r1.json()["status"] == "no_show"

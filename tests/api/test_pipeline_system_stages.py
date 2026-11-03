@@ -426,7 +426,13 @@ def test_a_held_meeting_needs_a_next_step(
 
     # Other outcomes do not ask for a next step.
     other = _meeting(client, deal_id, "2030-01-06T09:00:00Z", "2030-01-06T10:00:00Z")
-    _ok(client.post(f"/api/v1/meetings/{other}/outcome/", {"outcome": "no_show"}, format="json"))
+    _ok(
+        client.post(
+            f"/api/v1/meetings/{other}/outcome/",
+            {"outcome": "no_show", "reason": "no answer"},
+            format="json",
+        )
+    )
 
 
 # --- data migration -------------------------------------------------------------------

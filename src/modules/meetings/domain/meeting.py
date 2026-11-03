@@ -61,6 +61,12 @@ class MeetingStateError(ConflictError):
     code = "meeting_invalid_state"
 
 
+class NoShowReasonRequiredError(DomainValidationError):
+    """Requirement 5.13: a no-show is recorded with its reason (company list or free text)."""
+
+    code = "no_show_reason_required"
+
+
 def _clean(text: str, *, label: str, max_length: int, required: bool) -> str | None:
     cleaned = " ".join(text.split()) if text else ""
     if not cleaned:
@@ -275,12 +281,14 @@ class Meeting:
         self, comment: str | None = None, reason: str | None = None
     ) -> MeetingCompleted:
         self._require_scheduled("marked as a no-show")
+        if not (reason or "").strip():
+            raise NoShowReasonRequiredError("Give the reason the client did not come.")
         self.status = MeetingStatus.NO_SHOW
         self.outcome = _clean(
             comment or "", label="Outcome", max_length=MAX_TEXT_LENGTH, required=False
         )
         self.outcome_reason = _clean(
-            reason or "", label="Reason", max_length=MAX_REASON_LENGTH, required=False
+            reason or "", label="Reason", max_length=MAX_REASON_LENGTH, required=True
         )
         self.version += 1
         return MeetingCompleted(meeting_id=self.id)
