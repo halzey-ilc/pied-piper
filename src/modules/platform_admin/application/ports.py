@@ -31,6 +31,17 @@ class SubscriptionInfo:
 
 
 @dataclass(frozen=True, slots=True)
+class StaffCounts:
+    """The company's current structure: active accounts only, each person counted once."""
+
+    employees: int  # every active member, the director included
+    leaders: int  # director / owner / company admin
+    departments: int  # active sales departments
+    heads_of_sales: int
+    managers: int  # sales managers (sales_rep)
+
+
+@dataclass(frozen=True, slots=True)
 class CompanySummary:
     id: UUID
     slug: str
@@ -40,6 +51,7 @@ class CompanySummary:
     tenant_status: str | None  # provisioning state of the company's database
     users: int  # active accounts
     subscription: SubscriptionInfo | None
+    staff: StaffCounts | None = None
 
 
 @dataclass(frozen=True, slots=True)

@@ -25,6 +25,7 @@ from modules.platform_admin.application.ports import (
     NewCompanyRecord,
     NewDirector,
     PlatformCounts,
+    StaffCounts,
     SubscriptionInfo,
     Ticket,
 )
@@ -45,6 +46,8 @@ from platform_core.infrastructure.tenancy.services import system_tenant_scope
 
 DB = "default"
 _DIRECTOR_ROLES = (Role.OWNER.value, Role.DIRECTOR.value, Role.ADMIN.value)
+# "manager" is the stored legacy value of the head of sales
+_HEAD_ROLES = (Role.HEAD_OF_SALES.value, Role.MANAGER.value)
 _HISTORY_LIMIT = 50
 
 
@@ -92,6 +95,10 @@ def _active_users() -> Q:
     return Q(memberships__is_active=True, memberships__user__is_active=True)
 
 
+def _active_in(roles: tuple[str, ...]) -> Q:
+    return _active_users() & Q(memberships__role__in=roles)
+
+
 class DjangoDirectorCredentialsMixin:
     """Part of DjangoPlatformStore: restoring a director's access."""
 
@@ -123,7 +130,17 @@ class DjangoPlatformStore(DjangoDirectorCredentialsMixin):
         return (
             Organization.objects.using(DB)
             .select_related("subscription", "tenant_database")
-            .annotate(users=Count("memberships", filter=_active_users(), distinct=True))
+            .annotate(
+                users=Count("memberships", filter=_active_users(), distinct=True),
+                leaders=Count("memberships", filter=_active_in(_DIRECTOR_ROLES), distinct=True),
+                heads=Count("memberships", filter=_active_in(_HEAD_ROLES), distinct=True),
+                managers=Count(
+                    "memberships", filter=_active_in((Role.SALES_REP.value,)), distinct=True
+                ),
+                active_departments=Count(
+                    "departments", filter=Q(departments__is_active=True), distinct=True
+                ),
+            )
         )
 
     def _summary(self, org: Any, now: datetime) -> CompanySummary:
@@ -138,6 +155,13 @@ class DjangoPlatformStore(DjangoDirectorCredentialsMixin):
             tenant_status=tenant.status if tenant else None,
             users=org.users,
             subscription=_subscription(sub, now),
+            staff=StaffCounts(
+                employees=org.users,
+                leaders=org.leaders,
+                departments=org.active_departments,
+                heads_of_sales=org.heads,
+                managers=org.managers,
+            ),
         )
 
     def list_companies(

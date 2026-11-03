@@ -101,6 +101,15 @@ def summary_to_dict(c: CompanySummary) -> dict[str, Any]:
         "tenant_status": c.tenant_status,
         "users": c.users,
         "subscription": subscription_to_dict(c.subscription),
+        "staff": None
+        if c.staff is None
+        else {
+            "employees": c.staff.employees,
+            "leaders": c.staff.leaders,
+            "departments": c.staff.departments,
+            "heads_of_sales": c.staff.heads_of_sales,
+            "managers": c.staff.managers,
+        },
     }
 
 

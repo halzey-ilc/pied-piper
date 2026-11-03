@@ -518,3 +518,28 @@ def test_platform_admin_issues_new_director_credentials(
     )
     # A director is never a platform administrator.
     assert client_for(user, None).post(url).status_code == 403
+
+
+def test_company_staff_counts_follow_the_current_structure(
+    admin: APIClient, provisioner: None
+) -> None:
+    created = _connect(admin, "acme")
+    director = _sign_in("dir.acme", created["director"]["temporary_password"], "acme")
+    north = _ok(director.post("/api/v1/departments/", {"name": "North"}, format="json"), 201)["id"]
+    _ok(director.post("/api/v1/departments/", {"name": "South"}, format="json"), 201)
+
+    def hire(login: str, role: str) -> Any:
+        body = {"first_name": login, "role": role, "login": login, "department_id": north}
+        return _ok(director.post("/api/v1/staff/", body, format="json"), 201)
+
+    hire("rop.north", "head_of_sales")
+    hire("m.one", "sales_rep")
+    leaving = hire("m.two", "sales_rep")
+    deactivated = director.post(f"/api/v1/staff/{leaving['member']['id']}/deactivate/")
+    assert deactivated.status_code == 200, deactivated.content
+
+    company_id = created["company"]["id"]
+    expected = {"employees": 3, "leaders": 1, "departments": 2, "heads_of_sales": 1, "managers": 1}
+    listed = _ok(admin.get("/api/v1/platform/companies/?search=acme"))["results"]
+    assert [row["staff"] for row in listed] == [expected]
+    assert _ok(admin.get(f"/api/v1/platform/companies/{company_id}/"))["staff"] == expected
