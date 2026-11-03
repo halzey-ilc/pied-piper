@@ -444,7 +444,9 @@ def test_dismissal_keeps_leads_customers_and_deals_for_manual_redistribution(
     assert _ok(rop.get(f"/api/v1/sales/deals/{deal['id']}/"))["owner_user_id"] == rep_id
     # The head of sales reassigns by hand; the previous owner stays in the history.
     new_owner = str(users["rop_north"].id)
-    _ok(rop.post(f"/api/v1/leads/{lead['id']}/assign/", {"owner_user_id": new_owner}, format="json"))
+    _ok(
+        rop.post(f"/api/v1/leads/{lead['id']}/assign/", {"owner_user_id": new_owner}, format="json")
+    )
     actions = [e["action"] for e in _ok(rop.get(f"/api/v1/leads/{lead['id']}/history/"))["results"]]
     assert "lead.reassigned" in actions
 
