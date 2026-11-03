@@ -463,7 +463,12 @@ def test_a_connected_company_starts_with_the_standard_pipeline(
         assert ensure_starter_pipeline(tenant.db_alias) is False  # a retry adds nothing
         (pipeline,) = DjangoPipelineRepository(tenant.db_alias).list_all()
     assert pipeline.is_default
-    assert [s.kind.value for s in pipeline.stages][-2:] == ["won", "lost"]
+    # The system stages: «Встреча перенесена» after the open ones, «Продажа» always last.
+    assert [(s.name, s.kind.value) for s in pipeline.stages][-3:] == [
+        ("Встреча перенесена", "open"),
+        ("Проиграна", "lost"),
+        ("Продажа", "won"),
+    ]
 
 
 def test_platform_admin_issues_new_director_credentials(

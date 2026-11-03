@@ -26,6 +26,8 @@ from modules.sales_pipeline.composition import ensure_starter_pipeline
 from modules.tenant_registry.infrastructure.models import TenantDatabase
 from platform_core.domain.tenancy import TenantStatus
 from platform_core.infrastructure.tenancy.services import system_tenant_scope
+from tests.api.payment_helpers import pay_confirmed
+from tests.api.sale_helpers import close_as_sale, next_step
 from tests.api.test_platform_admin import _company_body, _sign_in
 from tests.conftest import ALL_DATABASES, TenantFixture
 
@@ -201,7 +203,7 @@ def test_scenario_a_and_b_from_platform_to_a_working_sales_department(
     moved = _ok(
         manager.post(
             f"/api/v1/sales/deals/{deal['id']}/stage/",
-            {"stage_id": stages[1]["id"]},
+            {"stage_id": stages[1]["id"], "next_step": next_step()},
             format="json",
         )
     )
@@ -223,7 +225,11 @@ def test_scenario_a_and_b_from_platform_to_a_working_sales_department(
     timeline = _ok(manager.get(f"/api/v1/activities/?subject_type=deal&subject_id={deal['id']}"))[
         "results"
     ]
-    assert [(a["title"], a["task_status"]) for a in timeline] == [("Send the offer", "completed")]
+    # The move to the next stage planned the next step as a task.
+    assert {(a["title"], a["task_status"]) for a in timeline} == {
+        ("Send the offer", "completed"),
+        ("Перезвонить клиенту", "open"),
+    }
 
 
 # --- C: sales management --------------------------------------------------------------
@@ -256,36 +262,26 @@ def test_scenario_c_plans_and_computed_results(company: dict[str, Any]) -> None:
 
     # One sale: the manager's deal gets its first payment this month (seller: the manager).
     deal = _deal(c["rep_north"], "Licences")
-    _ok(
-        c["director"].post(
-            "/api/v1/payments/",
-            {
-                "deal_id": deal["id"],
-                "amount": "400.00",
-                "kind": "prepayment",
-                "paid_on": str(_today()),
-                "seller_user_id": rep_north,
-            },
-            format="json",
-        ),
-        201,
+    pay_confirmed(
+        c["director"],
+        c["rop_north"],
+        deal_id=deal["id"],
+        amount="400.00",
+        kind="prepayment",
+        paid_on=str(_today()),
+        seller_user_id=rep_north,
     )
     # A call today counts nowhere here (no call plan), a payment of another department
     # does not count for North.
     south_deal = _deal(c["rep_south"], "South deal")
-    _ok(
-        c["director"].post(
-            "/api/v1/payments/",
-            {
-                "deal_id": south_deal["id"],
-                "amount": "900.00",
-                "kind": "full",
-                "paid_on": str(_today()),
-                "seller_user_id": str(users["rep_south"].id),
-            },
-            format="json",
-        ),
-        201,
+    pay_confirmed(
+        c["director"],
+        c["rop_south"],
+        deal_id=south_deal["id"],
+        amount="900.00",
+        kind="full",
+        paid_on=str(_today()),
+        seller_user_id=str(users["rep_south"].id),
     )
 
     def progress(client: APIClient) -> dict[tuple[str, str], dict[str, Any]]:
@@ -538,7 +534,7 @@ def test_scenario_g_dismissal_keeps_history_and_hands_over_open_work(
     done = _ok(_task(c["rep_north"], other_deal["id"], "Intro call"), 201)
     _ok(c["rep_north"].post(f"/api/v1/activities/{done['id']}/complete/"))
     won = _deal(c["rep_north"], "Already won")
-    _ok(c["rep_north"].post(f"/api/v1/sales/deals/{won['id']}/win/"))
+    close_as_sale(won["id"])
     note = _ok(
         c["rep_north"].post(
             "/api/v1/activities/",
@@ -663,7 +659,9 @@ def test_pipeline_stages_are_configured_without_breaking_deals(company: dict[str
     assert busy.status_code == 409 and busy.json()["error"]["code"] == "stage_in_use"
     _ok(
         director.post(
-            f"/api/v1/sales/deals/{deal['id']}/stage/", {"stage_id": first}, format="json"
+            f"/api/v1/sales/deals/{deal['id']}/stage/",
+            {"stage_id": first, "next_step": next_step()},
+            format="json",
         )
     )
     archived = _ok(director.patch(f"{url}stages/{second}/", {"is_active": False}, format="json"))

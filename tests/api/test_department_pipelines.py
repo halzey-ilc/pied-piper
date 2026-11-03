@@ -10,6 +10,7 @@ import pytest
 from rest_framework.test import APIClient
 
 from modules.access_control.domain.rbac import Role
+from tests.api.sale_helpers import close_as_sale
 from tests.conftest import ALL_DATABASES, TenantFixture
 
 pytestmark = pytest.mark.django_db(databases=ALL_DATABASES)
@@ -161,14 +162,13 @@ def test_deleting_a_stage_moves_its_deals_with_history(
     assert history[-1]["to_stage_id"] == stages["Думает"]
     assert "удалён" in history[-1]["reason"]
 
-    # A never-used stage is removed outright; the last won stage cannot go.
+    # A never-used stage is removed outright; «Продажа» (the system won stage) cannot go.
     unused = head.delete(f"/api/v1/sales/pipelines/{funnel['id']}/stages/{stages['Тёплый']}/")
     assert unused.status_code == 200 and unused.json()["archived"] is False
     assert stages["Тёплый"] not in [s["id"] for s in unused.json()["pipeline"]["stages"]]
-    last_won = head.delete(
-        f"/api/v1/sales/pipelines/{funnel['id']}/stages/{stages['Успешная сделка']}/"
-    )
+    last_won = head.delete(f"/api/v1/sales/pipelines/{funnel['id']}/stages/{stages['Продажа']}/")
     assert last_won.status_code == 400
+    assert last_won.json()["error"]["code"] == "system_stage_locked"
 
 
 def test_department_deals_move_into_its_funnel_only_on_confirmation(
@@ -193,10 +193,12 @@ def test_department_deals_move_into_its_funnel_only_on_confirmation(
     # Deals opened before the department had its own funnel stay in the company pipeline.
     open_deal = deal(manager, "Открытая")
     closed_deal = deal(manager, "Закрытая")
-    moved = manager.post(
+    refused = manager.post(
         f"/api/v1/sales/deals/{closed_deal}/stage/", {"stage_id": won_stage}, format="json"
     )
-    assert moved.status_code == 200, moved.content
+    assert refused.status_code == 409
+    assert refused.json()["error"]["code"] == "sale_requires_payment"
+    close_as_sale(closed_deal)
     foreign_deal = deal(outsider, "Чужая")
 
     funnel = head.post(

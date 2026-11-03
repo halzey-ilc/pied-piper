@@ -11,6 +11,7 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 
 from modules.access_control.domain.rbac import Principal, Role
+from modules.activities.presentation.serializers import next_step_from
 from modules.meetings.application.ports import MeetingFilter
 from modules.meetings.application.service import EditMeeting, MeetingService, ScheduleMeeting
 from modules.meetings.composition import meeting_service
@@ -334,7 +335,10 @@ class MeetingCompleteView(_Scoped):
         serializer.is_valid(raise_exception=True)
         service, principal = _service(self)
         meeting = service.complete(
-            principal, meeting_id, serializer.validated_data.get("outcome") or None
+            principal,
+            meeting_id,
+            serializer.validated_data.get("outcome") or None,
+            next_step=next_step_from(serializer.validated_data.get("next_step")),
         )
         return Response(meeting_to_dict(meeting))
 
@@ -390,7 +394,9 @@ class MeetingOutcomeView(_Scoped):
         description=(
             "Records how a scheduled meeting turned out: `held`, `no_show`, `rescheduled` "
             "(with `new_start`/`new_end` for a new date, or neither to park it awaiting one) "
-            "or `cancelled`. `comment` is stored as the outcome note."
+            "or `cancelled`. `comment` is stored as the outcome note. `held` for a meeting "
+            "of a deal or customer needs `next_step` (task title, due date, assignee) unless "
+            "an open task with a due date already exists: else 400 `next_step_required`."
         ),
         parameters=[_TENANT_HEADER],
         request=MeetingOutcomeSerializer,
@@ -409,6 +415,7 @@ class MeetingOutcomeView(_Scoped):
             new_end=data.get("new_end"),
             comment=data.get("comment") or None,
             reason=data.get("reason") or None,
+            next_step=next_step_from(data.get("next_step")),
         )
         return Response(meeting_to_dict(meeting))
 

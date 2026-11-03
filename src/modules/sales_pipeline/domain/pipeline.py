@@ -32,6 +32,31 @@ class StageNotInPipelineError(NotFoundError):
     code = "stage_not_in_pipeline"
 
 
+class SystemStage(StrEnum):
+    """Stages every pipeline has, created by the system (owner decision of 03.11.2026).
+
+    ``sale`` — «Продажа»: the won stage, always last; a deal reaches it only through a
+    confirmed payment. ``meeting_rescheduled`` — «Встреча перенесена»: an open stage the
+    head of sales may move or switch off; moving a deal there needs a new meeting date.
+    Names are fixed; neither can be deleted.
+    """
+
+    SALE = "sale"
+    MEETING_RESCHEDULED = "meeting_rescheduled"
+
+
+SYSTEM_STAGE_NAMES = {
+    SystemStage.SALE: "Продажа",
+    SystemStage.MEETING_RESCHEDULED: "Встреча перенесена",
+}
+
+
+class SystemStageLockedError(DomainValidationError):
+    """A system stage keeps its name, cannot be deleted, and «Продажа» stays last and on."""
+
+    code = "system_stage_locked"
+
+
 def _clean_name(name: str, label: str) -> str:
     cleaned = " ".join(name.split())
     if not cleaned:
@@ -49,6 +74,11 @@ class Stage:
     probability: int
     kind: StageKind = StageKind.OPEN
     is_active: bool = True
+    system_code: SystemStage | None = None
+
+    @property
+    def is_system(self) -> bool:
+        return self.system_code is not None
 
 
 @dataclass(frozen=True, slots=True)
@@ -109,7 +139,7 @@ class Pipeline:
             id=uuid4(),
             name=_clean_name(name, "Pipeline"),
             is_default=is_default,
-            stages=tuple(built),
+            stages=with_system_stages(built),
             department_id=department_id,
         )
 
@@ -128,6 +158,9 @@ class Pipeline:
     def has_stage(self, stage_id: UUID) -> bool:
         return any(stage.id == stage_id for stage in self.stages)
 
+    def system_stage(self, code: SystemStage) -> Stage | None:
+        return next((st for st in self.stages if st.system_code is code), None)
+
     # --- configuration (director / pipelines.manage) ------------------------------
 
     def rename(self, name: str) -> bool:
@@ -144,7 +177,9 @@ class Pipeline:
         _check_probability(definition.probability)
         name = self._unique_name(definition.name)
         ordered = sorted(self.stages, key=lambda st: st.position)
-        index = len(ordered) if position is None else max(0, min(position, len(ordered)))
+        # «Продажа» stays last: new stages go before it
+        last = len(ordered) - (1 if ordered and ordered[-1].system_code is SystemStage.SALE else 0)
+        index = last if position is None else max(0, min(position, last))
         stage = Stage(
             id=uuid4(),
             name=name,
@@ -163,6 +198,10 @@ class Pipeline:
         closed on it would otherwise change meaning."""
         current = self.stage(stage_id)
         updated = current
+        if name is not None and current.is_system and " ".join(name.split()) != current.name:
+            raise SystemStageLockedError(
+                f"{current.name!r} is a system stage and cannot be renamed."
+            )
         if name is not None:
             updated = replace(updated, name=self._unique_name(name, exclude=stage_id))
         if probability is not None:
@@ -178,6 +217,9 @@ class Pipeline:
         if sorted(map(str, stage_ids)) != sorted(str(st.id) for st in self.stages):
             raise DomainValidationError("stage_ids must list every stage of the pipeline once.")
         by_id = {st.id: st for st in self.stages}
+        sale = self.system_stage(SystemStage.SALE)
+        if sale is not None and stage_ids[-1] != sale.id:
+            raise SystemStageLockedError("The sale stage is a system stage and always comes last.")
         reordered = _renumbered([by_id[sid] for sid in stage_ids])
         if reordered == tuple(sorted(self.stages, key=lambda st: st.position)):
             return False
@@ -189,6 +231,10 @@ class Pipeline:
         current = self.stage(stage_id)
         if current.is_active == active:
             return False
+        if current.system_code is SystemStage.SALE:
+            raise SystemStageLockedError(
+                "The sale stage is a system stage and cannot be switched off."
+            )
         candidate = tuple(
             replace(st, is_active=active) if st.id == stage_id else st for st in self.stages
         )
@@ -199,6 +245,10 @@ class Pipeline:
     def remove_stage(self, stage_id: UUID) -> Stage:
         """Delete a stage outright (only one no deal ever stood on); later stages shift up."""
         removed = self.stage(stage_id)
+        if removed.is_system:
+            raise SystemStageLockedError(
+                f"{removed.name!r} is a system stage and cannot be deleted."
+            )
         remaining = [
             st for st in sorted(self.stages, key=lambda st: st.position) if st.id != stage_id
         ]
@@ -211,6 +261,86 @@ class Pipeline:
         if any(st.name.lower() == cleaned.lower() and st.id != exclude for st in self.stages):
             raise DomainValidationError(f"Duplicate stage name: {cleaned}.")
         return cleaned
+
+
+def with_system_stages(stages: list[Stage] | tuple[Stage, ...]) -> tuple[Stage, ...]:
+    """Make sure the stages carry both system stages, with «Продажа» last.
+
+    The first won stage becomes «Продажа» (its id is kept, so history stays valid); a stage
+    already named like a system stage becomes that system stage; missing ones are added.
+    «Встреча перенесена» goes right before «Продажа»."""
+    ordered = sorted(stages, key=lambda st: st.position)
+    names = {code: name.lower() for code, name in SYSTEM_STAGE_NAMES.items()}
+    sale = next((st for st in ordered if st.system_code is SystemStage.SALE), None)
+    if sale is None:
+        sale = next(
+            (
+                st
+                for st in ordered
+                if st.kind is StageKind.WON and st.name.lower() == names[SystemStage.SALE]
+            ),
+            None,
+        ) or next((st for st in ordered if st.kind is StageKind.WON), None)
+    if sale is None:
+        sale = Stage(id=uuid4(), name="", position=0, probability=100, kind=StageKind.WON)
+    else:
+        ordered = [st for st in ordered if st.id != sale.id]
+    sale = replace(
+        sale,
+        name=SYSTEM_STAGE_NAMES[SystemStage.SALE],
+        kind=StageKind.WON,
+        is_active=True,
+        system_code=SystemStage.SALE,
+    )
+    # A plain stage that happens to carry the system name would clash with it
+    ordered = [
+        st
+        if st.is_system or st.name.lower() != names[SystemStage.SALE]
+        else replace(st, name=f"{st.name} (2)")
+        for st in ordered
+    ]
+    moved = next((st for st in ordered if st.system_code is SystemStage.MEETING_RESCHEDULED), None)
+    if moved is None:
+        named = next(
+            (
+                st
+                for st in ordered
+                if st.kind is StageKind.OPEN
+                and st.name.lower() == names[SystemStage.MEETING_RESCHEDULED]
+            ),
+            None,
+        )
+        if named is not None:
+            ordered = [
+                replace(st, system_code=SystemStage.MEETING_RESCHEDULED)
+                if st.id == named.id
+                else st
+                for st in ordered
+            ]
+        else:
+            ordered = [
+                st
+                if st.name.lower() != names[SystemStage.MEETING_RESCHEDULED]
+                else replace(st, name=f"{st.name} (2)")
+                for st in ordered
+            ]
+            # After the last open stage, before the closing ones
+            closing = next(
+                (i for i, st in enumerate(ordered) if st.kind is not StageKind.OPEN), len(ordered)
+            )
+            ordered.insert(
+                closing,
+                Stage(
+                    id=uuid4(),
+                    name=SYSTEM_STAGE_NAMES[SystemStage.MEETING_RESCHEDULED],
+                    position=0,
+                    probability=0,
+                    kind=StageKind.OPEN,
+                    system_code=SystemStage.MEETING_RESCHEDULED,
+                ),
+            )
+    ordered.append(sale)
+    return _renumbered(ordered)
 
 
 def _check_still_usable(

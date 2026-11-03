@@ -10,6 +10,7 @@ import pytest
 from rest_framework.test import APIClient
 
 from modules.access_control.domain.rbac import Role
+from tests.api.payment_helpers import pay_confirmed
 from tests.conftest import ALL_DATABASES, TenantFixture
 
 pytestmark = pytest.mark.django_db(databases=ALL_DATABASES)
@@ -125,25 +126,19 @@ def test_plan_fact_plan_versus_actual(
     deal_id = director.post(
         "/api/v1/sales/deals/", {"title": "D", "amount": "3000"}, format="json"
     ).json()["id"]
-    paid = rep.post(
-        "/api/v1/payments/",
-        {"deal_id": deal_id, "amount": "1000.00", "kind": "prepayment", "paid_on": f"{month}-15"},
-        format="json",
+    pay_confirmed(
+        rep, director, deal_id=deal_id, amount="1000.00", kind="prepayment", paid_on=f"{month}-15"
     )
-    assert paid.status_code == 201, paid.content
     # A payment in another currency is never added to the company-currency money figures.
-    other = rep.post(
-        "/api/v1/payments/",
-        {
-            "deal_id": deal_id,
-            "amount": "50.00",
-            "currency": "EUR",
-            "kind": "additional",
-            "paid_on": f"{month}-16",
-        },
-        format="json",
+    pay_confirmed(
+        rep,
+        director,
+        deal_id=deal_id,
+        amount="50.00",
+        currency="EUR",
+        kind="additional",
+        paid_on=f"{month}-16",
     )
-    assert other.status_code == 201, other.content
 
     pf = director.get(f"/api/v1/team/plan-fact/?month={month}").json()
     assert len(pf["currency"]) == 3 and pf["currency"] != "EUR"

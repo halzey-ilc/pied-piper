@@ -11,6 +11,7 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 
 from modules.access_control.domain.rbac import Principal, Role
+from modules.activities.presentation.serializers import next_step_from
 from modules.customers.composition import customer_service
 from modules.organizations.composition import (
     company_settings,
@@ -21,7 +22,7 @@ from modules.sales_pipeline.application.custom_field_service import (
     CreateCustomField,
     UpdateCustomField,
 )
-from modules.sales_pipeline.application.deal_service import EditDeal, OpenDeal
+from modules.sales_pipeline.application.deal_service import EditDeal, OpenDeal, StageMoveExtras
 from modules.sales_pipeline.application.loss_reason_service import UpdateLossReason
 from modules.sales_pipeline.application.pipeline_service import CreatePipeline
 from modules.sales_pipeline.application.ports import DealFilter
@@ -647,7 +648,14 @@ class DealMoveView(_Scoped):
         description=(
             "Transitions an open deal to a stage of its own pipeline. Moving into a "
             "`won`-kind stage closes the deal as won; a `lost`-kind stage closes it as lost "
-            "and requires `reason`. An `open`-kind stage just moves the deal."
+            "and requires `reason`. An `open`-kind stage just moves the deal.\n\n"
+            "System stages: «Продажа» (`system_code=sale`) is refused with 409 "
+            "`sale_requires_payment` — a sale is closed by recording a confirmed payment. "
+            "«Встреча перенесена» (`meeting_rescheduled`) needs `meeting_start`/`meeting_end` "
+            "(400 `meeting_date_required`) and moves the deal's nearest scheduled meeting "
+            "(or books one for the deal owner) in the same transaction. Any other new open "
+            "stage needs `next_step` unless the deal already has an open task with a due "
+            "date (400 `next_step_required`)."
         ),
         parameters=[_TENANT_HEADER],
         request=DealMoveSerializer,
@@ -656,12 +664,18 @@ class DealMoveView(_Scoped):
     def post(self, request: Request, deal_id: UUID) -> Response:
         serializer = DealMoveSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
         deal = deal_service().move_stage(
             self.principal(),
             deal_id,
-            serializer.validated_data["stage_id"],
-            reason=serializer.validated_data.get("reason"),
-            loss_reason_id=serializer.validated_data.get("loss_reason_id"),
+            data["stage_id"],
+            reason=data.get("reason"),
+            loss_reason_id=data.get("loss_reason_id"),
+            extras=StageMoveExtras(
+                meeting_start=data.get("meeting_start"),
+                meeting_end=data.get("meeting_end"),
+                next_step=next_step_from(data.get("next_step")),
+            ),
         )
         return Response(deal_to_dict(deal))
 
@@ -690,8 +704,11 @@ class DealWinView(_Scoped):
     @extend_schema(
         tags=_DEAL_TAGS,
         operation_id="deals_win",
-        summary="Mark a deal won",
-        description="Closes an open deal as won and records the close time.",
+        summary="Mark a deal won (refused)",
+        description=(
+            "Always 409 `sale_requires_payment`: a deal is won only when a confirmed payment "
+            "moves it to «Продажа» (payments)."
+        ),
         parameters=[_TENANT_HEADER],
         request=None,
         responses=DealReadSerializer,

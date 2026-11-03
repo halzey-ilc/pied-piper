@@ -15,9 +15,12 @@ from uuid import UUID
 import pytest
 from rest_framework.test import APIClient
 
+from modules.access_control.domain.rbac import Role
 from modules.activities.infrastructure.models import ActivityRecord
 from modules.organizations.infrastructure.models import Membership
 from modules.planning.infrastructure.models import WorkSessionRecord
+from tests.api.payment_helpers import pay_confirmed
+from tests.api.sale_helpers import close_as_sale
 from tests.api.test_crm_scenarios import _customer, _deal, _ok, _task, two_department_company
 from tests.conftest import ALL_DATABASES, TenantFixture
 
@@ -45,11 +48,10 @@ def _lead(client: APIClient, name: str, **body: Any) -> dict[str, Any]:
     return lead
 
 
-def _pay(client: APIClient, **body: Any) -> dict[str, Any]:
-    body.setdefault("kind", "prepayment")
+def _pay(client: APIClient, verifier: APIClient, **body: Any) -> dict[str, Any]:
+    """A payment with its receipt, confirmed by ``verifier`` (only confirmed ones count)."""
     body.setdefault("paid_on", str(_today()))
-    payment: dict[str, Any] = _ok(client.post("/api/v1/payments/", body, format="json"), 201)
-    return payment
+    return pay_confirmed(client, verifier, **body)
 
 
 # --- leads ------------------------------------------------------------------------------
@@ -134,7 +136,7 @@ def test_one_customer_has_independent_deals(company: dict[str, Any]) -> None:
     customer = _customer(rep, "Returning client")
     first = _deal(rep, "First order", customer_id=customer)
     second = _deal(rep, "Second order", customer_id=customer)
-    _ok(rep.post(f"/api/v1/sales/deals/{first['id']}/win/"))
+    close_as_sale(first["id"])
     still_open = _ok(rep.get(f"/api/v1/sales/deals/{second['id']}/"))
     assert still_open["status"] == "open" and still_open["customer_id"] == customer
     listed = _ok(rep.get(f"/api/v1/sales/deals/?customer_id={customer}"))
@@ -200,9 +202,16 @@ def test_meetings_filter_by_period_and_responsible(company: dict[str, Any]) -> N
 
 def test_every_new_deal_is_a_sale_and_new_clients_are_counted_apart(
     company: dict[str, Any],
+    make_user: Callable[..., Any],
+    tenants: dict[str, TenantFixture],
+    client_for: Callable[..., APIClient],
 ) -> None:
     """Owner decision 02.11.2026: each new deal is a sale, even for a returning client."""
     c, users = company["c"], company["users"]
+    # A payment without a deal has no department: another director confirms it.
+    second_director = client_for(
+        make_user("director2", tenant=tenants["acme"], role=Role.DIRECTOR), "acme"
+    )
     director, rep, rep_id = c["director"], c["rep_north"], str(users["rep_north"].id)
     month = f"{_today():%Y-%m}"
     earlier = _today().replace(day=1) - timedelta(days=5)
@@ -211,7 +220,8 @@ def test_every_new_deal_is_a_sale_and_new_clients_are_counted_apart(
         body = {"amount": amount, "seller_user_id": rep_id, **extra}
         if deal is not None:
             body["deal_id"] = deal["id"]
-        _pay(director, **body)
+        # The head of sales confirms payments on the department's deals.
+        _pay(director, c["rop_north"] if deal is not None else second_director, **body)
 
     client = _customer(rep, "Returning client")
     first = _deal(rep, "Order", customer_id=client)
@@ -388,9 +398,17 @@ def test_a_refund_in_another_currency_does_not_cancel_the_sale(company: dict[str
     c, users = company["c"], company["users"]
     rep_id = str(users["rep_north"].id)
     deal = _deal(c["rep_north"], "Mixed currencies")
-    _pay(c["director"], deal_id=deal["id"], amount="100.00", currency="USD", seller_user_id=rep_id)
     _pay(
         c["director"],
+        c["rop_north"],
+        deal_id=deal["id"],
+        amount="100.00",
+        currency="USD",
+        seller_user_id=rep_id,
+    )
+    _pay(
+        c["director"],
+        c["rop_north"],
         deal_id=deal["id"],
         amount="9000.00",
         currency="KGS",
@@ -401,6 +419,7 @@ def test_a_refund_in_another_currency_does_not_cancel_the_sale(company: dict[str
     # A refund of the full amount in the same currency cancels it.
     _pay(
         c["director"],
+        c["rop_north"],
         deal_id=deal["id"],
         amount="100.00",
         currency="USD",
@@ -456,13 +475,19 @@ def test_payment_metrics_per_department_with_prepayments(company: dict[str, Any]
     north_deal = _deal(
         c["rep_north"], "North deal", customer_id=_customer(c["rep_north"], "N client")
     )
-    _pay(c["rep_north"], deal_id=north_deal["id"], amount="100.00")  # prepayment, a sale
-    _pay(c["rep_north"], deal_id=north_deal["id"], amount="40.00", kind="additional")
+    _pay(
+        c["rep_north"], c["rop_north"], deal_id=north_deal["id"], amount="100.00"
+    )  # prepayment, a sale
+    _pay(
+        c["rep_north"], c["rop_north"], deal_id=north_deal["id"], amount="40.00", kind="additional"
+    )
     south_deal = _deal(
         c["rep_south"], "South deal", customer_id=_customer(c["rep_south"], "S client")
     )
-    _pay(c["rep_south"], deal_id=south_deal["id"], amount="70.00")
-    _pay(c["rep_south"], deal_id=south_deal["id"], amount="70.00", is_refund=True)  # not counted
+    _pay(c["rep_south"], c["rop_south"], deal_id=south_deal["id"], amount="70.00")
+    _pay(
+        c["rep_south"], c["rop_south"], deal_id=south_deal["id"], amount="70.00", is_refund=True
+    )  # not counted
 
     director = c["director"]
     north = _ok(director.get(f"/api/v1/payments/metrics/?department_id={company['north']}"))

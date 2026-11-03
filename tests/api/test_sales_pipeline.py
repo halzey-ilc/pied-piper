@@ -11,6 +11,7 @@ from rest_framework.test import APIClient
 from modules.access_control.domain.rbac import Role
 from modules.sales_pipeline.infrastructure.models import DealRecord, PipelineRecord
 from platform_core.infrastructure.messaging.models import OutboxMessage
+from tests.api.sale_helpers import close_as_sale, next_step
 from tests.conftest import ALL_DATABASES, TenantFixture
 
 pytestmark = pytest.mark.django_db(databases=ALL_DATABASES)
@@ -51,7 +52,12 @@ def test_create_pipeline_assigns_positions_and_single_default(
 ) -> None:
     client = client_for(make_user("owner", tenant=tenants["acme"]), "acme")
     pipeline = _pipeline(client)
-    assert [s["position"] for s in pipeline["stages"]] == [0, 1, 2]
+    assert [s["position"] for s in pipeline["stages"]] == [0, 1, 2, 3, 4]
+    # Every pipeline gets the system stages: «Встреча перенесена» and «Продажа» (last).
+    assert [(s["name"], s["system_code"]) for s in pipeline["stages"]][3:] == [
+        ("Встреча перенесена", "meeting_rescheduled"),
+        ("Продажа", "sale"),
+    ]
     assert pipeline["is_default"] is True
 
     # Creating a second default moves the default; only one remains.
@@ -75,14 +81,18 @@ def test_full_deal_lifecycle_open_move_win(
 
     moved = client.post(
         f"/api/v1/sales/deals/{deal_id}/stage/",
-        {"stage_id": pipeline["stages"][1]["id"]},
+        {"stage_id": pipeline["stages"][1]["id"], "next_step": next_step()},
         format="json",
     )
     assert moved.status_code == 200 and moved.json()["stage_id"] == pipeline["stages"][1]["id"]
 
-    won = client.post(f"/api/v1/sales/deals/{deal_id}/win/", {}, format="json")
-    assert won.status_code == 200
-    assert won.json()["status"] == "won" and won.json()["closed_at"] is not None
+    # Winning by hand is refused: a sale is closed by a confirmed payment.
+    refused = client.post(f"/api/v1/sales/deals/{deal_id}/win/", {}, format="json")
+    assert refused.status_code == 409
+    assert refused.json()["error"]["code"] == "sale_requires_payment"
+    close_as_sale(deal_id)
+    won = client.get(f"/api/v1/sales/deals/{deal_id}/").json()
+    assert won["status"] == "won" and won["closed_at"] is not None
 
     events = set(OutboxMessage.objects.using("tenant_acme").values_list("event_type", flat=True))
     assert {"sales.deal_created", "sales.deal_stage_changed", "sales.deal_won"} <= events
@@ -129,7 +139,9 @@ def test_reopen_returns_to_last_open_stage(
     by_name = {s["name"]: s["id"] for s in response.json()["stages"]}
     deal_id = _deal(client)["id"]
     moved = client.post(
-        f"/api/v1/sales/deals/{deal_id}/stage/", {"stage_id": by_name["Proposal"]}, format="json"
+        f"/api/v1/sales/deals/{deal_id}/stage/",
+        {"stage_id": by_name["Proposal"], "next_step": next_step()},
+        format="json",
     )
     assert moved.status_code == 200, moved.content
     lost = client.post(
@@ -283,8 +295,9 @@ def test_stage_read_exposes_kind_and_active_defaults(
     client = client_for(make_user("owner", tenant=tenants["acme"]), "acme")
     pipeline = _pipeline(client)  # plain _STAGES, no explicit kind
     for stage in pipeline["stages"]:
-        assert stage["kind"] == "open"
+        assert stage["kind"] == ("won" if stage["system_code"] == "sale" else "open")
         assert stage["is_active"] is True
+        assert stage["is_system"] is (stage["system_code"] is not None)
 
 
 def test_pipeline_requires_at_least_one_open_stage(
@@ -309,7 +322,7 @@ def test_pipeline_requires_at_least_one_open_stage(
     assert response.json()["error"]["code"] == "validation_error"
 
 
-def test_transition_to_won_stage_closes_deal_as_won(
+def test_sale_stage_is_reached_only_by_a_confirmed_payment(
     make_user: Callable[..., Any],
     tenants: dict[str, TenantFixture],
     client_for: Callable[..., APIClient],
@@ -317,6 +330,7 @@ def test_transition_to_won_stage_closes_deal_as_won(
     client = client_for(make_user("owner", tenant=tenants["acme"]), "acme")
     pipeline = _kind_pipeline(client)
     won_stage = next(s for s in pipeline["stages"] if s["kind"] == "won")
+    assert won_stage["system_code"] == "sale" and won_stage["name"] == "Продажа"
     deal_id = _deal(client, amount="4000.00")["id"]
 
     response = client.post(
@@ -324,11 +338,13 @@ def test_transition_to_won_stage_closes_deal_as_won(
         {"stage_id": won_stage["id"]},
         format="json",
     )
-    assert response.status_code == 200, response.content
-    body = response.json()
+    assert response.status_code == 409, response.content
+    assert response.json()["error"]["code"] == "sale_requires_payment"
+    assert client.get(f"/api/v1/sales/deals/{deal_id}/").json()["status"] == "open"
+
+    body = close_as_sale(deal_id)
     assert body["status"] == "won"
     assert body["stage_id"] == won_stage["id"]
-    assert body["closed_at"] is not None
 
     events = set(OutboxMessage.objects.using("tenant_acme").values_list("event_type", flat=True))
     assert "sales.deal_won" in events
@@ -616,16 +632,13 @@ def test_stage_history_records_transitions_in_order(
     deal_id = _deal(client)["id"]
     assert (
         client.post(
-            f"/api/v1/sales/deals/{deal_id}/stage/", {"stage_id": qualify["id"]}, format="json"
+            f"/api/v1/sales/deals/{deal_id}/stage/",
+            {"stage_id": qualify["id"], "next_step": next_step()},
+            format="json",
         ).status_code
         == 200
     )
-    assert (
-        client.post(
-            f"/api/v1/sales/deals/{deal_id}/stage/", {"stage_id": won["id"]}, format="json"
-        ).status_code
-        == 200
-    )
+    close_as_sale(deal_id)
 
     history = client.get(f"/api/v1/sales/deals/{deal_id}/stage-history/")
     assert history.status_code == 200, history.content

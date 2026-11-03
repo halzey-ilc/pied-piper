@@ -191,7 +191,8 @@ def test_brief_sends_deal_and_history_without_phone_numbers(
     assert ai.submits[0]["job_type"] == "deal.coach.v1"
     deal = payload["deal"]
     assert deal["ref"] == f"deal:{deal_id}" and deal["stage"] == "New"
-    assert (deal["stage_position"], deal["stage_count"], deal["probability"]) == (1, 3, 10)
+    # Three open stages plus the system «Встреча перенесена» and «Продажа».
+    assert (deal["stage_position"], deal["stage_count"], deal["probability"]) == (1, 5, 10)
     assert deal["amount"] == 450000.0 and deal["expected_close_date"] == "2026-01-10"
     kinds = {h["kind"]: h for h in payload["history"]}
     assert set(kinds) == {"note", "task", "meeting", "call"}

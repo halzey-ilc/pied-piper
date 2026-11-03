@@ -49,6 +49,8 @@ class StageRecord(models.Model):
         default=StageKind.OPEN.value,
     )
     is_active = models.BooleanField(default=True)
+    # «Продажа» (sale) / «Встреча перенесена» (meeting_rescheduled); null for ordinary stages
+    system_code = models.CharField(max_length=32, null=True, blank=True)  # noqa: DJ001
 
     class Meta:
         db_table = "sales_stage"

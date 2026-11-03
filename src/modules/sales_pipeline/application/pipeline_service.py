@@ -25,7 +25,13 @@ from modules.sales_pipeline.application.ports import (
     StageChangeRepository,
 )
 from modules.sales_pipeline.domain.deal import DealStatus
-from modules.sales_pipeline.domain.pipeline import Pipeline, Stage, StageDefinition, StageKind
+from modules.sales_pipeline.domain.pipeline import (
+    Pipeline,
+    Stage,
+    StageDefinition,
+    StageKind,
+    SystemStageLockedError,
+)
 from modules.sales_pipeline.domain.stage_change import StageChange
 from shared.application.ports import UnitOfWork
 from shared.domain.errors import (
@@ -228,6 +234,10 @@ class PipelineService:
         with self._uow:
             pipeline = self._load_for_config(principal, pipeline_id)
             stage = pipeline.stage(stage_id)
+            if stage.is_system:
+                raise SystemStageLockedError(
+                    f"{stage.name!r} is a system stage and cannot be deleted."
+                )
             moved: list[tuple[UUID, int]] = []
             if deals.stage_counts(pipeline.id).get(stage.id, (0, 0))[1] > 0:
                 if move_to_stage_id is None:

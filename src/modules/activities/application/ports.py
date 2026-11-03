@@ -62,6 +62,10 @@ class ActivityRepository(Protocol):
         """Open tasks attached to one subject (used to cap open tasks per deal)."""
         ...
 
+    def has_open_dated_task(self, subject: SubjectRef) -> bool:
+        """An open task with a due date is attached to the subject (the next step is planned)."""
+        ...
+
 
 class SubjectChecker(Protocol):
     """Verifies the customer or deal an activity is attached to exists in this tenant."""

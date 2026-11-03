@@ -17,6 +17,7 @@ from modules.ai_insights.application.ports import AiJobState
 from modules.audit.infrastructure.models import AuditRecord
 from modules.sales_pipeline.infrastructure.models import DealRecord
 from platform_core.infrastructure.tenancy.services import system_tenant_scope
+from tests.api.sale_helpers import close_as_sale
 from tests.conftest import ALL_DATABASES, TenantFixture
 
 pytestmark = pytest.mark.django_db(databases=ALL_DATABASES)
@@ -41,7 +42,7 @@ def _won_deal_without_activity(client: APIClient) -> str:
     deal_id: str = _ok(
         client.post("/api/v1/sales/deals/", {"title": "D", "amount": "10.00"}, format="json")
     )["id"]
-    _ok(client.post(f"/api/v1/sales/deals/{deal_id}/win/"))
+    close_as_sale(deal_id)
     return deal_id
 
 

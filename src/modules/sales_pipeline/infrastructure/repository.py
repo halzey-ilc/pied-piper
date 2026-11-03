@@ -10,7 +10,7 @@ from modules.sales_pipeline.application.ports import ORDERING_FIELDS, DealFilter
 from modules.sales_pipeline.domain.custom_field import CustomFieldDefinition, CustomFieldType
 from modules.sales_pipeline.domain.deal import Deal, DealStatus
 from modules.sales_pipeline.domain.loss_reason import LossReason
-from modules.sales_pipeline.domain.pipeline import Pipeline, Stage, StageKind
+from modules.sales_pipeline.domain.pipeline import Pipeline, Stage, StageKind, SystemStage
 from modules.sales_pipeline.domain.stage_change import StageChange
 from modules.sales_pipeline.infrastructure.models import (
     CustomFieldDefinitionRecord,
@@ -33,6 +33,7 @@ def _pipeline_to_domain(row: PipelineRecord) -> Pipeline:
             probability=s.probability,
             kind=StageKind(s.kind),
             is_active=s.is_active,
+            system_code=SystemStage(s.system_code) if s.system_code else None,
         )
         for s in row.stages.all()
     )
@@ -99,6 +100,7 @@ class DjangoPipelineRepository:
                     probability=stage.probability,
                     kind=stage.kind.value,
                     is_active=stage.is_active,
+                    system_code=stage.system_code.value if stage.system_code else None,
                 )
                 for stage in pipeline.stages
             )
@@ -166,6 +168,7 @@ class DjangoPipelineRepository:
                         "probability": stage.probability,
                         "kind": stage.kind.value,
                         "is_active": stage.is_active,
+                        "system_code": stage.system_code.value if stage.system_code else None,
                     },
                 )
 

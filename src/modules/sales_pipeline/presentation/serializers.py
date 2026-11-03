@@ -8,6 +8,7 @@ from uuid import UUID
 
 from rest_framework import serializers
 
+from modules.activities.presentation.serializers import NextStepSerializer
 from modules.sales_pipeline.domain.custom_field import CustomFieldDefinition, CustomFieldType
 from modules.sales_pipeline.domain.deal import MAX_TITLE_LENGTH, Deal
 from modules.sales_pipeline.domain.loss_reason import LossReason
@@ -81,6 +82,17 @@ class StageReadSerializer(serializers.Serializer[dict[str, Any]]):
     probability = serializers.IntegerField(read_only=True)
     kind = serializers.CharField(read_only=True)
     is_active = serializers.BooleanField(read_only=True)
+    system_code = serializers.ChoiceField(
+        choices=["sale", "meeting_rescheduled"],
+        read_only=True,
+        allow_null=True,
+        help_text=(
+            "System stage: `sale` («Продажа», always last, set only by a confirmed payment) "
+            "or `meeting_rescheduled` («Встреча перенесена», can be moved and switched off). "
+            "Null for ordinary stages."
+        ),
+    )
+    is_system = serializers.BooleanField(read_only=True)
     open_deals = serializers.IntegerField(
         read_only=True, required=False, help_text="Only with ?counts=true"
     )
@@ -178,6 +190,11 @@ class DealMoveSerializer(serializers.Serializer[dict[str, Any]]):
     # loss_reason_id and/or a free-text reason.
     reason = serializers.CharField(required=False, max_length=500, allow_blank=False)
     loss_reason_id = serializers.UUIDField(required=False, allow_null=True)
+    # «Встреча перенесена»: the new meeting time (400 meeting_date_required without it).
+    meeting_start = serializers.DateTimeField(required=False, allow_null=True)
+    meeting_end = serializers.DateTimeField(required=False, allow_null=True)
+    # Another open stage: required unless the deal has an open task with a due date.
+    next_step = NextStepSerializer(required=False, allow_null=True)
 
 
 class DealLoseSerializer(serializers.Serializer[dict[str, Any]]):
@@ -287,6 +304,8 @@ def pipeline_to_dict(
             "probability": stage.probability,
             "kind": stage.kind.value,
             "is_active": stage.is_active,
+            "system_code": stage.system_code.value if stage.system_code else None,
+            "is_system": stage.is_system,
         }
         if counts is not None:
             open_deals, total_deals = counts.get(stage.id, (0, 0))

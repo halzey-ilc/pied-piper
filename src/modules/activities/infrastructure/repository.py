@@ -167,6 +167,19 @@ class DjangoActivityRepository:
             .count()
         )
 
+    def has_open_dated_task(self, subject: SubjectRef) -> bool:
+        return (
+            self._qs()
+            .filter(
+                kind=ActivityKind.TASK.value,
+                subject_type=subject.type.value,
+                subject_id=subject.id,
+                task_status=TaskStatus.OPEN.value,
+                due_date__isnull=False,
+            )
+            .exists()
+        )
+
     def list_visible(
         self, visibility: ActivityVisibility, filters: ActivityFilter, *, limit: int, offset: int
     ) -> list[Activity]:

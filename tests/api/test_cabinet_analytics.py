@@ -11,6 +11,7 @@ import pytest
 from rest_framework.test import APIClient
 
 from modules.access_control.domain.rbac import Role
+from tests.api.sale_helpers import close_as_sale, next_step
 from tests.conftest import ALL_DATABASES, TenantFixture
 
 pytestmark = pytest.mark.django_db(databases=ALL_DATABASES)
@@ -19,7 +20,7 @@ _STAGES = [
     {"name": "Новый", "kind": "open"},
     {"name": "Тёплый", "kind": "open"},
     {"name": "Думает", "kind": "open"},
-    {"name": "Успешная", "kind": "won"},
+    {"name": "Продажа", "kind": "won"},
     {"name": "Отказ", "kind": "lost"},
 ]
 
@@ -64,8 +65,8 @@ def test_funnel_conversion_bottleneck_and_losses(
         for i in range(4)
     ]
     for deal_id in deals[:3]:
-        _move(director, deal_id, stage["Тёплый"])
-    _move(director, deals[0], stage["Успешная"])
+        _move(director, deal_id, stage["Тёплый"], next_step=next_step())
+    close_as_sale(deals[0])
     reason_id = director.post(
         "/api/v1/sales/loss-reasons/", {"name": "Дорого"}, format="json"
     ).json()["id"]

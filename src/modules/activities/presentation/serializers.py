@@ -7,6 +7,7 @@ from typing import Any
 
 from rest_framework import serializers
 
+from modules.activities.application.next_step import NextStep
 from modules.activities.domain.activity import (
     MAX_BODY_LENGTH,
     MAX_DURATION_SECONDS,
@@ -20,6 +21,24 @@ from modules.activities.domain.activity import (
     TaskStatus,
     TaskType,
 )
+
+
+class NextStepSerializer(serializers.Serializer[dict[str, Any]]):
+    """The task that continues the work (meeting held, deal moved to another open stage)."""
+
+    title = serializers.CharField(max_length=MAX_TITLE_LENGTH)
+    due_date = serializers.DateField()
+    assignee_user_id = serializers.UUIDField(required=False, allow_null=True)
+
+
+def next_step_from(data: dict[str, Any] | None) -> NextStep | None:
+    if not data:
+        return None
+    return NextStep(
+        title=data["title"],
+        due_date=data["due_date"],
+        assignee_user_id=data.get("assignee_user_id"),
+    )
 
 
 class _SubjectSerializer(serializers.Serializer[dict[str, Any]]):

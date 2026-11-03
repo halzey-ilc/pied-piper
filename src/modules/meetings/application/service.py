@@ -15,6 +15,7 @@ from modules.access_control.domain.rbac import (
     ResourceOwnership,
     Scope,
 )
+from modules.activities.application.next_step import NextStep, NextSteps, ensure_next_step
 from modules.audit.application.ports import AuditLog
 from modules.audit.domain.entry import AuditEntry
 from modules.meetings.application.ports import (
@@ -86,7 +87,9 @@ class MeetingService:
         outbox: EventOutbox,
         audit: AuditLog,
         policy: AccessPolicy | None = None,
+        next_steps: NextSteps | None = None,
     ) -> None:
+        self._next_steps = next_steps
         self._repo = repository
         self._subjects = subjects
         self._uow = uow
@@ -176,10 +179,23 @@ class MeetingService:
             principal, meeting_id, lambda m: m.reschedule(start, end), "meeting.rescheduled"
         )
 
-    def complete(self, principal: Principal, meeting_id: UUID, outcome: str | None) -> Meeting:
-        return self._mutate(
-            principal, meeting_id, lambda m: m.complete(outcome), "meeting.completed"
-        )
+    def complete(
+        self,
+        principal: Principal,
+        meeting_id: UUID,
+        outcome: str | None,
+        *,
+        next_step: NextStep | None = None,
+    ) -> Meeting:
+        with self._uow:
+            meeting = self._load_for_write(principal, meeting_id)
+            version = meeting.version
+            event = meeting.complete(outcome)
+            self._plan_next_step(principal, meeting, next_step)
+            self._repo.save(meeting, expected_version=version)
+            self._emit(event, meeting)
+            self._record(principal, "meeting.completed", meeting)
+        return meeting
 
     def cancel(self, principal: Principal, meeting_id: UUID, reason: str) -> Meeting:
         return self._mutate(principal, meeting_id, lambda m: m.cancel(reason), "meeting.cancelled")
@@ -208,16 +224,19 @@ class MeetingService:
         new_end: datetime | None = None,
         comment: str | None = None,
         reason: str | None = None,
+        next_step: NextStep | None = None,
     ) -> Meeting:
         """Record how a scheduled meeting turned out: held / no_show / rescheduled
         (with or without a new date) / cancelled. ``reason`` — why the client did not
-        come (no_show) or why the meeting was cancelled."""
+        come (no_show) or why the meeting was cancelled. A held meeting of a deal or
+        customer needs a planned next step (``next_step`` creates it) unless one exists."""
         with self._uow:
             meeting = self._load_for_write(principal, meeting_id)
             version = meeting.version
             event: DomainEvent | None = None
             if outcome == "held":
                 event = meeting.complete(comment)
+                self._plan_next_step(principal, meeting, next_step)
             elif outcome == "no_show":
                 event = meeting.mark_no_show(comment, reason)
             elif outcome == "cancelled":
@@ -260,6 +279,21 @@ class MeetingService:
         return meeting
 
     # --- helpers ------------------------------------------------------------
+
+    def _plan_next_step(
+        self, principal: Principal, meeting: Meeting, next_step: NextStep | None
+    ) -> None:
+        """After a held meeting of a deal or customer the next step must be planned."""
+        if self._next_steps is None or meeting.link is None:
+            return
+        ensure_next_step(
+            self._next_steps,
+            principal,
+            meeting.link.type.value,
+            meeting.link.id,
+            next_step,
+            default_assignee=meeting.owner_user_id,
+        )
 
     def _mutate(
         self,

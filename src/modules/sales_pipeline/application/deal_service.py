@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import date
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import Any
 from uuid import UUID
@@ -18,12 +18,14 @@ from modules.access_control.domain.rbac import (
     Scope,
     check_assignable,
 )
+from modules.activities.application.next_step import NextStep, NextSteps, ensure_next_step
 from modules.audit.application.ports import AuditLog, AuditTrail
 from modules.audit.domain.entry import AuditEntry
 from modules.sales_pipeline.application.ports import (
     CustomerLookup,
     CustomFieldRepository,
     DealFilter,
+    DealMeetings,
     DealRepository,
     DealVisibility,
     LossReasonRepository,
@@ -33,7 +35,7 @@ from modules.sales_pipeline.application.ports import (
 )
 from modules.sales_pipeline.domain.custom_field import validate_custom_fields
 from modules.sales_pipeline.domain.deal import Deal, DealStatus
-from modules.sales_pipeline.domain.pipeline import Pipeline, StageKind
+from modules.sales_pipeline.domain.pipeline import Pipeline, Stage, StageKind, SystemStage
 from modules.sales_pipeline.domain.stage_change import StageChange
 from platform_core.application.ports import EventOutbox
 from shared.application.ports import UnitOfWork
@@ -42,6 +44,26 @@ from shared.domain.events import DomainEvent
 from shared.domain.value_objects import Money
 
 AGGREGATE = "deal"
+
+
+class SaleRequiresPaymentError(ConflictError):
+    """«Продажа» is reached only by a confirmed payment (payments context), never by hand."""
+
+    code = "sale_requires_payment"
+
+
+class MeetingDateRequiredError(DomainValidationError):
+    code = "meeting_date_required"
+
+
+@dataclass(frozen=True, slots=True)
+class StageMoveExtras:
+    """What some stage moves need: the new meeting time («Встреча перенесена») and the
+    next step (any other open stage, unless the deal already has an open dated task)."""
+
+    meeting_start: datetime | None = None
+    meeting_end: datetime | None = None
+    next_step: NextStep | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,6 +104,10 @@ class DealPage:
     total: int
 
 
+def _utc_text(moment: datetime) -> str:
+    return moment.astimezone(UTC).strftime("%d.%m.%Y %H:%M UTC")
+
+
 def _ownership(deal: Deal) -> ResourceOwnership:
     return ResourceOwnership(owner_user_id=deal.owner_user_id, team_id=deal.team_id)
 
@@ -101,7 +127,11 @@ class DealService:
         members: MemberDirectory | None = None,
         trail: AuditTrail | None = None,
         policy: AccessPolicy | None = None,
+        meetings: DealMeetings | None = None,
+        next_steps: NextSteps | None = None,
     ) -> None:
+        self._meetings = meetings
+        self._next_steps = next_steps
         self._members = members
         self._trail = trail
         self._deals = deals
@@ -247,36 +277,88 @@ class DealService:
         *,
         reason: str | None = None,
         loss_reason_id: UUID | None = None,
+        extras: StageMoveExtras | None = None,
     ) -> Deal:
-        """Transition a deal to a stage. A won/lost-kind stage closes the deal
-        (a lost stage needs a reason: a catalog ``loss_reason_id`` and/or free-text
-        ``reason``); an open-kind stage just moves it."""
+        """Transition a deal to a stage. A lost-kind stage closes the deal (it needs a
+        reason: a catalog ``loss_reason_id`` and/or free-text ``reason``); an open-kind
+        stage just moves it. A won stage («Продажа» or any other) is refused (409, only a
+        confirmed payment closes a sale); «Встреча перенесена» needs the new meeting time
+        and reschedules the deal's meeting; any other new open stage needs a next step."""
+        extras = extras or StageMoveExtras()
         with self._uow:
             deal = self._load_for_write(principal, deal_id)
             pipeline = self._pipelines.get(deal.pipeline_id)
             if pipeline is None:
                 raise NotFoundError("Stage does not belong to the deal's pipeline.")
             stage = pipeline.stage(stage_id)  # 404 if not in this pipeline
+            if stage.kind is StageKind.WON:
+                # Owner decision 03.11.2026: a deal is won only by a confirmed payment
+                # (payments → SaleClosing), whichever won stage the pipeline has.
+                raise SaleRequiresPaymentError(
+                    "«Продажа» is set by a confirmed payment: record the payment instead."
+                )
             if not stage.is_active:
                 raise DomainValidationError("That stage is no longer active.")
             version = deal.version
             from_stage = deal.stage_id
-            if stage.kind is StageKind.WON:
-                event: DomainEvent | None = deal.win(stage_id=stage_id)
-                audit_action = "deal.won"
-            elif stage.kind is StageKind.LOST:
+            if stage.kind is StageKind.OPEN and stage.id != deal.stage_id:
+                self._check_open_move(stage, extras)
+            if stage.kind is StageKind.LOST:
                 text = self._resolve_loss_reason(reason, loss_reason_id)
-                event = deal.lose(text, stage_id=stage_id, loss_reason_id=loss_reason_id)
+                event: DomainEvent | None = deal.lose(
+                    text, stage_id=stage_id, loss_reason_id=loss_reason_id
+                )
                 audit_action = "deal.lost"
             else:
                 event = deal.move_to(stage_id)
                 audit_action = "deal.stage_changed"
             if event is not None:
                 self._deals.save(deal, expected_version=version)
-                self._record_stage_change(principal, deal, from_stage)
+                note = None
+                if stage.kind is StageKind.OPEN:
+                    note = self._follow_up_open_move(principal, deal, stage, extras)
+                self._record_stage_change(principal, deal, from_stage, note=note)
                 self._emit(event, deal)
                 self._record(principal, audit_action, deal)
         return deal
+
+    def _check_open_move(self, stage: Stage, extras: StageMoveExtras) -> None:
+        if stage.system_code is SystemStage.MEETING_RESCHEDULED and (
+            extras.meeting_start is None or extras.meeting_end is None
+        ):
+            raise MeetingDateRequiredError(
+                "Give the new meeting date and time (meeting_start and meeting_end)."
+            )
+
+    def _follow_up_open_move(
+        self, principal: Principal, deal: Deal, stage: Stage, extras: StageMoveExtras
+    ) -> str | None:
+        """Runs inside the move's transaction: a refused next step rolls the move back.
+        Returns the note for the deal's stage history (the meeting's old and new time)."""
+        if stage.system_code is SystemStage.MEETING_RESCHEDULED:
+            # The rescheduled meeting is itself the planned next step.
+            if self._meetings is None or not extras.meeting_start or not extras.meeting_end:
+                return None
+            meeting_id, previous = self._meetings.reschedule_next(
+                principal, deal, extras.meeting_start, extras.meeting_end
+            )
+            self._record(
+                principal, "deal.meeting_rescheduled", deal, details={"meeting_id": str(meeting_id)}
+            )
+            new = _utc_text(extras.meeting_start)
+            if previous is None:
+                return f"Встреча назначена на {new}"
+            return f"Встреча перенесена: {_utc_text(previous)} → {new}"
+        if self._next_steps is not None:
+            ensure_next_step(
+                self._next_steps,
+                principal,
+                "deal",
+                deal.id,
+                extras.next_step,
+                default_assignee=deal.owner_user_id,
+            )
+        return None
 
     def _resolve_loss_reason(self, reason: str | None, loss_reason_id: UUID | None) -> str:
         """Validate a catalog loss reason (if given) and return the free-text note
@@ -295,7 +377,11 @@ class DealService:
         return text
 
     def win(self, principal: Principal, deal_id: UUID) -> Deal:
-        return self._close(principal, deal_id, lambda deal: deal.win(), "deal.won")
+        """Refused: a deal is won only by a confirmed payment (``SaleClosing``)."""
+        self.get(principal, deal_id)  # 404 if not visible
+        raise SaleRequiresPaymentError(
+            "A deal is won by recording a confirmed payment, not by hand."
+        )
 
     def lose(self, principal: Principal, deal_id: UUID, reason: str) -> Deal:
         return self._close(principal, deal_id, lambda deal: deal.lose(reason), "deal.lost")
@@ -391,7 +477,12 @@ class DealService:
             raise ConflictError("Deal was modified by someone else; reload and retry.")
 
     def _record_stage_change(
-        self, principal: Principal, deal: Deal, from_stage_id: UUID | None
+        self,
+        principal: Principal,
+        deal: Deal,
+        from_stage_id: UUID | None,
+        *,
+        note: str | None = None,
     ) -> None:
         if self._stage_changes is None:
             return
@@ -403,7 +494,7 @@ class DealService:
                 to_stage_id=deal.stage_id,
                 author_user_id=principal.user_id,
                 deal_version=deal.version,
-                reason=deal.lost_reason if is_lost else None,
+                reason=deal.lost_reason if is_lost else note,
                 loss_reason_id=deal.loss_reason_id if is_lost else None,
             )
         )

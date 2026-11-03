@@ -6,6 +6,7 @@ from typing import Any
 
 from rest_framework import serializers
 
+from modules.activities.presentation.serializers import NextStepSerializer
 from modules.meetings.domain.meeting import (
     MAX_REMINDER_MINUTES,
     MAX_TITLE_LENGTH,
@@ -68,6 +69,7 @@ class MeetingRescheduleSerializer(serializers.Serializer[dict[str, Any]]):
 
 class MeetingCompleteSerializer(serializers.Serializer[dict[str, Any]]):
     outcome = serializers.CharField(required=False, allow_blank=True, max_length=2000)
+    next_step = NextStepSerializer(required=False, allow_null=True)
 
 
 class MeetingCancelSerializer(serializers.Serializer[dict[str, Any]]):
@@ -88,6 +90,8 @@ class MeetingOutcomeSerializer(serializers.Serializer[dict[str, Any]]):
     new_end = serializers.DateTimeField(required=False, allow_null=True)
     comment = serializers.CharField(required=False, allow_blank=True, max_length=2000)
     reason = serializers.CharField(required=False, allow_blank=True, max_length=200)
+    # Required for `held` unless the deal/customer already has an open task with a due date.
+    next_step = NextStepSerializer(required=False, allow_null=True)
 
 
 class ParticipantResponseSerializer(serializers.Serializer[dict[str, Any]]):

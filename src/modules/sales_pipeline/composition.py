@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
+from modules.activities.infrastructure.next_steps import ActivityNextSteps
 from modules.audit.domain.entry import AuditEntry
 from modules.audit.infrastructure.audit_log import DjangoAuditLog
 from modules.organizations.infrastructure.memberships import DjangoMemberDirectory
@@ -14,6 +15,7 @@ from modules.sales_pipeline.application.loss_reason_service import LossReasonSer
 from modules.sales_pipeline.application.pipeline_service import PipelineService
 from modules.sales_pipeline.domain.pipeline import Pipeline, StageDefinition, StageKind
 from modules.sales_pipeline.infrastructure.customer_lookup import DjangoCustomerLookup
+from modules.sales_pipeline.infrastructure.deal_meetings import MeetingsDealMeetings
 from modules.sales_pipeline.infrastructure.repository import (
     DjangoCustomFieldRepository,
     DjangoDealRepository,
@@ -73,6 +75,8 @@ def deal_service() -> DealService:
         custom_fields=DjangoCustomFieldRepository(alias),
         members=DjangoMemberDirectory(tenant.tenant_id),
         trail=DjangoAuditLog(alias),
+        meetings=MeetingsDealMeetings(),
+        next_steps=ActivityNextSteps(),
     )
 
 

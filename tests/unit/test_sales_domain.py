@@ -61,7 +61,9 @@ def test_money_rejects_bad_values(amount: Decimal, currency: str) -> None:
 
 def test_pipeline_create_assigns_positions_and_initial_stage() -> None:
     pipeline = _pipeline()
-    assert [s.position for s in pipeline.stages] == [0, 1]
+    # Two open stages, then the system «Встреча перенесена» and «Продажа».
+    assert [s.position for s in pipeline.stages] == [0, 1, 2, 3]
+    assert [s.name for s in pipeline.stages][2:] == ["Встреча перенесена", "Продажа"]
     assert pipeline.initial_stage.name == "New"
     assert pipeline.stage(pipeline.stages[1].id).name == "Negotiation"
 

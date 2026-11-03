@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Protocol
 from uuid import UUID
 
-from modules.access_control.domain.rbac import MemberRef
+from modules.access_control.domain.rbac import MemberRef, Principal
 from modules.sales_pipeline.domain.custom_field import CustomFieldDefinition
 from modules.sales_pipeline.domain.deal import Deal, DealStatus
 from modules.sales_pipeline.domain.loss_reason import LossReason
@@ -173,3 +173,15 @@ class CustomFieldRepository(Protocol):
     def save(self, definition: CustomFieldDefinition) -> None: ...
 
     def exists_by_key(self, key: str) -> bool: ...
+
+
+class DealMeetings(Protocol):
+    """Meetings of a deal, for the «Встреча перенесена» stage (implemented by meetings)."""
+
+    def reschedule_next(
+        self, principal: Principal, deal: Deal, start: datetime, end: datetime
+    ) -> tuple[UUID, datetime | None]:
+        """Move the deal's nearest scheduled (or awaiting a new date) meeting to the new
+        time, or book one for the deal owner. Returns the meeting and its previous start
+        (None for a newly booked meeting)."""
+        ...

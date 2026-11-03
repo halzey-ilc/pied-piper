@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from modules.activities.infrastructure.next_steps import ActivityNextSteps
 from modules.audit.infrastructure.audit_log import DjangoAuditLog
 from modules.meetings.application.service import MeetingService
 from modules.meetings.infrastructure.repository import DjangoMeetingRepository
@@ -19,4 +20,5 @@ def meeting_service() -> MeetingService:
         uow=DjangoUnitOfWork(alias),
         outbox=DjangoEventOutbox(alias),
         audit=DjangoAuditLog(alias),
+        next_steps=ActivityNextSteps(),
     )
