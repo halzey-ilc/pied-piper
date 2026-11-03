@@ -102,6 +102,21 @@ class DealRepository(Protocol):
         """A deal stands on the stage now or did in the past (stage history)."""
         ...
 
+    def open_deal_counts(self, pipeline_id: UUID, owner_ids: set[UUID]) -> dict[UUID, int]:
+        """Open deals per stage of a pipeline, only those owned by ``owner_ids``."""
+        ...
+
+    def move_open_deals(
+        self,
+        from_pipeline_id: UUID,
+        to_pipeline_id: UUID,
+        stage_map: dict[UUID, UUID],
+        owner_ids: set[UUID],
+    ) -> list[tuple[UUID, UUID, UUID, int]]:
+        """Move the open deals of ``owner_ids`` from one pipeline to another, each stage to
+        its mapped stage; bumps versions. Returns (deal id, from stage, to stage, version)."""
+        ...
+
 
 @dataclass(frozen=True, slots=True)
 class LinkedCustomer:
@@ -116,6 +131,12 @@ class CustomerLookup(Protocol):
     """Port to the customers context: the customer a deal links to, in this tenant."""
 
     def find(self, customer_id: UUID) -> LinkedCustomer | None: ...
+
+
+class DepartmentRoster(Protocol):
+    """Port to the organizations context: active members of a sales department."""
+
+    def member_ids(self, department_id: UUID) -> set[UUID]: ...
 
 
 class MemberDirectory(Protocol):

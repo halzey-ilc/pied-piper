@@ -106,6 +106,33 @@ class StageRemovalSerializer(serializers.Serializer[dict[str, Any]]):
     )
 
 
+class AdoptDealsSerializer(serializers.Serializer[dict[str, Any]]):
+    from_pipeline_id = serializers.UUIDField()
+    stage_map = serializers.DictField(
+        child=serializers.UUIDField(),
+        help_text="Source stage id -> target stage id (an active open stage of this pipeline)",
+    )
+
+
+class AdoptionStageSerializer(serializers.Serializer[dict[str, Any]]):
+    stage_id = serializers.UUIDField(read_only=True)
+    name = serializers.CharField(read_only=True)
+    kind = serializers.CharField(read_only=True)
+    open_deals = serializers.IntegerField(read_only=True)
+
+
+class AdoptionPreviewSerializer(serializers.Serializer[dict[str, Any]]):
+    from_pipeline_id = serializers.UUIDField(read_only=True)
+    from_pipeline_name = serializers.CharField(read_only=True)
+    total = serializers.IntegerField(read_only=True)
+    stages = AdoptionStageSerializer(many=True, read_only=True)
+
+
+class AdoptionResultSerializer(serializers.Serializer[dict[str, Any]]):
+    moved = serializers.IntegerField(read_only=True)
+    per_stage = serializers.DictField(child=serializers.IntegerField(), read_only=True)
+
+
 # --- deals ------------------------------------------------------------------
 
 

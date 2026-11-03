@@ -12,7 +12,11 @@ from rest_framework.response import Response
 
 from modules.access_control.domain.rbac import Principal, Role
 from modules.customers.composition import customer_service
-from modules.organizations.composition import company_settings, member_display_name
+from modules.organizations.composition import (
+    company_settings,
+    member_display_name,
+    people_in_details,
+)
 from modules.sales_pipeline.application.custom_field_service import (
     CreateCustomField,
     UpdateCustomField,
@@ -31,6 +35,9 @@ from modules.sales_pipeline.domain.custom_field import CustomFieldType
 from modules.sales_pipeline.domain.deal import DealStatus
 from modules.sales_pipeline.domain.pipeline import StageDefinition, StageKind
 from modules.sales_pipeline.presentation.serializers import (
+    AdoptDealsSerializer,
+    AdoptionPreviewSerializer,
+    AdoptionResultSerializer,
     CustomFieldCreateSerializer,
     CustomFieldListSerializer,
     CustomFieldReadSerializer,
@@ -351,6 +358,81 @@ class PipelineStageDetailView(_Scoped):
                 "moved_deals": result.moved_deals,
                 "archived": result.archived,
             }
+        )
+
+
+class PipelineAdoptDealsView(_Scoped):
+    @extend_schema(
+        tags=_PIPELINE_TAGS,
+        operation_id="pipelines_adopt_deals_preview",
+        summary="Preview: department deals still in a company pipeline",
+        description=(
+            "For a department pipeline you may configure: open deals of the department's "
+            "active members that stand in the company-wide pipeline `from_pipeline_id`, per "
+            "source stage. Nothing moves."
+        ),
+        parameters=[
+            _TENANT_HEADER,
+            OpenApiParameter("from_pipeline_id", UUID, OpenApiParameter.QUERY, required=True),
+        ],
+        responses=AdoptionPreviewSerializer,
+    )
+    def get(self, request: Request, pipeline_id: UUID) -> Response:
+        raw = request.query_params.get("from_pipeline_id") or ""
+        try:
+            from_pipeline_id = UUID(raw)
+        except ValueError as exc:
+            raise DomainValidationError("from_pipeline_id must be a UUID.") from exc
+        preview = pipeline_service().adoption_preview(
+            self.principal(), pipeline_id, from_pipeline_id
+        )
+        return Response(
+            {
+                "from_pipeline_id": str(preview.source.id),
+                "from_pipeline_name": preview.source.name,
+                "total": preview.total,
+                "stages": [
+                    {
+                        "stage_id": str(stage.id),
+                        "name": stage.name,
+                        "kind": stage.kind.value,
+                        "open_deals": preview.counts.get(stage.id, 0),
+                    }
+                    for stage in sorted(preview.source.stages, key=lambda s: s.position)
+                ],
+            }
+        )
+
+    @extend_schema(
+        tags=_PIPELINE_TAGS,
+        operation_id="pipelines_adopt_deals",
+        summary="Move the department's open deals into this department pipeline",
+        description=(
+            "Explicit, confirmed transfer (nothing moves automatically): the open deals of the "
+            "department's active members in the company-wide pipeline move into this "
+            "department pipeline, each source stage onto the stage given in `stage_map` (an "
+            "active open stage of this pipeline). Every stage that has such deals must be "
+            "mapped (400 `stage_mapping_required`). Closed deals and other people's deals stay. "
+            "Each move is written to the deal's stage history. Head of sales: own department "
+            "only; director: any; managers: 403."
+        ),
+        parameters=[_TENANT_HEADER],
+        request=AdoptDealsSerializer,
+        responses=AdoptionResultSerializer,
+    )
+    def post(self, request: Request, pipeline_id: UUID) -> Response:
+        serializer = AdoptDealsSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        try:
+            stage_map = {UUID(str(k)): v for k, v in data["stage_map"].items()}
+        except ValueError as exc:
+            raise DomainValidationError("stage_map keys must be stage UUIDs.") from exc
+        result = pipeline_service().adopt_deals(
+            self.principal(), pipeline_id, data["from_pipeline_id"], stage_map
+        )
+        return Response(
+            {"moved": result.moved, "per_stage": {str(k): v for k, v in result.per_stage.items()}}
         )
 
 
@@ -701,6 +783,8 @@ class DealHistoryView(_Scoped):
                     "occurred_at": e.occurred_at.isoformat(),
                     "actor": {"id": str(actor), "name": names[actor]} if actor else None,
                     "changed_fields": list(e.changed_fields),
+                    # A reassignment names the previous and the new owner
+                    "details": people_in_details(tenant_id, e.details),
                 }
             )
         return Response({"count": len(results), "results": results})

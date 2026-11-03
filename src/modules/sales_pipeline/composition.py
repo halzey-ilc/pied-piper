@@ -7,6 +7,7 @@ from uuid import UUID
 from modules.audit.domain.entry import AuditEntry
 from modules.audit.infrastructure.audit_log import DjangoAuditLog
 from modules.organizations.infrastructure.memberships import DjangoMemberDirectory
+from modules.organizations.infrastructure.models import Membership
 from modules.sales_pipeline.application.custom_field_service import CustomFieldService
 from modules.sales_pipeline.application.deal_service import DealService
 from modules.sales_pipeline.application.loss_reason_service import LossReasonService
@@ -25,14 +26,35 @@ from platform_core.infrastructure.messaging.stores import DjangoEventOutbox
 from shared.infrastructure.unit_of_work import DjangoUnitOfWork
 
 
+class _DepartmentRoster:
+    """Active members of one company's sales department (control plane)."""
+
+    def __init__(self, tenant_id: UUID) -> None:
+        self.tenant_id = tenant_id
+
+    def member_ids(self, department_id: UUID) -> set[UUID]:
+        return set(
+            Membership.objects.using("default")
+            .filter(
+                organization_id=self.tenant_id,
+                department_id=department_id,
+                is_active=True,
+                user__is_active=True,
+            )
+            .values_list("user_id", flat=True)
+        )
+
+
 def pipeline_service() -> PipelineService:
-    alias = require_tenant().db_alias
+    tenant = require_tenant()
+    alias = tenant.db_alias
     return PipelineService(
         repository=DjangoPipelineRepository(alias),
         uow=DjangoUnitOfWork(alias),
         audit=DjangoAuditLog(alias),
         deals=DjangoDealRepository(alias),
         stage_changes=DjangoStageChangeRepository(alias),
+        roster=_DepartmentRoster(tenant.tenant_id),
     )
 
 

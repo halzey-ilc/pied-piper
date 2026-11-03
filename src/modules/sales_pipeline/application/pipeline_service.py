@@ -20,11 +20,12 @@ from modules.sales_pipeline.application.ports import (
     DealFilter,
     DealRepository,
     DealVisibility,
+    DepartmentRoster,
     PipelineRepository,
     StageChangeRepository,
 )
 from modules.sales_pipeline.domain.deal import DealStatus
-from modules.sales_pipeline.domain.pipeline import Pipeline, Stage, StageDefinition
+from modules.sales_pipeline.domain.pipeline import Pipeline, Stage, StageDefinition, StageKind
 from modules.sales_pipeline.domain.stage_change import StageChange
 from shared.application.ports import UnitOfWork
 from shared.domain.errors import (
@@ -55,6 +56,25 @@ class StageRemoval:
     archived: bool
 
 
+@dataclass(frozen=True, slots=True)
+class AdoptionSource:
+    """Open deals of a department's members still standing in another pipeline."""
+
+    source: Pipeline
+    target: Pipeline
+    counts: dict[UUID, int]  # source stage id -> open deals of the department's members
+
+    @property
+    def total(self) -> int:
+        return sum(self.counts.values())
+
+
+@dataclass(frozen=True, slots=True)
+class AdoptionResult:
+    moved: int
+    per_stage: dict[UUID, int]  # target stage id -> deals moved onto it
+
+
 class PipelineService:
     def __init__(
         self,
@@ -64,7 +84,9 @@ class PipelineService:
         deals: DealRepository | None = None,
         policy: AccessPolicy | None = None,
         stage_changes: StageChangeRepository | None = None,
+        roster: DepartmentRoster | None = None,
     ) -> None:
+        self._roster = roster
         self._deals = deals
         self._stage_changes = stage_changes
         self._repo = repository
@@ -249,6 +271,102 @@ class PipelineService:
             )
         return StageRemoval(pipeline=pipeline, moved_deals=len(moved), archived=archived)
 
+    # --- moving existing deals into a department pipeline -----------------------
+    # Nothing moves automatically: the head of sales (or the director) looks at the
+    # preview, maps every source stage to a stage of the department pipeline and confirms.
+
+    def adoption_preview(
+        self, principal: Principal, pipeline_id: UUID, from_pipeline_id: UUID
+    ) -> AdoptionSource:
+        target, source, owners = self._adoption_scope(principal, pipeline_id, from_pipeline_id)
+        counts = self._deals.open_deal_counts(source.id, owners) if self._deals else {}
+        return AdoptionSource(source=source, target=target, counts=counts)
+
+    def adopt_deals(
+        self,
+        principal: Principal,
+        pipeline_id: UUID,
+        from_pipeline_id: UUID,
+        stage_map: dict[UUID, UUID],
+    ) -> AdoptionResult:
+        """Move the department members' OPEN deals from a company pipeline into the
+        department's pipeline, each source stage onto the stage chosen for it. Every move is
+        written to the deal's stage history; closed deals and other people's deals stay."""
+        deals = self._deals
+        if deals is None:  # pragma: no cover - always wired in composition
+            raise ConflictError("Moving deals is not available.")
+        with self._uow:
+            target, source, owners = self._adoption_scope(
+                principal, pipeline_id, from_pipeline_id, lock=True
+            )
+            counts = deals.open_deal_counts(source.id, owners)
+            source_ids = {stage.id for stage in source.stages}
+            target_open = {
+                stage.id: stage
+                for stage in target.stages
+                if stage.is_active and stage.kind is StageKind.OPEN
+            }
+            for from_stage, to_stage in stage_map.items():
+                if from_stage not in source_ids:
+                    raise DomainValidationError("A mapped stage is not in the source pipeline.")
+                if to_stage not in target_open:
+                    raise DomainValidationError(
+                        "Deals can move only onto an active open stage of the department pipeline."
+                    )
+            missing = [
+                stage_id for stage_id, n in counts.items() if n and stage_id not in stage_map
+            ]
+            if missing:
+                raise StageMappingRequiredError(
+                    "Every stage with deals needs a target stage in the department pipeline."
+                )
+            moved = deals.move_open_deals(
+                source.id, target.id, {k: v for k, v in stage_map.items() if counts.get(k)}, owners
+            )
+            note = f"Перенос в воронку отдела «{target.name}» из «{source.name}»"
+            per_stage: dict[UUID, int] = {}
+            for deal_id, from_stage, to_stage, version in moved:
+                per_stage[to_stage] = per_stage.get(to_stage, 0) + 1
+                if self._stage_changes is not None:
+                    self._stage_changes.add(
+                        StageChange.record(
+                            deal_id=deal_id,
+                            from_stage_id=from_stage,
+                            to_stage_id=to_stage,
+                            author_user_id=principal.user_id,
+                            deal_version=version,
+                            reason=note,
+                        )
+                    )
+            self._audit.record(
+                AuditEntry(
+                    actor_user_id=principal.user_id,
+                    action="pipeline.deals_adopted",
+                    resource_type="pipeline",
+                    resource_id=str(target.id),
+                    changed_fields=("deals",),
+                )
+            )
+        return AdoptionResult(moved=len(moved), per_stage=per_stage)
+
+    def _adoption_scope(
+        self, principal: Principal, pipeline_id: UUID, from_pipeline_id: UUID, *, lock: bool = False
+    ) -> tuple[Pipeline, Pipeline, set[UUID]]:
+        target = (
+            self._load_for_config(principal, pipeline_id)
+            if lock
+            else self.get(principal, pipeline_id)
+        )
+        self._require_manager_of(principal, target)
+        if target.department_id is None:
+            raise DomainValidationError("Deals can be moved only into a department pipeline.")
+        source = self._repo.get(from_pipeline_id)
+        # Only company-wide pipelines give deals away: another department's pipeline is not ours.
+        if source is None or source.department_id is not None or source.id == target.id:
+            raise NotFoundError("Source pipeline not found.")
+        owners = self._roster.member_ids(target.department_id) if self._roster else set()
+        return target, source, owners
+
     def reorder_stages(
         self, principal: Principal, pipeline_id: UUID, stage_ids: list[UUID]
     ) -> Pipeline:
@@ -319,6 +437,10 @@ class PipelineService:
 
 class StageInUseError(ConflictError):
     code = "stage_in_use"
+
+
+class StageMappingRequiredError(DomainValidationError):
+    code = "stage_mapping_required"
 
 
 class MoveTargetRequiredError(DomainValidationError):

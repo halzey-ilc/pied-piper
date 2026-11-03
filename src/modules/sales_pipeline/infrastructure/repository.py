@@ -327,6 +327,53 @@ class DjangoDealRepository:
             self._qs().filter(id__in=ids).update(stage_id=to_stage_id, version=F("version") + 1)
             return list(self._qs().filter(id__in=ids).values_list("id", "version"))
 
+    def open_deal_counts(self, pipeline_id: UUID, owner_ids: set[UUID]) -> dict[UUID, int]:
+        if not owner_ids:
+            return {}
+        rows = (
+            self._qs()
+            .filter(
+                pipeline_id=pipeline_id,
+                status=DealStatus.OPEN.value,
+                owner_user_id__in=owner_ids,
+            )
+            .values("stage_id")
+            .annotate(open=Count("id"))
+        )
+        return {row["stage_id"]: row["open"] for row in rows}
+
+    def move_open_deals(
+        self,
+        from_pipeline_id: UUID,
+        to_pipeline_id: UUID,
+        stage_map: dict[UUID, UUID],
+        owner_ids: set[UUID],
+    ) -> list[tuple[UUID, UUID, UUID, int]]:
+        if not owner_ids:
+            return []
+        with transaction.atomic(using=self.using):
+            rows = list(
+                self._qs()
+                .select_for_update()
+                .filter(
+                    pipeline_id=from_pipeline_id,
+                    status=DealStatus.OPEN.value,
+                    owner_user_id__in=owner_ids,
+                )
+                .values_list("id", "stage_id")
+            )
+            moved: list[tuple[UUID, UUID, UUID, int]] = []
+            for from_stage, to_stage in stage_map.items():
+                ids = [deal_id for deal_id, stage_id in rows if stage_id == from_stage]
+                if not ids:
+                    continue
+                self._qs().filter(id__in=ids).update(
+                    pipeline_id=to_pipeline_id, stage_id=to_stage, version=F("version") + 1
+                )
+                versions = dict(self._qs().filter(id__in=ids).values_list("id", "version"))
+                moved.extend((deal_id, from_stage, to_stage, versions[deal_id]) for deal_id in ids)
+            return moved
+
     def stage_ever_used(self, stage_id: UUID) -> bool:
         if self._qs().filter(stage_id=stage_id).exists():
             return True

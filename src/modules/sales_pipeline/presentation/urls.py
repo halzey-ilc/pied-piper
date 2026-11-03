@@ -14,6 +14,7 @@ from modules.sales_pipeline.presentation.views import (
     DealWinView,
     LossReasonDetailView,
     LossReasonListCreateView,
+    PipelineAdoptDealsView,
     PipelineDetailView,
     PipelineListCreateView,
     PipelineStageDetailView,
@@ -33,6 +34,11 @@ urlpatterns = [
         "pipelines/<uuid:pipeline_id>/stages/<uuid:stage_id>/",
         PipelineStageDetailView.as_view(),
         name="pipeline-stage",
+    ),
+    path(
+        "pipelines/<uuid:pipeline_id>/adopt-deals/",
+        PipelineAdoptDealsView.as_view(),
+        name="pipeline-adopt-deals",
     ),
     path(
         "pipelines/<uuid:pipeline_id>/stage-order/",

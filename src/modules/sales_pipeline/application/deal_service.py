@@ -220,9 +220,16 @@ class DealService:
             check_assignable(principal, scope, owner_user_id, member, what="deals")
             team_id = member.department_id if member is not None else principal.department_id
             version = deal.version
+            previous_owner = deal.owner_user_id
             if deal.assign(owner_user_id, team_id):
                 self._deals.save(deal, expected_version=version)
-                self._record(principal, "deal.reassigned", deal, ("owner",))
+                self._record(
+                    principal,
+                    "deal.reassigned",
+                    deal,
+                    ("owner",),
+                    details={"from_owner": str(previous_owner), "to_owner": str(owner_user_id)},
+                )
         return deal
 
     def history(self, principal: Principal, deal_id: UUID) -> list[AuditEntry]:
@@ -417,7 +424,13 @@ class DealService:
             raise DomainValidationError("The customer is archived; restore it first.")
 
     def _record(
-        self, principal: Principal, action: str, deal: Deal, fields: tuple[str, ...] = ()
+        self,
+        principal: Principal,
+        action: str,
+        deal: Deal,
+        fields: tuple[str, ...] = (),
+        *,
+        details: dict[str, str] | None = None,
     ) -> None:
         self._audit.record(
             AuditEntry(
@@ -426,5 +439,6 @@ class DealService:
                 resource_type=AGGREGATE,
                 resource_id=str(deal.id),
                 changed_fields=fields,
+                details=details or {},
             )
         )

@@ -169,3 +169,72 @@ def test_deleting_a_stage_moves_its_deals_with_history(
         f"/api/v1/sales/pipelines/{funnel['id']}/stages/{stages['Успешная сделка']}/"
     )
     assert last_won.status_code == 400
+
+
+def test_department_deals_move_into_its_funnel_only_on_confirmation(
+    make_user: Callable[..., Any],
+    tenants: dict[str, TenantFixture],
+    client_for: Callable[..., APIClient],
+) -> None:
+    director, head, manager, outsider, _north = _setup(make_user, tenants, client_for)
+    company = _company_pipeline(director)
+    new_stage = next(s["id"] for s in company["stages"] if s["kind"] == "open")
+    won_stage = next(s["id"] for s in company["stages"] if s["kind"] == "won")
+
+    def deal(client: APIClient, title: str) -> str:
+        response = client.post(
+            "/api/v1/sales/deals/", {"title": title, "amount": "10"}, format="json"
+        )
+        assert response.status_code == 201, response.content
+        assert response.json()["pipeline_id"] == company["id"]
+        deal_id: str = response.json()["id"]
+        return deal_id
+
+    # Deals opened before the department had its own funnel stay in the company pipeline.
+    open_deal = deal(manager, "Открытая")
+    closed_deal = deal(manager, "Закрытая")
+    moved = manager.post(
+        f"/api/v1/sales/deals/{closed_deal}/stage/", {"stage_id": won_stage}, format="json"
+    )
+    assert moved.status_code == 200, moved.content
+    foreign_deal = deal(outsider, "Чужая")
+
+    funnel = head.post(
+        "/api/v1/sales/pipelines/", {"name": "Воронка North", "stages": _STAGES}, format="json"
+    ).json()
+    warm = next(s["id"] for s in funnel["stages"] if s["name"] == "Тёплый")
+    url = f"/api/v1/sales/pipelines/{funnel['id']}/adopt-deals/"
+
+    # Nothing moved by creating the funnel; the preview counts only the department's open deals.
+    preview = head.get(f"{url}?from_pipeline_id={company['id']}")
+    assert preview.status_code == 200, preview.content
+    assert preview.json()["total"] == 1
+    assert {s["stage_id"]: s["open_deals"] for s in preview.json()["stages"]}[new_stage] == 1
+    assert director.get(f"/api/v1/sales/deals/{open_deal}/").json()["pipeline_id"] == company["id"]
+
+    # Managers and other departments' heads may not move deals; every stage must be mapped.
+    body = {"from_pipeline_id": company["id"], "stage_map": {new_stage: warm}}
+    assert manager.post(url, body, format="json").status_code == 403
+    assert outsider.post(url, body, format="json").status_code == 404
+    unmapped = head.post(url, {"from_pipeline_id": company["id"], "stage_map": {}}, format="json")
+    assert unmapped.status_code == 400
+    assert unmapped.json()["error"]["code"] == "stage_mapping_required"
+    wrong_target = {"from_pipeline_id": company["id"], "stage_map": {new_stage: won_stage}}
+    assert head.post(url, wrong_target, format="json").status_code == 400
+
+    adopted = head.post(url, body, format="json")
+    assert adopted.status_code == 200, adopted.content
+    assert adopted.json() == {"moved": 1, "per_stage": {warm: 1}}
+
+    moved_deal = director.get(f"/api/v1/sales/deals/{open_deal}/").json()
+    assert (moved_deal["pipeline_id"], moved_deal["stage_id"]) == (funnel["id"], warm)
+    history = director.get(f"/api/v1/sales/deals/{open_deal}/stage-history/").json()["results"]
+    assert history[-1]["from_stage_id"] == new_stage and history[-1]["to_stage_id"] == warm
+    assert "Перенос в воронку отдела" in history[-1]["reason"]
+    # Closed deals and other departments' deals stay where they were.
+    assert (
+        director.get(f"/api/v1/sales/deals/{closed_deal}/").json()["pipeline_id"] == company["id"]
+    )
+    assert (
+        director.get(f"/api/v1/sales/deals/{foreign_deal}/").json()["pipeline_id"] == company["id"]
+    )
