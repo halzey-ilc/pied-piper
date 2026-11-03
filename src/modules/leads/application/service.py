@@ -142,9 +142,16 @@ class LeadService:
             check_assignable(principal, scope, owner_user_id, member, what="leads")
             team_id = member.department_id if member is not None else principal.department_id
             version = lead.version
+            previous_owner = lead.owner_user_id
             if lead.assign(owner_user_id, team_id):
                 self._repo.save(lead, expected_version=version)
-                self._record(principal, "lead.reassigned", lead, ("owner",))
+                self._record(
+                    principal,
+                    "lead.reassigned",
+                    lead,
+                    ("owner",),
+                    details=_owner_change(previous_owner, owner_user_id),
+                )
         return lead
 
     def find_duplicates(self, principal: Principal, lead_id: UUID) -> list[DuplicateCandidate]:
@@ -269,7 +276,13 @@ class LeadService:
             raise ConflictError("Lead was modified by someone else; reload and retry.")
 
     def _record(
-        self, principal: Principal, action: str, lead: Lead, fields: tuple[str, ...] = ()
+        self,
+        principal: Principal,
+        action: str,
+        lead: Lead,
+        fields: tuple[str, ...] = (),
+        *,
+        details: dict[str, str] | None = None,
     ) -> None:
         self._audit.record(
             AuditEntry(
@@ -278,5 +291,14 @@ class LeadService:
                 resource_type=AGGREGATE,
                 resource_id=str(lead.id),
                 changed_fields=fields,
+                details=details or {},
             )
         )
+
+
+def _owner_change(previous: UUID | None, new: UUID) -> dict[str, str]:
+    """Audit details of a reassignment: who owned the record before and who owns it now."""
+    change = {"to_owner": str(new)}
+    if previous is not None:
+        change["from_owner"] = str(previous)
+    return change

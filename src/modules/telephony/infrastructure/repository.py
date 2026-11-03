@@ -64,6 +64,20 @@ class DjangoCallRepository:
             qs = qs.filter(direction=filters.direction.value)
         if filters.subject_type is not None and filters.subject_id is not None:
             qs = qs.filter(subject_type=filters.subject_type.value, subject_id=filters.subject_id)
+        if filters.statuses:
+            qs = qs.filter(status__in=[s.value for s in filters.statuses])
+        if filters.owner_user_id is not None:
+            qs = qs.filter(owner_user_id=filters.owner_user_id)
+        if filters.started_from is not None:
+            qs = qs.filter(started_at__gte=filters.started_from)
+        if filters.started_to is not None:
+            qs = qs.filter(started_at__lt=filters.started_to)
+        if filters.search:
+            digits = "".join(ch for ch in filters.search if ch.isdigit())
+            text = Q(notes__icontains=filters.search)
+            if digits:
+                text |= Q(from_number__contains=digits) | Q(to_number__contains=digits)
+            qs = qs.filter(text)
         return qs
 
     def add(self, call: Call) -> None:

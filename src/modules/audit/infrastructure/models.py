@@ -22,6 +22,8 @@ class AuditRecord(models.Model):
     resource_type = models.CharField(max_length=100)
     resource_id = models.CharField(max_length=64)
     changed_fields = models.JSONField(default=list)
+    # Identifiers that explain the change (e.g. previous/new owner) — never personal data.
+    details = models.JSONField(default=dict, blank=True)
     request_id = models.CharField(max_length=64, blank=True, default="")
     correlation_id = models.CharField(max_length=64, blank=True, default="")
 

@@ -19,6 +19,7 @@ from modules.customers.presentation.serializers import (
     CustomerUpdateSerializer,
     customer_to_dict,
 )
+from modules.organizations.composition import member_display_name, people_in_details
 from platform_core.presentation.tenancy import TenantScopedAPIView
 from shared.domain.errors import DomainValidationError
 
@@ -234,6 +235,42 @@ class CustomerRestoreView(CustomerBaseView):
     )
     def post(self, request: Request, customer_id: UUID) -> Response:
         return Response(customer_to_dict(customer_service().restore(self.principal(), customer_id)))
+
+
+class CustomerHistoryView(CustomerBaseView):
+    @extend_schema(
+        tags=["Customers"],
+        operation_id="customers_history",
+        summary="Customer change history",
+        description=(
+            "Audited changes, newest first: customer.created|updated|archived|restored|"
+            "reassigned with actor, time and changed field names (no values). A reassignment "
+            "also names the previous and the new owner (`details.from_owner`, `details.to_owner`)."
+        ),
+        parameters=[_TENANT_HEADER],
+        responses=None,
+    )
+    def get(self, request: Request, customer_id: UUID) -> Response:
+        entries = customer_service().history(self.principal(), customer_id)
+        tenant_id = self.membership.tenant_id
+        results = [
+            {
+                "action": e.action,
+                "occurred_at": e.occurred_at.isoformat(),
+                "actor": (
+                    {
+                        "id": str(e.actor_user_id),
+                        "name": member_display_name(tenant_id, e.actor_user_id),
+                    }
+                    if e.actor_user_id
+                    else None
+                ),
+                "changed_fields": list(e.changed_fields),
+                "details": people_in_details(tenant_id, e.details),
+            }
+            for e in entries
+        ]
+        return Response({"count": len(results), "results": results})
 
 
 class CustomerAssignView(CustomerBaseView):

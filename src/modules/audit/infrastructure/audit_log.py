@@ -17,6 +17,7 @@ class DjangoAuditLog:
             resource_type=entry.resource_type,
             resource_id=entry.resource_id,
             changed_fields=list(entry.changed_fields),
+            details={key: str(value) for key, value in entry.details.items()},
             request_id=current_request_id() or "",
             correlation_id=current_correlation_id() or "",
         )
@@ -37,6 +38,7 @@ class DjangoAuditLog:
                 resource_id=row.resource_id,
                 changed_fields=tuple(row.changed_fields or ()),
                 occurred_at=row.occurred_at,
+                details=dict(row.details or {}),
             )
             for row in rows
         ]

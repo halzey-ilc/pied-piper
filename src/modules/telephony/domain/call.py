@@ -193,6 +193,22 @@ class Call:
         self.status = status
         self.version += 1
 
+    def relink(self, link: CallLink | None, notes: str | None = None) -> bool:
+        """Attach the call to a customer or deal (or detach it); optionally replace the notes.
+        Returns True if anything changed."""
+        changed = False
+        if link != self.link:
+            self.link = link
+            changed = True
+        if notes is not None:
+            cleaned = _clean(notes, label="Notes", max_length=MAX_NOTES_LENGTH)
+            if cleaned != self.notes:
+                self.notes = cleaned
+                changed = True
+        if changed:
+            self.version += 1
+        return changed
+
     def end(
         self, status: CallStatus, *, duration_seconds: int = 0, recording_url: str | None = None
     ) -> CallEnded:

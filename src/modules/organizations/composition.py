@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import secrets
+from collections.abc import Mapping
 from typing import Any
 from uuid import UUID
 
@@ -65,6 +66,11 @@ class _TaskHandover:
             return hand_over_open_tasks(from_user, to_user, team, actor)
 
 
+def _reassigned_from(action: str, user_id: UUID) -> Any:
+    """Audit entries of records handed over *from* this member (``details.from_owner``)."""
+    return AuditRecord.objects.filter(action=action, details__from_owner=str(user_id))
+
+
 class _WorkHistory:
     """WorkHistory adapter: everything in the company's database that names the person.
 
@@ -99,6 +105,10 @@ class _WorkHistory:
             "absences": AbsenceRecord.objects.filter(Q(user_id=user_id) | Q(created_by=user_id)),
             "work_sessions": WorkSessionRecord.objects.filter(user_id=user_id),
             "actions": AuditRecord.objects.filter(actor_user_id=user_id),
+            # Records reassigned away from this person (their former base) — also history
+            "transferred_leads": _reassigned_from("lead.reassigned", user_id),
+            "transferred_customers": _reassigned_from("customer.reassigned", user_id),
+            "transferred_deals": _reassigned_from("deal.reassigned", user_id),
         }
         return {kind: qs.using(db).count() for kind, qs in checks.items()}
 
@@ -213,3 +223,18 @@ def member_display_name(tenant_id: UUID, user_id: UUID) -> str | None:
         return None
     user = row.user
     return " ".join(p for p in (user.first_name, user.last_name) if p) or user.get_username()
+
+
+def people_in_details(
+    tenant_id: UUID, details: Mapping[str, str]
+) -> dict[str, dict[str, str | None]]:
+    """Audit ``details`` (identifiers only) with each member's display name resolved now,
+    e.g. ``{"from_owner": {"id": ..., "name": "Айбек"}, "to_owner": {...}}``."""
+    resolved: dict[str, dict[str, str | None]] = {}
+    for key, value in details.items():
+        try:
+            user_id = UUID(str(value))
+        except ValueError:
+            continue
+        resolved[key] = {"id": str(user_id), "name": member_display_name(tenant_id, user_id)}
+    return resolved

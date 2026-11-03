@@ -15,7 +15,7 @@ from modules.access_control.domain.rbac import (
     Scope,
     check_assignable,
 )
-from modules.audit.application.ports import AuditLog
+from modules.audit.application.ports import AuditLog, AuditTrail
 from modules.audit.domain.entry import AuditEntry
 from modules.customers.application.ports import (
     CUSTOMER_ORDERING,
@@ -67,7 +67,9 @@ class CustomerService:
         audit: AuditLog,
         members: MemberDirectory | None = None,
         policy: AccessPolicy | None = None,
+        trail: AuditTrail | None = None,
     ) -> None:
+        self._trail = trail
         self._members = members
         self._repo = repository
         self._uow = uow
@@ -96,6 +98,12 @@ class CustomerService:
                 )
             )
         return customer
+
+    def history(self, principal: Principal, customer_id: UUID) -> list[AuditEntry]:
+        """Audited changes of the customer, newest first (field names; a reassignment also
+        carries the previous and the new owner ids)."""
+        self.get(principal, customer_id)  # 404 if not visible
+        return [] if self._trail is None else self._trail.entries_for(AGGREGATE, str(customer_id))
 
     def get(self, principal: Principal, customer_id: UUID) -> Customer:
         customer = self._repo.get(customer_id)
@@ -156,9 +164,16 @@ class CustomerService:
             check_assignable(principal, scope, owner_user_id, member, what="customers")
             team_id = member.department_id if member is not None else principal.department_id
             version = customer.version
+            previous_owner = customer.owner_user_id
             if customer.assign(owner_user_id, team_id):
                 self._repo.save(customer, expected_version=version)
-                self._audit_change(principal, "customer.reassigned", customer, ("owner",))
+                self._audit_change(
+                    principal,
+                    "customer.reassigned",
+                    customer,
+                    ("owner",),
+                    details={"from_owner": str(previous_owner), "to_owner": str(owner_user_id)},
+                )
         return customer
 
     def _change(
@@ -178,7 +193,13 @@ class CustomerService:
         return customer
 
     def _audit_change(
-        self, principal: Principal, action: str, customer: Customer, fields: tuple[str, ...]
+        self,
+        principal: Principal,
+        action: str,
+        customer: Customer,
+        fields: tuple[str, ...],
+        *,
+        details: dict[str, str] | None = None,
     ) -> None:
         self._audit.record(
             AuditEntry(
@@ -187,6 +208,7 @@ class CustomerService:
                 resource_type=AGGREGATE,
                 resource_id=str(customer.id),
                 changed_fields=fields,
+                details=details or {},
             )
         )
 

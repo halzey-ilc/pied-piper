@@ -32,6 +32,7 @@ class CustomerReadSerializer(serializers.Serializer[dict[str, Any]]):
     owner_user_id = serializers.UUIDField(read_only=True)
     team_id = serializers.UUIDField(read_only=True, allow_null=True)
     archived_at = serializers.DateTimeField(read_only=True, allow_null=True)
+    merged_into_id = serializers.UUIDField(read_only=True, allow_null=True)
     version = serializers.IntegerField(read_only=True)
     created_at = serializers.DateTimeField(read_only=True)
 
@@ -54,6 +55,7 @@ def customer_to_dict(customer: Customer) -> dict[str, Any]:
         "owner_user_id": str(customer.owner_user_id),
         "team_id": str(customer.team_id) if customer.team_id else None,
         "archived_at": customer.archived_at.isoformat() if customer.archived_at else None,
+        "merged_into_id": str(customer.merged_into_id) if customer.merged_into_id else None,
         "version": customer.version,
         "created_at": customer.created_at.isoformat(),
     }

@@ -18,6 +18,8 @@ class CustomerRecord(models.Model):
     team_id = models.UUIDField(null=True, blank=True)
     # Out of active work; kept with its deals and history (never deleted).
     archived_at = models.DateTimeField(null=True, blank=True)
+    # Merged duplicate: the customer it was merged into (this card stays archived as history).
+    merged_into_id = models.UUIDField(null=True, blank=True)
     version = models.PositiveIntegerField(default=1)
     created_at = models.DateTimeField()
     updated_at = models.DateTimeField(auto_now=True)

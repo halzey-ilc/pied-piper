@@ -181,6 +181,24 @@ class CallService:
             self._record(principal, "call.ended", call)
         return call
 
+    def relink(
+        self,
+        principal: Principal,
+        call_id: UUID,
+        link: CallLink | None,
+        *,
+        notes: str | None = None,
+    ) -> Call:
+        """Attach a call to a customer or deal (2.7 / 6.7), or detach it; edit the notes."""
+        with self._uow:
+            call = self._load_for_write(principal, call_id)
+            self._check_link(link)
+            version = call.version
+            if call.relink(link, notes):
+                self._repo.save(call, expected_version=version)
+                self._record(principal, "call.linked", call)
+        return call
+
     def _check_link(self, link: CallLink | None) -> None:
         if link is not None and not self._subjects.exists(link.type, link.id):
             raise NotFoundError(f"The {link.type.value} this call links to was not found.")

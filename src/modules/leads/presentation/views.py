@@ -27,7 +27,7 @@ from modules.leads.presentation.serializers import (
     duplicate_to_dict,
     lead_to_dict,
 )
-from modules.organizations.composition import company_settings
+from modules.organizations.composition import company_settings, people_in_details
 from modules.sales_pipeline.application.deal_service import OpenDeal
 from modules.sales_pipeline.composition import deal_service
 from platform_core.presentation.tenancy import TenantScopedAPIView
@@ -363,12 +363,15 @@ class LeadHistoryView(LeadBaseView):
     )
     def get(self, request: Request, lead_id: UUID) -> Response:
         entries = lead_service().history(self.principal(), lead_id)
+        tenant_id = self.membership.tenant_id
         results = [
             {
                 "action": e.action,
                 "occurred_at": e.occurred_at.isoformat(),
                 "actor_user_id": str(e.actor_user_id) if e.actor_user_id else None,
                 "changed_fields": list(e.changed_fields),
+                # A reassignment names the previous and the new owner
+                "details": people_in_details(tenant_id, e.details),
             }
             for e in entries
         ]

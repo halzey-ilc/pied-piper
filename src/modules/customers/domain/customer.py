@@ -55,6 +55,8 @@ class Customer:
     # Archived: out of active work (hidden from the default list, read-only); history stays.
     archived_at: datetime | None = None
     version: int = 1
+    # Set when this card was merged into another (a duplicate): it stays archived as history.
+    merged_into_id: UUID | None = None
 
     @classmethod
     def register(
@@ -121,6 +123,10 @@ class Customer:
         return True
 
     def restore(self) -> bool:
+        if self.merged_into_id is not None:
+            raise ConflictError(
+                "This card was merged into another customer and cannot be restored."
+            )
         if self.archived_at is None:
             return False
         self.archived_at = None
@@ -136,6 +142,37 @@ class Customer:
         self.team_id = team_id
         self.version += 1
         return True
+
+    def absorb_contacts(
+        self, email: EmailAddress | None, phone: PhoneNumber | None
+    ) -> tuple[str, ...]:
+        """Merge (spec 2.10): keep this card's contacts, fill only the empty ones with the
+        duplicate's. Returns the filled field names."""
+        self._require_active()
+        filled: list[str] = []
+        if self.email is None and email is not None:
+            self.email = email
+            filled.append("email")
+        if self.phone is None and phone is not None:
+            self.phone = phone
+            filled.append("phone")
+        if filled:
+            self.version += 1
+        return tuple(filled)
+
+    def mark_merged_into(self, target_id: UUID, *, release_email: bool) -> None:
+        """Archive this duplicate with a "merged into" marker. ``release_email`` frees its
+        e-mail (unique per company) when the e-mail moves to the target."""
+        if target_id == self.id:
+            raise DomainValidationError("A customer cannot be merged into itself.")
+        if self.merged_into_id is not None:
+            raise ConflictError("This customer has already been merged into another one.")
+        self.merged_into_id = target_id
+        if self.archived_at is None:
+            self.archived_at = datetime.now(UTC)
+        if release_email:
+            self.email = None
+        self.version += 1
 
 
 class CustomerArchivedError(ConflictError):

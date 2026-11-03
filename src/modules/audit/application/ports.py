@@ -12,7 +12,8 @@ class AuditLog(Protocol):
 
 
 class AuditTrail(Protocol):
-    """Reads the audit entries of one resource, newest first (field names only, no values)."""
+    """Reads the audit entries of one resource, newest first (field names only, no values;
+    ``details`` may carry identifiers such as the previous and the new owner)."""
 
     def entries_for(
         self, resource_type: str, resource_id: str, *, limit: int = 100

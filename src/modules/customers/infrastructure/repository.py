@@ -34,6 +34,7 @@ def _to_domain(row: CustomerRecord) -> Customer:
         created_at=row.created_at,
         archived_at=row.archived_at,
         version=row.version,
+        merged_into_id=row.merged_into_id,
     )
 
 
@@ -112,6 +113,7 @@ class DjangoCustomerRepository:
                         owner_user_id=customer.owner_user_id,
                         team_id=customer.team_id,
                         archived_at=customer.archived_at,
+                        merged_into_id=customer.merged_into_id,
                         version=F("version") + 1,
                     )
                 )

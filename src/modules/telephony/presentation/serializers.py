@@ -32,6 +32,19 @@ class CallLogSerializer(serializers.Serializer[dict[str, Any]]):
     subject_id = serializers.UUIDField(required=False, allow_null=True)
 
 
+class CallLinkSerializer(serializers.Serializer[dict[str, Any]]):
+    subject_type = serializers.ChoiceField(
+        choices=[t.value for t in SubjectType], required=False, allow_null=True
+    )
+    subject_id = serializers.UUIDField(required=False, allow_null=True)
+    notes = serializers.CharField(required=False, allow_blank=True, max_length=2000)
+
+    def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
+        if bool(attrs.get("subject_type")) != bool(attrs.get("subject_id")):
+            raise serializers.ValidationError("Give both subject_type and subject_id, or neither.")
+        return attrs
+
+
 class CallRequestSerializer(serializers.Serializer[dict[str, Any]]):
     from_number = serializers.CharField(max_length=32)
     to_number = serializers.CharField(max_length=32)

@@ -46,6 +46,7 @@ def hand_over_open_leads(from_user: UUID, to_user: UUID, to_team: UUID | None, a
                     resource_type="lead",
                     resource_id=str(record_id),
                     changed_fields=("owner",),
+                    details={"from_owner": str(from_user), "to_owner": str(to_user)},
                 )
             )
     return len(moved)

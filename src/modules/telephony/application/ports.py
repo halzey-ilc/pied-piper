@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Protocol
 from uuid import UUID
 
@@ -19,6 +20,13 @@ class CallFilter:
     direction: CallDirection | None = None
     subject_type: SubjectType | None = None
     subject_id: UUID | None = None
+    # Any of these statuses (e.g. missed + failed); combined with ``status`` if both set.
+    statuses: frozenset[CallStatus] = frozenset()
+    owner_user_id: UUID | None = None
+    started_from: datetime | None = None  # inclusive
+    started_to: datetime | None = None  # exclusive
+    # Case-insensitive text in a phone number or the notes.
+    search: str | None = None
 
 
 class CallRepository(Protocol):
