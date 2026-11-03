@@ -1,5 +1,6 @@
 from django.urls import path
 
+from modules.leads.presentation.routing_views import LeadRoutingView
 from modules.leads.presentation.views import (
     LeadAssignView,
     LeadConvertView,
@@ -13,6 +14,7 @@ from modules.leads.presentation.views import (
 
 urlpatterns = [
     path("", LeadListCreateView.as_view(), name="lead-list"),
+    path("routing/", LeadRoutingView.as_view(), name="lead-routing"),
     path("<uuid:lead_id>/", LeadDetailView.as_view(), name="lead-detail"),
     path("<uuid:lead_id>/qualify/", LeadQualifyView.as_view(), name="lead-qualify"),
     path("<uuid:lead_id>/disqualify/", LeadDisqualifyView.as_view(), name="lead-disqualify"),

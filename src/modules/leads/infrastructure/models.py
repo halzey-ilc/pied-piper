@@ -39,3 +39,33 @@ class LeadRecord(models.Model):
 
     def __str__(self) -> str:
         return f"{self.name} ({self.status})"
+
+
+class LeadRoutingRuleRecord(models.Model):
+    """Automatic lead distribution settings of one department (tenant database).
+
+    No row = routing off. ``last_assigned_user_id`` is the round-robin pointer; captures
+    lock the row (SELECT ... FOR UPDATE) before moving it."""
+
+    department_id = models.UUIDField(primary_key=True)
+    enabled = models.BooleanField(default=False)
+    member_ids = models.JSONField(default=list)  # empty = every active sales manager
+    require_on_shift = models.BooleanField(default=True)
+    skip_on_absence = models.BooleanField(default=True)
+    is_company_intake = models.BooleanField(default=False)
+    last_assigned_user_id = models.UUIDField(null=True, blank=True)
+    updated_by = models.UUIDField(null=True, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "leads_routing_rule"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["is_company_intake"],
+                condition=models.Q(is_company_intake=True),
+                name="lead_routing_one_intake",
+            )
+        ]
+
+    def __str__(self) -> str:
+        return f"routing {self.department_id} ({'on' if self.enabled else 'off'})"

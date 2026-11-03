@@ -7,6 +7,7 @@ from uuid import UUID
 
 from modules.access_control.domain.rbac import MemberRef, Principal
 from modules.leads.domain.lead import Lead, LeadSource, LeadStatus
+from modules.leads.domain.routing import RoutingRule
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,3 +91,37 @@ class MemberDirectory(Protocol):
     """Active members of the company (a lead can be handed only to one of them)."""
 
     def active_member(self, user_id: UUID) -> MemberRef | None: ...
+
+
+class LeadRouting(Protocol):
+    """Data for automatic distribution of captured leads (see ``domain.routing``)."""
+
+    def rule(self, department_id: UUID) -> RoutingRule | None: ...
+
+    def rule_for_update(self, department_id: UUID) -> RoutingRule | None:
+        """The rule locked until the transaction ends (the rotation pointer moves once)."""
+        ...
+
+    def intake_department(self) -> UUID | None:
+        """The department marked as company intake, if its routing is on."""
+        ...
+
+    def save_rule(self, rule: RoutingRule, *, updated_by: UUID) -> RoutingRule: ...
+
+    def remember(self, department_id: UUID, user_id: UUID) -> None:
+        """Move the rotation pointer of the department to ``user_id``."""
+        ...
+
+    def managers(self, department_id: UUID) -> list[UUID]:
+        """Active sales managers of the department."""
+        ...
+
+    def on_shift(self, user_ids: list[UUID]) -> set[UUID]: ...
+
+    def absent_today(self, user_ids: list[UUID]) -> set[UUID]: ...
+
+    def department_exists(self, department_id: UUID) -> bool: ...
+
+    def notify_assignee_missing(self, department_id: UUID, lead: Lead) -> None:
+        """Tell the department's heads of sales that nobody could take the lead."""
+        ...

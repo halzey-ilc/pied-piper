@@ -24,9 +24,11 @@ from modules.leads.application.ports import (
     DuplicateFinder,
     LeadFilter,
     LeadRepository,
+    LeadRouting,
     LeadVisibility,
     MemberDirectory,
 )
+from modules.leads.application.routing import pick_assignee
 from modules.leads.domain.lead import Lead, LeadSource, LeadStatus
 from platform_core.application.ports import EventOutbox
 from shared.application.ports import UnitOfWork
@@ -81,7 +83,9 @@ class LeadService:
         members: MemberDirectory | None = None,
         trail: AuditTrail | None = None,
         policy: AccessPolicy | None = None,
+        routing: LeadRouting | None = None,
     ) -> None:
+        self._routing = routing
         self._members = members
         self._trail = trail
         self._repo = repository
@@ -178,19 +182,34 @@ class LeadService:
     # --- writes -------------------------------------------------------------
 
     def capture(self, principal: Principal, command: CaptureLead) -> Lead:
+        """Every intake path (form, import) comes here. With routing on for the department,
+        a lead captured by a non-manager goes in turn to an eligible manager; if nobody is
+        eligible it stays with the creator and the department's head of sales is told."""
         self._policy.require(principal, Permission.LEADS_CREATE)
-        lead, event = Lead.capture(
-            name=command.name,
-            owner_user_id=principal.user_id,
-            team_id=principal.department_id,
-            source=command.source,
-            email=command.email,
-            phone=command.phone,
-        )
         with self._uow:
+            pick = pick_assignee(self._routing, principal) if self._routing else None
+            routed_to = pick.user_id if pick is not None else None
+            lead, event = Lead.capture(
+                name=command.name,
+                owner_user_id=routed_to or principal.user_id,
+                team_id=pick.department_id if routed_to and pick else principal.department_id,
+                source=command.source,
+                email=command.email,
+                phone=command.phone,
+            )
             self._repo.add(lead)
             self._outbox.add(event, aggregate_type=AGGREGATE, aggregate_id=str(lead.id))
             self._record(principal, "lead.captured", lead)
+            if routed_to is not None:
+                self._record(
+                    principal,
+                    "lead.auto_assigned",
+                    lead,
+                    ("owner",),
+                    details=_owner_change(principal.user_id, routed_to),
+                )
+            elif pick is not None and self._routing is not None:
+                self._routing.notify_assignee_missing(pick.department_id, lead)
         return lead
 
     def update(self, principal: Principal, command: UpdateLead) -> Lead:

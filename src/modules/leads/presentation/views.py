@@ -356,7 +356,8 @@ class LeadHistoryView(LeadBaseView):
         summary="Lead change history",
         description=(
             "Audited changes, newest first: lead.captured|updated|qualified|disqualified|"
-            "converted|reassigned with actor, time and changed field names (no values)."
+            "converted|reassigned|auto_assigned with actor, time and changed field names "
+            "(no values)."
         ),
         parameters=[_TENANT_HEADER],
         responses=None,

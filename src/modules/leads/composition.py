@@ -6,10 +6,12 @@ from uuid import UUID
 
 from modules.audit.domain.entry import AuditEntry
 from modules.audit.infrastructure.audit_log import DjangoAuditLog
+from modules.leads.application.routing import LeadRoutingService
 from modules.leads.application.service import LeadService
 from modules.leads.infrastructure.customer_creation import CustomersCustomerCreation
 from modules.leads.infrastructure.duplicate_finder import DjangoDuplicateFinder
 from modules.leads.infrastructure.repository import DjangoLeadRepository
+from modules.leads.infrastructure.routing import DjangoLeadRouting
 from modules.organizations.infrastructure.memberships import DjangoMemberDirectory
 from platform_core.application.context import require_tenant
 from platform_core.infrastructure.messaging.stores import DjangoEventOutbox
@@ -28,6 +30,16 @@ def lead_service() -> LeadService:
         duplicates=DjangoDuplicateFinder(alias),
         members=DjangoMemberDirectory(tenant.tenant_id),
         trail=DjangoAuditLog(alias),
+        routing=DjangoLeadRouting(alias, tenant.tenant_id),
+    )
+
+
+def lead_routing_service() -> LeadRoutingService:
+    tenant = require_tenant()
+    return LeadRoutingService(
+        routing=DjangoLeadRouting(tenant.db_alias, tenant.tenant_id),
+        uow=DjangoUnitOfWork(tenant.db_alias),
+        audit=DjangoAuditLog(tenant.db_alias),
     )
 
 
