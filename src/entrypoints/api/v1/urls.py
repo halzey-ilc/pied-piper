@@ -18,6 +18,7 @@ from modules.identity.presentation.views import (
 )
 from modules.integrations.presentation.views import WebhookView
 from modules.platform_admin.presentation.views import SupportTicketsView
+from modules.web_forms.presentation.views import PublicLeadView
 
 urlpatterns = [
     path("auth/token/", TokenObtainView.as_view(), name="auth-token"),
@@ -65,6 +66,9 @@ urlpatterns = [
     path("risk/", include("modules.risk.presentation.urls")),
     path("platform/", include("modules.platform_admin.presentation.urls")),
     path("support/tickets/", SupportTicketsView.as_view(), name="support-tickets"),
+    path("web-forms/", include("modules.web_forms.presentation.urls")),
+    # Public, unauthenticated: website forms post leads here (CORS open for this path only).
+    path("public/leads/<str:token>/", PublicLeadView.as_view(), name="public-lead"),
     path(
         "webhooks/<str:provider>/<slug:tenant_slug>/",
         WebhookView.as_view(),

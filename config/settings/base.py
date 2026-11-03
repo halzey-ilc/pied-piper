@@ -61,6 +61,7 @@ INSTALLED_APPS = [
     "modules.workspace.infrastructure.apps.WorkspaceConfig",
     "modules.imports.infrastructure.apps.ImportsConfig",
     "modules.reference_lists.infrastructure.apps.ReferenceListsConfig",
+    "modules.web_forms.infrastructure.apps.WebFormsConfig",
 ]
 
 MIDDLEWARE = [
@@ -162,6 +163,7 @@ TENANCY: dict[str, Any] = {
         "tenant_registry",
         "subscriptions",
         "platform_admin",
+        "web_forms",
     },
     "TENANT_PLANE_APPS": {
         "customers",
@@ -281,6 +283,9 @@ REST_FRAMEWORK: dict[str, Any] = {
         "user": "600/min",
         "auth": "10/min",
         "webhooks": "600/min",
+        # Public website lead forms: per client IP and per intake key.
+        "web_form_ip": "10/min",
+        "web_form_token": "120/min",
     },
     "NUM_PROXIES": ENV.TRUSTED_PROXY_COUNT,
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.LimitOffsetPagination",
