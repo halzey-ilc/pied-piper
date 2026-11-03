@@ -6,6 +6,7 @@ from typing import Protocol
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
+from modules.team_cabinet.domain.actions import ActionGroup
 from modules.team_cabinet.domain.analytics import (
     LeadResponse,
     MeetingReasons,
@@ -111,3 +112,47 @@ class AnalyticsReader(Protocol):
     ) -> LeadResponse: ...
 
     def tasks_as_of(self, user_id: UUID, day_end: datetime, day: date) -> tuple[int, int]: ...
+
+
+class ActionsReader(Protocol):
+    """Reads the «Что делать сегодня» groups. ``owners`` limits the records to those owned
+    (assigned, sold) by these users; None means the whole company. Each method returns the
+    full count, counts per manager and at most ``limit`` items, oldest problems first."""
+
+    def stalled_deal_days(self) -> int:
+        """The company's stalled-deal threshold (shared with the operations rules)."""
+        ...
+
+    def payments_to_verify(
+        self, owners: list[UUID] | None, *, now: datetime, limit: int
+    ) -> ActionGroup: ...
+
+    def overdue_tasks(
+        self, owners: list[UUID] | None, *, today: date, limit: int
+    ) -> ActionGroup: ...
+
+    def tasks_due_soon(
+        self, owners: list[UUID] | None, *, today: date, limit: int
+    ) -> ActionGroup: ...
+
+    def meetings_without_outcome(
+        self, owners: list[UUID] | None, *, now: datetime, limit: int
+    ) -> ActionGroup: ...
+
+    def deals_without_next_step(
+        self, owners: list[UUID] | None, *, now: datetime, limit: int
+    ) -> ActionGroup: ...
+
+    def deals_to_push(
+        self, owners: list[UUID] | None, *, now: datetime, stalled_days: int, limit: int
+    ) -> ActionGroup: ...
+
+    def leads_without_contact(
+        self, owners: list[UUID] | None, *, now: datetime, response_minutes: int, limit: int
+    ) -> ActionGroup: ...
+
+    def on_shift(
+        self, user_ids: list[UUID], *, day_start: datetime, day_end: datetime
+    ) -> set[UUID]:
+        """Users with a work session started today or still open."""
+        ...

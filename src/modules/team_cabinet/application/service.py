@@ -15,7 +15,22 @@ from uuid import UUID
 from zoneinfo import ZoneInfo
 
 from modules.access_control.domain.rbac import AccessPolicy, Permission, Principal, Scope
-from modules.team_cabinet.application.ports import AnalyticsReader, CabinetReader, TeamRoster
+from modules.team_cabinet.application.ports import (
+    ActionsReader,
+    AnalyticsReader,
+    CabinetReader,
+    TeamRoster,
+)
+from modules.team_cabinet.domain.actions import (
+    ACTION_ORDER,
+    FIELD_ROLES,
+    ActionGroup,
+    ActionItem,
+    ActionKind,
+    ActionThresholds,
+    TodayActions,
+    manager_reasons,
+)
 from modules.team_cabinet.domain.analytics import (
     DayScorePoint,
     FunnelReport,
@@ -85,11 +100,13 @@ class TeamCabinetService:
         reader: CabinetReader,
         policy: AccessPolicy | None = None,
         analytics: AnalyticsReader | None = None,
+        actions: ActionsReader | None = None,
     ) -> None:
         self._roster = roster
         self._reader = reader
         self._policy = policy or AccessPolicy()
         self._analytics = analytics
+        self._actions = actions
 
     def today_board(
         self,
@@ -310,6 +327,90 @@ class TeamCabinetService:
             for m in members
         ]
         return TeamReport(start=start, end=end, department_id=department_id, rows=rows)
+
+    # --- «Что делать сегодня» -------------------------------------------------
+
+    def today_actions(
+        self,
+        principal: Principal,
+        board: TodayBoard,
+        *,
+        timezone_name: str,
+        limit: int,
+        department_id: UUID | None = None,
+    ) -> TodayActions:
+        """Prioritised action groups for a head of sales (their department) or a director
+        (the whole company or one department). ``board`` is today's board for the same scope:
+        its rows give who is silent today."""
+        owners, department_id = self._owners(principal, department_id)
+        if self._actions is None:  # pragma: no cover - wiring error
+            raise RuntimeError("Actions reader is not configured.")
+        reader = self._actions
+        tz = ZoneInfo(timezone_name)
+        now = datetime.now(tz)
+        today = now.date()
+        day_start = datetime(today.year, today.month, today.day, tzinfo=tz)
+        thresholds = ActionThresholds(stalled_deal_days=reader.stalled_deal_days())
+
+        groups: dict[ActionKind, ActionGroup] = {
+            ActionKind.PAYMENTS_TO_VERIFY: reader.payments_to_verify(owners, now=now, limit=limit),
+            ActionKind.OVERDUE_TASKS: reader.overdue_tasks(owners, today=today, limit=limit),
+            ActionKind.TASKS_DUE_SOON: reader.tasks_due_soon(owners, today=today, limit=limit),
+            ActionKind.MEETINGS_WITHOUT_OUTCOME: reader.meetings_without_outcome(
+                owners, now=now, limit=limit
+            ),
+            ActionKind.DEALS_WITHOUT_NEXT_STEP: reader.deals_without_next_step(
+                owners, now=now, limit=limit
+            ),
+            ActionKind.DEALS_TO_PUSH: reader.deals_to_push(
+                owners, now=now, stalled_days=thresholds.stalled_deal_days, limit=limit
+            ),
+            ActionKind.LEADS_WITHOUT_CONTACT: reader.leads_without_contact(
+                owners, now=now, response_minutes=thresholds.lead_response_minutes, limit=limit
+            ),
+            ActionKind.MANAGERS_WITHOUT_ACTIVITY: self._silent_managers(
+                board, reader, day_start=day_start, limit=limit
+            ),
+        }
+        names = {m.user_id: m.username for m in self._roster.members(principal.tenant_id, None)}
+        for group in groups.values():
+            for item in group.items:
+                if item.manager_id is not None:
+                    item.manager_username = names.get(item.manager_id, "")
+        return TodayActions(
+            day=today,
+            as_of=now,
+            limit=limit,
+            thresholds=thresholds,
+            department_id=department_id,
+            groups=[groups[kind] for kind in ACTION_ORDER],
+            usernames=names,
+        )
+
+    @staticmethod
+    def _silent_managers(
+        board: TodayBoard, reader: ActionsReader, *, day_start: datetime, limit: int
+    ) -> ActionGroup:
+        """Sales managers and lead callers not on a planned absence who did not start a
+        shift today or have no calls, meetings or payments today."""
+        field = [m for m in board.managers if m.product_role in FIELD_ROLES and not m.on_absence]
+        on_shift = reader.on_shift(
+            [m.user_id for m in field], day_start=day_start, day_end=day_start + timedelta(days=1)
+        )
+        group = ActionGroup(ActionKind.MANAGERS_WITHOUT_ACTIVITY)
+        for m in field:
+            reasons = manager_reasons(on_shift=m.user_id in on_shift, has_activity=m.has_activity)
+            if not reasons:
+                continue
+            group.count += 1
+            group.by_manager[m.user_id] = 1
+            if len(group.items) < limit:
+                group.items.append(
+                    ActionItem(
+                        id=m.user_id, title=m.username, manager_id=m.user_id, reasons=reasons
+                    )
+                )
+        return group
 
     # --- analytics ------------------------------------------------------------
 

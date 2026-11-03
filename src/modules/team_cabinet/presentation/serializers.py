@@ -7,6 +7,13 @@ from typing import Any
 from rest_framework import serializers
 
 from modules.team_cabinet.application.service import MemberCard, TeamReport, TodayBoard
+from modules.team_cabinet.domain.actions import (
+    TITLES,
+    ActionGroup,
+    ActionItem,
+    TodayActions,
+    rule_text,
+)
 from modules.team_cabinet.domain.analytics import (
     FunnelReport,
     LeadResponse,
@@ -419,5 +426,64 @@ def score_history_to_dict(history: ScoreHistory) -> dict[str, Any]:
         "points": [
             {"day": p.day, "points": p.points, "grade": p.grade, "reason": p.reason}
             for p in history.points
+        ],
+    }
+
+
+def action_item_to_dict(item: ActionItem) -> dict[str, Any]:
+    return {
+        "id": str(item.id),
+        "title": item.title,
+        "manager_id": str(item.manager_id) if item.manager_id else None,
+        "manager_username": item.manager_username,
+        "amount": _dec(item.amount),
+        "currency": item.currency,
+        "date": item.date.isoformat() if item.date else None,
+        "at": item.at.isoformat() if item.at else None,
+        "age_days": item.age_days,
+        "subject_type": item.subject_type,
+        "subject_id": str(item.subject_id) if item.subject_id else None,
+        "reasons": list(item.reasons),
+        "paid": _dec(item.paid),
+        "debt": _dec(item.debt),
+        "stage_name": item.stage_name,
+    }
+
+
+def action_group_to_dict(
+    group: ActionGroup, priority: int, actions: TodayActions
+) -> dict[str, Any]:
+    return {
+        "kind": group.kind.value,
+        "priority": priority,
+        "title": TITLES[group.kind],
+        "rule": rule_text(group.kind, actions.thresholds),
+        "count": group.count,
+        "amounts": [
+            {"currency": currency, "total": str(total)}
+            for currency, total in sorted(group.amounts.items())
+        ],
+        "by_manager": [
+            {"user_id": str(uid), "username": actions.usernames.get(uid, ""), "count": count}
+            for uid, count in sorted(group.by_manager.items(), key=lambda kv: (-kv[1], str(kv[0])))
+        ],
+        "items": [action_item_to_dict(item) for item in group.items],
+    }
+
+
+def today_actions_to_dict(actions: TodayActions) -> dict[str, Any]:
+    return {
+        "date": actions.day.isoformat(),
+        "as_of": actions.as_of.isoformat(),
+        "limit": actions.limit,
+        "department_id": str(actions.department_id) if actions.department_id else None,
+        "thresholds": {
+            "stalled_deal_days": actions.thresholds.stalled_deal_days,
+            "lead_response_minutes": actions.thresholds.lead_response_minutes,
+        },
+        "total": actions.total,
+        "groups": [
+            action_group_to_dict(group, index + 1, actions)
+            for index, group in enumerate(actions.groups)
         ],
     }

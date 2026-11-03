@@ -17,6 +17,7 @@ from rest_framework.response import Response
 from modules.access_control.domain.rbac import Principal, Role
 from modules.organizations.composition import company_settings
 from modules.team_cabinet.composition import team_cabinet_service
+from modules.team_cabinet.domain.actions import DEFAULT_ACTIONS_LIMIT, MAX_ACTIONS_LIMIT
 from modules.team_cabinet.domain.board import TrafficThresholds
 from modules.team_cabinet.presentation.serializers import (
     REPORT_COLUMNS,
@@ -29,6 +30,7 @@ from modules.team_cabinet.presentation.serializers import (
     plan_fact_to_dict,
     score_history_to_dict,
     team_report_to_dict,
+    today_actions_to_dict,
 )
 from platform_core.presentation.tenancy import TenantScopedAPIView
 from shared.domain.errors import DomainValidationError
@@ -50,6 +52,18 @@ _DEPARTMENT = OpenApiParameter(
     description="Director only: limit to one department (a head of sales always sees their own).",
 )
 _TAGS = ["Cabinet"]
+_INCLUDE = OpenApiParameter(
+    "include",
+    str,
+    OpenApiParameter.QUERY,
+    description="`actions`: also return «Что делать сегодня» (the `actions` object).",
+)
+_ACTIONS_LIMIT = OpenApiParameter(
+    "actions_limit",
+    int,
+    OpenApiParameter.QUERY,
+    description=f"Items per action group, 1-{MAX_ACTIONS_LIMIT} (default {DEFAULT_ACTIONS_LIMIT}).",
+)
 
 
 class _Scoped(TenantScopedAPIView):
@@ -106,19 +120,58 @@ class TeamTodayView(_Scoped):
             "date-less reschedules, tasks due/done today, the month plan and sales, and the day "
             "score (0-100 = up to 50 result vs the plan pro-rated by elapsed days + up to 50 CRM "
             "discipline; grades 5/4/3/2 from 90/75/60; null on a silent day or absence). "
-            "Needs the team_cabinet.view permission."
+            "With `include=actions` the response also has `actions` — «Что делать сегодня»: "
+            "prioritised groups, each with a stable `kind`, its `rule` in words, the full "
+            "`count`, counts per manager, money per currency (never summed across "
+            "currencies) and up to `actions_limit` items (oldest problems first): "
+            "payments_to_verify (pending_verification), overdue_tasks, tasks_due_soon (due "
+            "today or tomorrow), meetings_without_outcome (ended, still scheduled), "
+            "deals_without_next_step (no open task with a due date and no upcoming meeting), "
+            "deals_to_push (on the stage for at least the company's stalled-deal days and with "
+            "a held meeting, a confirmed prepayment or an unpaid balance — confirmed money in "
+            "the deal currency only), leads_without_contact (new, no first response after 15 "
+            "minutes) and managers_without_activity (sales managers and lead callers, not on "
+            "absence, with no shift started today or no activity). Not tied to the operations "
+            "plan gate. Needs the team_cabinet.view permission."
         ),
-        parameters=[_TENANT_HEADER, _DEPARTMENT],
+        parameters=[_TENANT_HEADER, _DEPARTMENT, _INCLUDE, _ACTIONS_LIMIT],
         responses=TodayBoardSerializer,
     )
     def get(self, request: Request) -> Response:
-        board = team_cabinet_service().today_board(
-            self.principal(),
-            timezone_name=self._timezone(),
+        service = team_cabinet_service()
+        principal = self.principal()
+        timezone_name = self._timezone()
+        department_id = self._department(request)
+        board = service.today_board(
+            principal,
+            timezone_name=timezone_name,
             thresholds=self._thresholds(),
-            department_id=self._department(request),
+            department_id=department_id,
         )
-        return Response({**board_to_dict(board), "currency": self._currency()})
+        data = {**board_to_dict(board), "currency": self._currency()}
+        include = {part.strip() for part in request.query_params.get("include", "").split(",")}
+        if "actions" in include:
+            actions = service.today_actions(
+                principal,
+                board,
+                timezone_name=timezone_name,
+                limit=_actions_limit(request.query_params.get("actions_limit")),
+                department_id=department_id,
+            )
+            data["actions"] = today_actions_to_dict(actions)
+        return Response(data)
+
+
+def _actions_limit(raw: str | None) -> int:
+    if not raw:
+        return DEFAULT_ACTIONS_LIMIT
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise DomainValidationError("actions_limit must be a number.") from exc
+    if not 1 <= value <= MAX_ACTIONS_LIMIT:
+        raise DomainValidationError(f"actions_limit must be 1 to {MAX_ACTIONS_LIMIT}.")
+    return value
 
 
 class TeamInactivityView(_Scoped):

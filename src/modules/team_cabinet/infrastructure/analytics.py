@@ -32,7 +32,7 @@ from modules.team_cabinet.domain.analytics import (
 
 NO_REASON = "Причина не указана"
 # A first response to a lead: any activity on it or a decision about it.
-_RESPONSE_ACTIONS = ("lead.qualified", "lead.disqualified", "lead.converted", "lead.updated")
+RESPONSE_ACTIONS = ("lead.qualified", "lead.disqualified", "lead.converted", "lead.updated")
 
 
 def _months(start: date, end: date) -> list[str]:
@@ -300,7 +300,7 @@ class DjangoAnalyticsReader:
             .filter(
                 resource_type="lead",
                 resource_id__in=[str(i) for i in leads],
-                action__in=_RESPONSE_ACTIONS,
+                action__in=RESPONSE_ACTIONS,
                 actor_user_id__isnull=False,
             )
             .values("resource_id")
