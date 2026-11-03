@@ -23,6 +23,7 @@ class RoutingRule:
     member_ids: frozenset[UUID] = field(default_factory=frozenset)
     # Always True: only managers on shift receive leads (owner decision 03.11.2026)
     require_on_shift: bool = True
+    # Always True as well: nobody on a planned absence receives leads
     skip_on_absence: bool = True
     # Leads captured by members without a department (director, imports) go here.
     is_company_intake: bool = False
@@ -46,7 +47,7 @@ class Candidate:
             return False
         if not self.on_shift:  # owner decision 03.11.2026: never someone off shift
             return False
-        return not (rule.skip_on_absence and self.absent)
+        return not self.absent  # owner decision: never someone on a planned absence
 
 
 def candidates(

@@ -103,9 +103,10 @@ class LeadRoutingView(LeadBaseView):
         description=(
             "Round-robin among the department's active sales managers (lead callers never "
             "take part; optionally only `member_ids`) who are on shift — always required, "
-            "`require_on_shift: false` is refused — skipping those on a planned absence today "
-            "(`skip_on_absence`). Off until turned on. `candidates` shows who "
-            "would be eligible right now. Director: any department; head of sales: own."
+            "`require_on_shift: false` is refused — and not on a planned absence today "
+            "(`skip_on_absence: false` is refused too). Off until turned on; the head of sales "
+            "may turn it off (`enabled`). `candidates` shows who would be eligible right now. "
+            "Director: any department; head of sales: own."
         ),
         parameters=[_TENANT_HEADER, _DEPARTMENT],
         responses=RoutingSettingsSerializer,
