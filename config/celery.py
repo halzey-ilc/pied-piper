@@ -18,6 +18,7 @@ app.conf.include = [
     "entrypoints.workers.tasks.events",
     "entrypoints.workers.tasks.integrations",
     "entrypoints.workers.tasks.reports",
+    "entrypoints.workers.tasks.notifications",
     "entrypoints.workers.tasks.ai_insights",
 ]
 

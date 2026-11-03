@@ -20,6 +20,7 @@ class NotificationCategory(StrEnum):
     PAYMENT = "payment"
     SYSTEM = "system"
     AI = "ai"
+    TASK = "task"  # deadline reminders, overdue alerts and escalations
 
 
 def _clean(text: str, *, label: str, max_length: int, required: bool) -> str:

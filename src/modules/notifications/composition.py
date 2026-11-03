@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
+from modules.notifications.application.deadlines import DeadlineAlertService
 from modules.notifications.application.service import NotificationService
+from modules.notifications.infrastructure.deadlines import (
+    DjangoDepartmentHeads,
+    DjangoTaskDeadlineSource,
+)
 from modules.notifications.infrastructure.repository import (
     DjangoNotificationRepository,
     DjangoPreferenceRepository,
@@ -17,4 +22,15 @@ def notification_service() -> NotificationService:
         notifications=DjangoNotificationRepository(alias),
         preferences=DjangoPreferenceRepository(alias),
         uow=DjangoUnitOfWork(alias),
+    )
+
+
+def deadline_alert_service() -> DeadlineAlertService:
+    """Task deadline reminders/escalations for the company bound to the current scope."""
+    tenant = require_tenant()
+    return DeadlineAlertService(
+        notifications=notification_service(),
+        preferences=DjangoPreferenceRepository(tenant.db_alias),
+        tasks=DjangoTaskDeadlineSource(tenant.db_alias),
+        heads=DjangoDepartmentHeads(tenant.tenant_id),
     )

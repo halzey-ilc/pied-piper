@@ -91,6 +91,13 @@ class NotificationService:
     def get_preferences(self, user_id: UUID) -> NotificationPreferences:
         return self._prefs.get(user_id)
 
+    def set_reminder_days(self, user_id: UUID, days: int) -> NotificationPreferences:
+        with self._uow:
+            preferences = self._prefs.get(user_id)
+            if preferences.set_reminder_days(days):
+                self._prefs.save(preferences)
+        return preferences
+
     def set_preference(
         self, user_id: UUID, category: NotificationCategory, *, enabled: bool
     ) -> NotificationPreferences:

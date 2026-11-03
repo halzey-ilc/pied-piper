@@ -47,6 +47,7 @@ class NotificationPreferenceRecord(models.Model):
     user_id = models.UUIDField(unique=True)
     muted = models.JSONField(default=list)
     version = models.PositiveIntegerField(default=1)
+    reminder_days_before = models.PositiveSmallIntegerField(default=1)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:

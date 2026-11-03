@@ -13,7 +13,10 @@ from modules.access_control.domain.rbac import Principal, Role
 from modules.notifications.application.ports import NotificationFilter
 from modules.notifications.composition import notification_service
 from modules.notifications.domain.notification import Notification, NotificationCategory
-from modules.notifications.domain.preferences import NotificationPreferences
+from modules.notifications.domain.preferences import (
+    MAX_REMINDER_DAYS_BEFORE,
+    NotificationPreferences,
+)
 from platform_core.presentation.tenancy import TenantScopedAPIView
 
 _TENANT_HEADER = OpenApiParameter(
@@ -45,8 +48,23 @@ _TAGS = ["Notifications"]
 
 
 class PreferenceUpdateSerializer(serializers.Serializer[dict[str, Any]]):
-    category = serializers.ChoiceField(choices=[c.value for c in NotificationCategory])
-    enabled = serializers.BooleanField()
+    """Either a category toggle (``category`` + ``enabled``) or the task reminder lead time."""
+
+    category = serializers.ChoiceField(
+        choices=[c.value for c in NotificationCategory], required=False
+    )
+    enabled = serializers.BooleanField(required=False)
+    reminder_days_before = serializers.IntegerField(
+        required=False, min_value=0, max_value=MAX_REMINDER_DAYS_BEFORE
+    )
+
+    def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
+        toggle = "category" in attrs or "enabled" in attrs
+        if toggle and not ("category" in attrs and "enabled" in attrs):
+            raise serializers.ValidationError("Pass both category and enabled.")
+        if not toggle and "reminder_days_before" not in attrs:
+            raise serializers.ValidationError("Pass category and enabled, or reminder_days_before.")
+        return attrs
 
 
 class _Scoped(TenantScopedAPIView):
@@ -76,6 +94,7 @@ def _to_dict(n: Notification) -> dict[str, Any]:
 def _prefs_dict(prefs: NotificationPreferences) -> dict[str, Any]:
     return {
         "categories": {c.value: prefs.is_enabled(c) for c in NotificationCategory},
+        "reminder_days_before": prefs.reminder_days_before,
         "version": prefs.version,
     }
 
@@ -172,8 +191,13 @@ class PreferencesView(_Scoped):
     @extend_schema(
         tags=_TAGS,
         operation_id="notifications_set_preference",
-        summary="Enable/disable a category",
-        description="Turns a notification category on or off for you.",
+        summary="Enable/disable a category or set the task reminder lead time",
+        description=(
+            "Turns a notification category on or off for you, and/or sets "
+            "`reminder_days_before` (0-7): how many days before a task's due date the "
+            "reminder comes (0 = on the due day). Overdue alerts come the day after the due "
+            "date; the head of sales is told when a task is 2 calendar days overdue."
+        ),
         parameters=[_TENANT_HEADER],
         request=PreferenceUpdateSerializer,
         responses=OpenApiTypes.OBJECT,
@@ -182,9 +206,13 @@ class PreferencesView(_Scoped):
         serializer = PreferenceUpdateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
-        prefs = notification_service().set_preference(
-            self.principal().user_id,
-            NotificationCategory(data["category"]),
-            enabled=data["enabled"],
-        )
+        service = notification_service()
+        user_id = self.principal().user_id
+        prefs = service.get_preferences(user_id)
+        if "category" in data:
+            prefs = service.set_preference(
+                user_id, NotificationCategory(data["category"]), enabled=data["enabled"]
+            )
+        if "reminder_days_before" in data:
+            prefs = service.set_reminder_days(user_id, data["reminder_days_before"])
         return Response(_prefs_dict(prefs))

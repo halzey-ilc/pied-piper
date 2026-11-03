@@ -109,7 +109,12 @@ class DjangoPreferenceRepository:
         if row is None:
             return NotificationPreferences(user_id=user_id)
         muted = frozenset(NotificationCategory(c) for c in row.muted)
-        return NotificationPreferences(user_id=user_id, muted=muted, version=row.version)
+        return NotificationPreferences(
+            user_id=user_id,
+            muted=muted,
+            version=row.version,
+            reminder_days_before=row.reminder_days_before,
+        )
 
     def save(self, preferences: NotificationPreferences) -> None:
         NotificationPreferenceRecord.objects.using(self.using).update_or_create(
@@ -117,5 +122,6 @@ class DjangoPreferenceRepository:
             defaults={
                 "muted": [c.value for c in sorted(preferences.muted)],
                 "version": preferences.version,
+                "reminder_days_before": preferences.reminder_days_before,
             },
         )

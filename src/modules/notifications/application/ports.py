@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date
 from typing import Protocol
 from uuid import UUID
 
+from modules.notifications.domain.deadlines import TaskDeadline
 from modules.notifications.domain.notification import Notification, NotificationCategory
 from modules.notifications.domain.preferences import NotificationPreferences
 
@@ -38,3 +40,19 @@ class PreferenceRepository(Protocol):
     def get(self, user_id: UUID) -> NotificationPreferences: ...
 
     def save(self, preferences: NotificationPreferences) -> None: ...
+
+
+class TaskDeadlineSource(Protocol):
+    def open_tasks_due_until(self, until: date) -> list[TaskDeadline]:
+        """Open, assigned tasks with a due date on or before ``until`` (incl. overdue)."""
+        ...
+
+    def subject_titles(self, tasks: list[TaskDeadline]) -> dict[UUID, str]:
+        """Display names of the tasks' deals/customers, by subject id (for the text)."""
+        ...
+
+
+class DepartmentHeads(Protocol):
+    def head_of(self, user_id: UUID) -> UUID | None:
+        """User id of the active head of sales of the user's department, if any."""
+        ...
