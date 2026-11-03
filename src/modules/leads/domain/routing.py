@@ -21,6 +21,7 @@ class RoutingRule:
     enabled: bool = False
     # Who takes part; empty = every active sales manager of the department.
     member_ids: frozenset[UUID] = field(default_factory=frozenset)
+    # Always True: only managers on shift receive leads (owner decision 03.11.2026)
     require_on_shift: bool = True
     skip_on_absence: bool = True
     # Leads captured by members without a department (director, imports) go here.
@@ -43,7 +44,7 @@ class Candidate:
     def eligible(self, rule: RoutingRule) -> bool:
         if not self.selected:
             return False
-        if rule.require_on_shift and not self.on_shift:
+        if not self.on_shift:  # owner decision 03.11.2026: never someone off shift
             return False
         return not (rule.skip_on_absence and self.absent)
 

@@ -48,7 +48,7 @@ class RoutingPick:
 
 def current_candidates(routing: LeadRouting, rule: RoutingRule) -> list[Candidate]:
     managers = routing.managers(rule.department_id)
-    on_shift = routing.on_shift(managers) if rule.require_on_shift else set()
+    on_shift = routing.on_shift(managers)
     absent = routing.absent_today(managers) if rule.skip_on_absence else set()
     return candidates(rule, managers, on_shift, absent)
 
@@ -99,6 +99,10 @@ class LeadRoutingService:
 
     def save(self, principal: Principal, command: UpdateRouting) -> RoutingSettings:
         department_id = self._check_scope(principal, command.department_id)
+        if not command.require_on_shift:
+            raise DomainValidationError(
+                "Leads go only to sales managers on shift; require_on_shift cannot be off."
+            )
         managers = set(self._routing.managers(department_id))
         unknown = command.member_ids - managers
         if unknown:
@@ -118,7 +122,7 @@ class LeadRoutingService:
                     current,
                     enabled=command.enabled,
                     member_ids=command.member_ids,
-                    require_on_shift=command.require_on_shift,
+                    require_on_shift=True,
                     skip_on_absence=command.skip_on_absence,
                     is_company_intake=intake,
                 ),

@@ -13,6 +13,7 @@ from modules.payments.infrastructure.lookups import (
     DjangoDealLookup,
     DjangoDealRefLookup,
     DjangoDealValueLookup,
+    DjangoDirectorLookup,
 )
 from modules.payments.infrastructure.payment_repository import (
     DjangoPaymentRepository,
@@ -82,4 +83,5 @@ def payment_service() -> PaymentService:
             audit=audit,
         ),
         notifier=_SellerNotifier(),
+        directors=DjangoDirectorLookup(require_tenant().tenant_id),
     )

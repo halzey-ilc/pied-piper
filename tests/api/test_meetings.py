@@ -165,16 +165,22 @@ def test_outcome_no_show_held_and_reschedule(
     r2 = client.post(f"/api/v1/meetings/{m2}/outcome/", {"outcome": "held"}, format="json")
     assert r2.status_code == 200 and r2.json()["status"] == "held"
 
-    # rescheduled without a date parks the meeting; then a new date reschedules it.
+    # rescheduled needs the new date and time (owner decision 03.11.2026)
     m3 = _schedule(client).json()["id"]
     r3 = client.post(f"/api/v1/meetings/{m3}/outcome/", {"outcome": "rescheduled"}, format="json")
-    assert r3.status_code == 200 and r3.json()["status"] == "rescheduled"
+    assert r3.status_code == 400
+    assert r3.json()["error"]["code"] == "meeting_date_required"
     r3b = client.post(
-        f"/api/v1/meetings/{m3}/reschedule/",
-        {"scheduled_start": "2026-12-01T09:00:00Z", "scheduled_end": "2026-12-01T09:30:00Z"},
+        f"/api/v1/meetings/{m3}/outcome/",
+        {
+            "outcome": "rescheduled",
+            "new_start": "2026-12-01T09:00:00Z",
+            "new_end": "2026-12-01T09:30:00Z",
+        },
         format="json",
     )
     assert r3b.status_code == 200 and r3b.json()["status"] == "scheduled"
+    assert r3b.json()["scheduled_start"].startswith("2026-12-01T09:00")
 
 
 def test_participants_add_and_respond(

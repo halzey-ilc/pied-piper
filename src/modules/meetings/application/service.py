@@ -37,6 +37,11 @@ from shared.application.ports import UnitOfWork
 from shared.domain.errors import ConflictError, DomainValidationError, NotFoundError
 from shared.domain.events import DomainEvent
 
+
+class MeetingDateRequiredError(DomainValidationError):
+    code = "meeting_date_required"
+
+
 AGGREGATE = "meeting"
 _EventAction = Callable[["Meeting"], "DomainEvent"]
 
@@ -227,7 +232,7 @@ class MeetingService:
         next_step: NextStep | None = None,
     ) -> Meeting:
         """Record how a scheduled meeting turned out: held / no_show / rescheduled
-        (with or without a new date) / cancelled. ``reason`` — why the client did not
+        (only with the new date and time) / cancelled. ``reason`` — why the client did not
         come (no_show) or why the meeting was cancelled. A held meeting of a deal or
         customer needs a planned next step (``next_step`` creates it) unless one exists."""
         with self._uow:
@@ -242,12 +247,12 @@ class MeetingService:
             elif outcome == "cancelled":
                 event = meeting.cancel(reason or comment or "Cancelled.")
             elif outcome == "rescheduled":
-                if new_start is not None and new_end is not None:
-                    event = meeting.reschedule(new_start, new_end)
-                elif new_start is not None or new_end is not None:
-                    raise DomainValidationError("Provide both new_start and new_end, or neither.")
-                else:
-                    meeting.mark_rescheduled_pending(comment)
+                # Owner decision 03.11.2026: a reschedule always carries the new date and time
+                if new_start is None or new_end is None:
+                    raise MeetingDateRequiredError(
+                        "Give the new meeting date and time (new_start and new_end)."
+                    )
+                event = meeting.reschedule(new_start, new_end)
             else:
                 raise DomainValidationError(f"Unknown outcome: {outcome}.")
             self._repo.save(meeting, expected_version=version)

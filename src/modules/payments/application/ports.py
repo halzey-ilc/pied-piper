@@ -240,3 +240,9 @@ class DealRef:
 
 class DealRefLookup(Protocol):
     def find(self, deal_id: UUID) -> DealRef | None: ...
+
+
+class DirectorLookup(Protocol):
+    def has_other_active_director(self, user_id: UUID) -> bool:
+        """Whether the company has an active director other than ``user_id``."""
+        ...

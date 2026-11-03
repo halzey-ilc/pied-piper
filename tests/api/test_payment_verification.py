@@ -10,6 +10,8 @@ from typing import Any
 import pytest
 from rest_framework.test import APIClient
 
+from modules.access_control.domain.rbac import Role
+from modules.audit.infrastructure.models import AuditRecord
 from modules.notifications.infrastructure.models import NotificationRecord
 from modules.payments.infrastructure.models import PaymentRecord
 from tests.api import payment_helpers
@@ -108,6 +110,33 @@ def test_who_may_confirm_a_payment(company: dict[str, Any]) -> None:
     again = c["director"].post(url)
     assert again.status_code == 409
     assert again.json()["error"]["code"] == "payment_already_verified"
+
+
+def test_only_director_confirms_own_payment_and_it_is_journalled(
+    company: dict[str, Any],
+    make_user: Callable[..., Any],
+    tenants: dict[str, TenantFixture],
+    client_for: Callable[..., APIClient],
+) -> None:
+    """Owner decision of 03.11.2026: a company's only director confirms their own payments;
+    the journal records it as a self-confirmation. With a second director, they cannot."""
+    c = company["c"]
+    deal = _deal(c["director"], "Director's deal")
+    own = _ok(post_payment(c["director"], deal_id=deal["id"], amount="50.00"), 201)
+    assert own["can_verify"] is True
+    assert _ok(c["director"].post(f"/api/v1/payments/{own['id']}/confirm/"))["status"] == (
+        "confirmed"
+    )
+    journal = AuditRecord.objects.using("tenant_acme").filter(resource_id=own["id"])
+    assert list(
+        journal.filter(action="payment.self_confirmed").values_list("actor_user_id", flat=True)
+    ) == [company["users"]["director"].id]
+
+    second = make_user("director_two", tenant=tenants["acme"], role=Role.DIRECTOR)
+    another = _ok(post_payment(c["director"], deal_id=deal["id"], amount="20.00"), 201)
+    url = f"/api/v1/payments/{another['id']}/confirm/"
+    assert c["director"].post(url).status_code == 403
+    assert _ok(client_for(second, "acme").post(url))["status"] == "confirmed"
 
 
 def test_confirmed_sale_payment_wins_the_deal_and_counts_everywhere(

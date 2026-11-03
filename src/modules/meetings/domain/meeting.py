@@ -29,7 +29,7 @@ class MeetingStatus(StrEnum):
     SCHEDULED = "scheduled"
     HELD = "held"
     NO_SHOW = "no_show"
-    RESCHEDULED = "rescheduled"  # didn't happen, awaiting a new date
+    RESCHEDULED = "rescheduled"  # legacy: awaiting a new date (no longer set, 03.11.2026)
     CANCELLED = "cancelled"
     # Legacy value kept so pre-P0-3 rows still load; new code produces HELD instead.
     COMPLETED = "completed"
@@ -284,15 +284,6 @@ class Meeting:
         )
         self.version += 1
         return MeetingCompleted(meeting_id=self.id)
-
-    def mark_rescheduled_pending(self, comment: str | None = None) -> None:
-        """The meeting did not happen and awaits a new date (no date yet)."""
-        self._require_scheduled("rescheduled")
-        self.status = MeetingStatus.RESCHEDULED
-        self.outcome = _clean(
-            comment or "", label="Outcome", max_length=MAX_TEXT_LENGTH, required=False
-        )
-        self.version += 1
 
     def edit_details(
         self,

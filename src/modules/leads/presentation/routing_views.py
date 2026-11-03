@@ -101,9 +101,10 @@ class LeadRoutingView(LeadBaseView):
         operation_id="leads_routing_get",
         summary="Automatic lead distribution settings of a department",
         description=(
-            "Round-robin among the department's active sales managers (optionally only "
-            "`member_ids`), skipping those off shift (`require_on_shift`) or on a planned "
-            "absence today (`skip_on_absence`). Off until turned on. `candidates` shows who "
+            "Round-robin among the department's active sales managers (lead callers never "
+            "take part; optionally only `member_ids`) who are on shift — always required, "
+            "`require_on_shift: false` is refused — skipping those on a planned absence today "
+            "(`skip_on_absence`). Off until turned on. `candidates` shows who "
             "would be eligible right now. Director: any department; head of sales: own."
         ),
         parameters=[_TENANT_HEADER, _DEPARTMENT],

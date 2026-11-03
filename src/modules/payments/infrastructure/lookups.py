@@ -5,7 +5,9 @@ from __future__ import annotations
 from decimal import Decimal
 from uuid import UUID
 
+from modules.access_control.domain.rbac import Role
 from modules.customers.infrastructure.models import CustomerRecord
+from modules.organizations.infrastructure.models import Membership
 from modules.payments.application.ports import DealRef
 from modules.sales_pipeline.infrastructure.models import DealRecord
 
@@ -62,4 +64,28 @@ class DjangoDealRefLookup:
             owner_user_id=row["owner_user_id"],
             team_id=row["team_id"],
             title=row["title"],
+        )
+
+
+# Stored values of the director-level roles (owner and admin are legacy aliases)
+_DIRECTOR_ROLES = (Role.OWNER.value, Role.DIRECTOR.value, Role.ADMIN.value)
+
+
+class DjangoDirectorLookup:
+    """Directors of the company (control-plane memberships of the tenant)."""
+
+    def __init__(self, tenant_id: UUID) -> None:
+        self.tenant_id = tenant_id
+
+    def has_other_active_director(self, user_id: UUID) -> bool:
+        return (
+            Membership.objects.using("default")
+            .filter(
+                organization_id=self.tenant_id,
+                role__in=_DIRECTOR_ROLES,
+                is_active=True,
+                user__is_active=True,
+            )
+            .exclude(user_id=user_id)
+            .exists()
         )

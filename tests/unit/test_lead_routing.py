@@ -34,8 +34,10 @@ def test_eligibility_skips_off_shift_and_absent() -> None:
     found = candidates(rule, [A, B, C], on_shift={A, B}, absent={B})
     assert [(c.user_id, c.eligible(rule)) for c in found] == [(A, True), (B, False), (C, False)]
 
+    # Absence may be ignored, the shift may not: nobody off shift gets a lead.
     relaxed = replace(rule, require_on_shift=False, skip_on_absence=False)
-    assert all(c.eligible(relaxed) for c in candidates(relaxed, [A, B, C], set(), {B}))
+    found = candidates(relaxed, [A, B, C], on_shift={A, B}, absent={B})
+    assert [(c.user_id, c.eligible(relaxed)) for c in found] == [(A, True), (B, True), (C, False)]
 
 
 def test_member_list_limits_who_takes_part() -> None:

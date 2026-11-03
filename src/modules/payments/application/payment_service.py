@@ -6,8 +6,10 @@ money and debt are derived from the confirmed payment records and the deals' val
 Verification (owner decision of 03.11.2026): a payment is recorded with its receipt and
 waits for verification. The automatic ``ReceiptVerifier`` may confirm it; otherwise the
 head of sales (their own department) or the director confirms or rejects it — never the
-seller or the person who recorded it. Confirming a payment recorded from the system stage
-«Продажа» (``close_sale``) closes the deal as won. A rejection notifies the seller.
+seller or the person who recorded it, except a company's only director, who confirms their
+own payments (owner decision of 03.11.2026; journalled as ``payment.self_confirmed``).
+Confirming a payment recorded from the system stage «Продажа» (``close_sale``) closes the
+deal as won. A rejection notifies the seller.
 """
 
 from __future__ import annotations
@@ -34,6 +36,7 @@ from modules.payments.application.ports import (
     DealRefLookup,
     DealSummary,
     DealValueLookup,
+    DirectorLookup,
     PaymentFilter,
     PaymentRepository,
     PaymentVisibility,
@@ -116,7 +119,9 @@ class PaymentService:
         deal_refs: DealRefLookup | None = None,
         sale_closer: SaleCloser | None = None,
         notifier: SellerNotifier | None = None,
+        directors: DirectorLookup | None = None,
     ) -> None:
+        self._directors = directors
         self._receipts = receipts
         self._verifier = verifier
         self._deal_refs = deal_refs
@@ -315,9 +320,21 @@ class PaymentService:
             return "Only the head of sales or the director confirms payments."
         if scope is Scope.TEAM and not self._in_department(principal, payment):
             return "You can only confirm payments of your own department."
-        if principal.user_id in {payment.seller_user_id, payment.owner_user_id}:
+        if self._is_own(principal, payment) and not self._sole_director(principal):
             return "You cannot confirm a payment you made or recorded yourself."
         return None
+
+    @staticmethod
+    def _is_own(principal: Principal, payment: Payment) -> bool:
+        return principal.user_id in {payment.seller_user_id, payment.owner_user_id}
+
+    def _sole_director(self, principal: Principal) -> bool:
+        """The company's only active director: nobody else could check their payment."""
+        return (
+            product_role(principal.role) == "director"
+            and self._directors is not None
+            and not self._directors.has_other_active_director(principal.user_id)
+        )
 
     def review_queue(self, principal: Principal, *, limit: int, offset: int) -> PaymentPage:
         """Pending payments for the head of sales (their department) or the director."""
@@ -352,10 +369,15 @@ class PaymentService:
         payment recorded from «Продажа» closes its deal as won."""
         with self._uow:
             payment = self._load_for_verification(principal, payment_id)
+            action = (
+                "payment.self_confirmed"
+                if self._is_own(principal, payment)
+                else "payment.confirmed"
+            )
             event = payment.confirm(
                 verifier_user_id=principal.user_id, method=VerificationMethod.MANUAL
             )
-            self._apply(payment, event, actor_user_id=principal.user_id, action="payment.confirmed")
+            self._apply(payment, event, actor_user_id=principal.user_id, action=action)
             self._close_sale_if_flagged(payment, principal.user_id)
         return payment
 
