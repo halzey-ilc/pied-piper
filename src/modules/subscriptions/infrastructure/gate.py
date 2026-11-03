@@ -69,9 +69,26 @@ class SubscriptionAccessGate:
         if method == "POST" and db_alias is not None:
             metric = limit_for_create(path)
             if metric is not None:
-                limit = subscription.effective_limits(get_plan(subscription.plan_code))[metric]
-                if limit != UNLIMITED and count_usage(tenant_id, db_alias, metric)[metric] >= limit:
-                    raise PlanLimitReachedError(
-                        f"The plan's limit of {limit} {_LIMIT_NAMES[metric]} is reached. "
-                        "Ask the platform administrator to raise it."
-                    )
+                check_room(tenant_id, db_alias, metric, repo=self._repo)
+
+
+def check_room(
+    tenant_id: UUID,
+    db_alias: str,
+    metric: str,
+    *,
+    repo: DjangoSubscriptionRepository | None = None,
+) -> None:
+    """Raise PlanLimitReachedError when one more record of ``metric`` exceeds the plan.
+
+    Used per request by the gate and per row by bulk creation (imports), which a single
+    request-level check cannot cover."""
+    subscription = (repo or DjangoSubscriptionRepository()).get_by_org(tenant_id)
+    if subscription is None:
+        return
+    limit = subscription.effective_limits(get_plan(subscription.plan_code))[metric]
+    if limit != UNLIMITED and count_usage(tenant_id, db_alias, metric)[metric] >= limit:
+        raise PlanLimitReachedError(
+            f"The plan's limit of {limit} {_LIMIT_NAMES[metric]} is reached. "
+            "Ask the platform administrator to raise it."
+        )

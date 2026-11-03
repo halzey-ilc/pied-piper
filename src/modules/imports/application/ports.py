@@ -110,6 +110,13 @@ class CreatedDeal:
     customer_id: UUID | None
 
 
+class PlanCapacity(Protocol):
+    def check_room(self, metric: str) -> None:
+        """Raise ``plan_limit_reached`` when one more ``customers``/``deals`` record
+        would exceed the company's plan."""
+        ...
+
+
 class DealCreator(Protocol):
     """Creates one deal (and its new customer) through the customers and sales_pipeline
     services in one transaction: a refused step leaves nothing of the row behind."""

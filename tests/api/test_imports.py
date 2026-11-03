@@ -109,3 +109,22 @@ def test_import_customers_to_another_owner_and_rules(
     # Another company sees nothing of it.
     other = client_for(make_user("other", tenant=tenants["globex"], role=Role.DIRECTOR), "globex")
     assert other.get("/api/v1/imports/").json()["count"] == 0
+
+
+def test_import_stops_at_the_plan_limit(
+    make_user: Callable[..., Any],
+    tenants: dict[str, TenantFixture],
+    client_for: Callable[..., APIClient],
+) -> None:
+    """A file cannot carry the company past its plan: the limit is checked per row."""
+    from tests.api.test_limits_and_audit import _subscribe
+
+    _subscribe(tenants["acme"], customers=2)
+    director = client_for(make_user("dir", tenant=tenants["acme"], role=Role.DIRECTOR), "acme")
+    rows = "Имя;Телефон\nA;+996700000011\nB;+996700000012\nC;+996700000013\n"
+    result = director.post(
+        "/api/v1/imports/", {"entity": "customers", "content": rows}, format="json"
+    ).json()
+    assert (result["created"], result["failed"]) == (2, 1)
+    assert "лимит тарифа" in result["errors"][0]["message"]
+    assert director.get("/api/v1/customers/").json()["count"] == 2

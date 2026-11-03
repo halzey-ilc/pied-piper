@@ -24,6 +24,7 @@ from modules.imports.application.ports import (
     ExistingMatch,
     ImportJob,
     ImportJobStore,
+    PlanCapacity,
     RecordCreator,
     RowError,
 )
@@ -82,7 +83,9 @@ class ImportService:
         policy: AccessPolicy | None = None,
         deal_creator: DealCreator | None = None,
         deal_refs: DealReferences | None = None,
+        capacity: PlanCapacity | None = None,
     ) -> None:
+        self._capacity = capacity
         self._deal_creator = deal_creator
         self._deal_refs = deal_refs
         self._contacts = contacts
@@ -190,11 +193,15 @@ class ImportService:
             if not isinstance(item.row, ImportRow):
                 continue
             try:
+                if entity is ImportEntity.CUSTOMERS:
+                    self._check_room("customers")
                 self._creator.create(principal, entity, item.row, owner)
                 created += 1
             except DomainError as error:
                 failed += 1
-                errors.append(RowError(item.row.line, str(error)))
+                errors.append(
+                    RowError(item.row.line, ROW_ERROR_MESSAGES.get(error.code, str(error)))
+                )
         return created, failed, errors
 
     def _preview_deals(self, principal: Principal, text: str, default_owner: UUID) -> Preview:
@@ -245,6 +252,9 @@ class ImportService:
             if known is not None:
                 draft = replace(draft, customer_id=known, new_customer=None)
             try:
+                self._check_room("deals")
+                if draft.new_customer is not None:
+                    self._check_room("customers")
                 result = self._deal_creator.create(principal, draft)
             except DomainError as error:
                 failed += 1
@@ -256,6 +266,11 @@ class ImportService:
                 for key in keys:
                     new_customers.setdefault(key, result.customer_id)
         return created, failed, errors
+
+    def _check_room(self, metric: str) -> None:
+        """Per row: a file cannot carry the company past its plan limits."""
+        if self._capacity is not None:
+            self._capacity.check_room(metric)
 
     def recent(self, principal: Principal, limit: int = 20) -> list[ImportJob]:
         self._policy.require(principal, Permission.CUSTOMERS_VIEW)
