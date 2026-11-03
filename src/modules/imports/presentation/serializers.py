@@ -4,6 +4,7 @@ from typing import Any
 
 from rest_framework import serializers
 
+from modules.imports.application.deals import DealPlan
 from modules.imports.application.ports import ImportJob
 from modules.imports.application.service import Preview
 from modules.imports.domain.rows import MAX_TEXT_BYTES, ImportEntity
@@ -43,9 +44,28 @@ def preview_to_dict(preview: Preview) -> dict[str, Any]:
                     "name": item.duplicate_of.name,
                 },
                 "duplicate_line": item.duplicate_line,
+                "deal": None if item.deal is None else _deal_plan(item.deal),
             }
             for item in preview.rows
         ],
+    }
+
+
+def _deal_plan(plan: DealPlan) -> dict[str, Any]:
+    draft = plan.draft
+    return {
+        "title": draft.title,
+        "amount": str(draft.amount),
+        "currency": draft.currency,
+        "pipeline_id": str(draft.pipeline_id),
+        "pipeline_name": plan.pipeline_name,
+        "stage_id": str(draft.stage_id),
+        "stage_name": plan.stage_name,
+        "owner_user_id": str(draft.owner_user_id),
+        "customer_id": None if draft.customer_id is None else str(draft.customer_id),
+        "customer_name": plan.customer_name,
+        "customer_action": plan.customer_action,
+        "has_next_step": draft.next_step is not None,
     }
 
 
