@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Protocol
 from uuid import UUID
 
-from shared.domain.errors import ConflictError
+from shared.domain.errors import ConflictError, DomainValidationError
 
 
 @dataclass(frozen=True, slots=True)
@@ -143,6 +143,12 @@ class OrganizationStore(Protocol):
         """Block sign-in (user and membership); history and records stay."""
         ...
 
+    def delete_member(self, company_id: UUID, membership_id: UUID) -> None:
+        """Remove the membership, and the user account if it has no other membership.
+
+        ConflictError if the control plane still references the account."""
+        ...
+
     def set_temporary_password(self, company_id: UUID, membership_id: UUID, password: str) -> None:
         """Store a hash only and require a change at next sign-in."""
         ...
@@ -190,8 +196,47 @@ class DepartmentHeadTakenError(ConflictError):
         super().__init__(message or self.default)
 
 
+class DepartmentRequiredError(DomainValidationError):
+    """Every employee except the director belongs to a sales department."""
+
+    code = "department_required"
+    default = "Choose the department the employee belongs to."
+
+    def __init__(self, message: str | None = None) -> None:
+        super().__init__(message or self.default)
+
+
+class NoDepartmentError(DomainValidationError):
+    """A head of sales can only be appointed to an existing department."""
+
+    code = "no_department"
+    default = "Create a sales department first, then appoint its head."
+
+    def __init__(self, message: str | None = None) -> None:
+        super().__init__(message or self.default)
+
+
+class HasWorkHistoryError(ConflictError):
+    """An account with work history is archived (deactivated), never deleted."""
+
+    code = "has_history"
+    default = (
+        "This employee has work history (leads, customers, deals, tasks, meetings, calls, "
+        "payments or shifts). Deactivate the account instead; history is kept."
+    )
+
+    def __init__(self, message: str | None = None) -> None:
+        super().__init__(message or self.default)
+
+
+class WorkHistory(Protocol):
+    """Counts what a person did or owns in the company's database (by kind)."""
+
+    def count(self, user_id: UUID) -> dict[str, int]: ...
+
+
 class WorkHandover(Protocol):
-    """Hands a deactivated member's open tasks and open deals to another member."""
+    """Hands a deactivated member's open tasks to another member."""
 
     def hand_over(self, from_user: UUID, to_user: UUID, actor: UUID) -> int: ...
 

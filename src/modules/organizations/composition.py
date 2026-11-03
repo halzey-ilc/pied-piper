@@ -6,6 +6,8 @@ import secrets
 from typing import Any
 from uuid import UUID
 
+from django.db.models import Q
+
 from modules.access_control.domain.rbac import (
     AccessPolicy,
     Permission,
@@ -14,14 +16,26 @@ from modules.access_control.domain.rbac import (
     product_role,
 )
 from modules.activities.composition import hand_over_open_tasks
+from modules.activities.infrastructure.models import ActivityRecord
 from modules.audit.infrastructure.audit_log import DjangoAuditLog
-from modules.customers.composition import hand_over_customers
-from modules.leads.composition import hand_over_open_leads
+from modules.audit.infrastructure.models import AuditRecord
+from modules.communications.infrastructure.models import ConversationRecord, MessageRecord
+from modules.customers.infrastructure.models import CustomerRecord
+from modules.leads.infrastructure.models import LeadRecord
+from modules.meetings.infrastructure.models import MeetingRecord
 from modules.organizations.application.service import OrganizationService
 from modules.organizations.infrastructure.memberships import DjangoMemberDirectory
 from modules.organizations.infrastructure.models import Membership
 from modules.organizations.infrastructure.store import DjangoOrganizationStore
-from modules.sales_pipeline.composition import hand_over_open_deals
+from modules.payments.infrastructure.models import InvoiceRecord, PaymentRecord
+from modules.planning.infrastructure.models import (
+    AbsenceRecord,
+    PlanChangeRecord,
+    PlanRecord,
+    WorkSessionRecord,
+)
+from modules.sales_pipeline.infrastructure.models import DealRecord, DealStageChangeRecord
+from modules.telephony.infrastructure.models import CallRecord
 from platform_core.application.context import require_tenant
 from shared.infrastructure.unit_of_work import DjangoUnitOfWork
 
@@ -32,8 +46,8 @@ def temporary_password() -> str:
 
 
 class _TaskHandover:
-    """WorkHandover adapter: open tasks (activities), open deals (sales), leads still being
-    worked and active customers move together, in one transaction of the company's database."""
+    """WorkHandover adapter: a dismissed member's open tasks move to the recipient. Leads,
+    customers and deals stay with the dismissed member until reassigned by hand."""
 
     def __init__(self, tenant_id: UUID) -> None:
         self.tenant_id = tenant_id
@@ -48,11 +62,45 @@ class _TaskHandover:
         # the department's head of sales still sees them.
         team = recipient.department_id if recipient is not None else None
         with DjangoUnitOfWork(require_tenant().db_alias):
-            tasks = hand_over_open_tasks(from_user, to_user, team, actor)
-            deals = hand_over_open_deals(from_user, to_user, team, actor)
-            leads = hand_over_open_leads(from_user, to_user, team, actor)
-            customers = hand_over_customers(from_user, to_user, team, actor)
-        return tasks + deals + leads + customers
+            return hand_over_open_tasks(from_user, to_user, team, actor)
+
+
+class _WorkHistory:
+    """WorkHistory adapter: everything in the company's database that names the person.
+
+    Anything here means the account is archived, never deleted (records would lose their
+    owner, author or seller)."""
+
+    def count(self, user_id: UUID) -> dict[str, int]:
+        db = require_tenant().db_alias
+        checks: dict[str, Any] = {
+            "leads": LeadRecord.objects.filter(owner_user_id=user_id),
+            "customers": CustomerRecord.objects.filter(owner_user_id=user_id),
+            "deals": DealRecord.objects.filter(owner_user_id=user_id),
+            "stage_changes": DealStageChangeRecord.objects.filter(author_user_id=user_id),
+            "activities": ActivityRecord.objects.filter(
+                Q(owner_user_id=user_id) | Q(assignee_user_id=user_id) | Q(created_by=user_id)
+            ),
+            "meetings": MeetingRecord.objects.filter(
+                Q(owner_user_id=user_id)
+                | Q(host_user_id=user_id)
+                | Q(booked_by_user_id=user_id)
+                | Q(confirmed_by_user_id=user_id)
+            ),
+            "calls": CallRecord.objects.filter(owner_user_id=user_id),
+            "payments": PaymentRecord.objects.filter(
+                Q(seller_user_id=user_id) | Q(owner_user_id=user_id)
+            ),
+            "invoices": InvoiceRecord.objects.filter(owner_user_id=user_id),
+            "conversations": ConversationRecord.objects.filter(owner_user_id=user_id),
+            "messages": MessageRecord.objects.filter(sender_user_id=user_id),
+            "plans": PlanRecord.objects.filter(scope="user", scope_id=user_id),
+            "plan_changes": PlanChangeRecord.objects.filter(author_user_id=user_id),
+            "absences": AbsenceRecord.objects.filter(Q(user_id=user_id) | Q(created_by=user_id)),
+            "work_sessions": WorkSessionRecord.objects.filter(user_id=user_id),
+            "actions": AuditRecord.objects.filter(actor_user_id=user_id),
+        }
+        return {kind: qs.using(db).count() for kind, qs in checks.items()}
 
 
 def organization_service() -> OrganizationService:
@@ -64,6 +112,7 @@ def organization_service() -> OrganizationService:
         uow=DjangoUnitOfWork("default"),
         passwords=temporary_password,
         handover=_TaskHandover(tenant.tenant_id),
+        history=_WorkHistory(),
     )
 
 

@@ -32,6 +32,11 @@ def _department(director: APIClient, name: str) -> str:
 
 
 def _create(client: APIClient, **body: Any) -> dict[str, Any]:
+    # Every employee except the director belongs to a department: use the first one.
+    if body.get("role") != "director" and "department_id" not in body:
+        listed = _ok(client.get("/api/v1/departments/"))
+        rows = listed["results"] if isinstance(listed, dict) else listed
+        body["department_id"] = rows[0]["id"] if rows else _department(client, "Main")
     result: dict[str, Any] = _ok(client.post("/api/v1/staff/", body, format="json"), 201)
     return result
 
@@ -409,3 +414,76 @@ def test_the_database_refuses_a_second_head_even_when_the_check_is_raced(
             tenants["acme"].org.id, UUID(rep["member"]["id"]), role="head_of_sales"
         )
     assert Membership.objects.get(id=rep["member"]["id"]).role == "sales_rep"
+
+
+def test_every_employee_needs_a_department(
+    make_user: Callable[..., Any],
+    tenants: dict[str, TenantFixture],
+    client_for: Callable[..., APIClient],
+) -> None:
+    director = client_for(make_user("owner", tenant=tenants["acme"]), "acme")
+    # No department yet: a head of sales cannot be appointed.
+    no_dept = director.post(
+        "/api/v1/staff/", {"first_name": "H", "role": "head_of_sales"}, format="json"
+    )
+    assert no_dept.status_code == 400
+    assert no_dept.json()["error"]["code"] == "no_department"
+    sales = _department(director, "Sales")
+    missing = director.post(
+        "/api/v1/staff/", {"first_name": "R", "role": "sales_rep"}, format="json"
+    )
+    assert missing.status_code == 400
+    assert missing.json()["error"]["code"] == "department_required"
+    rep = _create(director, first_name="R", role="sales_rep", department_id=sales)
+    # Taking the department away is refused too.
+    cleared = director.patch(
+        f"/api/v1/staff/{rep['member']['id']}/", {"department_id": None}, format="json"
+    )
+    assert cleared.status_code == 400
+    assert cleared.json()["error"]["code"] == "department_required"
+
+
+def test_only_an_account_without_history_is_deleted(
+    make_user: Callable[..., Any],
+    tenants: dict[str, TenantFixture],
+    client_for: Callable[..., APIClient],
+) -> None:
+    director = client_for(make_user("owner", tenant=tenants["acme"]), "acme")
+    sales = _department(director, "Sales")
+    head = _create(director, first_name="Head", role="head_of_sales", department_id=sales)
+    idle = _create(director, first_name="Idle", role="sales_rep", department_id=sales)
+    busy = _create(director, first_name="Busy", role="sales_rep", department_id=sales)
+    busy_user = _user(busy)
+    busy_user.must_change_password = False
+    busy_user.save()
+    _ok(
+        client_for(busy_user, "acme").post(
+            "/api/v1/leads/", {"name": "Lead", "phone": "+996555000301"}, format="json"
+        ),
+        201,
+    )
+
+    # An active employee in a department is dismissed first, never deleted directly.
+    assert director.delete(f"/api/v1/staff/{idle['member']['id']}/").status_code == 409
+    for member in (idle, busy):
+        _ok(director.post(f"/api/v1/staff/{member['member']['id']}/deactivate/"))
+
+    detail = _ok(director.get(f"/api/v1/staff/{busy['member']['id']}/"))
+    assert detail["history"]["leads"] == 1 and detail["has_history"] and not detail["can_delete"]
+    refused = director.delete(f"/api/v1/staff/{busy['member']['id']}/")
+    assert refused.status_code == 409 and refused.json()["error"]["code"] == "has_history"
+
+    assert _ok(director.get(f"/api/v1/staff/{idle['member']['id']}/"))["can_delete"]
+    # Only the director deletes.
+    head_user = _user(head)
+    head_user.must_change_password = False
+    head_user.save()
+    hos = client_for(head_user, "acme")
+    assert hos.delete(f"/api/v1/staff/{idle['member']['id']}/").status_code == 403
+    assert director.delete(f"/api/v1/staff/{idle['member']['id']}/").status_code == 204
+    assert not Membership.objects.filter(id=idle["member"]["id"]).exists()
+    assert not get_user_model().objects.filter(id=idle["member"]["user_id"]).exists()
+    assert director.get(f"/api/v1/staff/{idle['member']['id']}/").status_code == 404
+    # The archived employee with history is still there.
+    assert Membership.objects.filter(id=busy["member"]["id"], is_active=False).exists()
+    assert AuditRecord.objects.using("tenant_acme").filter(action="staff.deleted").count() == 1

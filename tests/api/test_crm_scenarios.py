@@ -579,14 +579,10 @@ def test_scenario_g_dismissal_keeps_history_and_hands_over_open_work(
         assert rows.get(id=task_id).assignee_user_id == rop.id  # handed to the requester
     assert rows.get(id=done["id"]).assignee_user_id == rep.id  # history unchanged
     assert rows.get(id=note["id"]).owner_user_id == rep.id  # authorship unchanged
-    # Open deals go to the requester (audited); a closed deal keeps its owner.
-    for open_deal in (deal, other_deal):
-        moved = _ok(c["director"].get(f"/api/v1/sales/deals/{open_deal['id']}/"))
-        assert moved["owner_user_id"] == str(rop.id)
-        history = _ok(c["director"].get(f"/api/v1/sales/deals/{open_deal['id']}/history/"))
-        assert history["results"][0]["action"] == "deal.reassigned"
-    kept = _ok(c["director"].get(f"/api/v1/sales/deals/{won['id']}/"))
-    assert kept["owner_user_id"] == str(rep.id)
+    # Deals stay with the dismissed employee for manual redistribution from the profile.
+    for own_deal in (deal, other_deal, won):
+        kept = _ok(c["director"].get(f"/api/v1/sales/deals/{own_deal['id']}/"))
+        assert kept["owner_user_id"] == str(rep.id)
     # Nobody hands work to the deactivated member any more.
     refused = c["director"].post(
         f"/api/v1/sales/deals/{deal['id']}/assign/",

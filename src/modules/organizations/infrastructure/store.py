@@ -9,7 +9,7 @@ from uuid import UUID
 
 from django.contrib.auth import get_user_model
 from django.db import IntegrityError, transaction
-from django.db.models import Q
+from django.db.models import ProtectedError, Q
 from django.utils import timezone
 
 from modules.identity.infrastructure.sessions import revoke_credentials
@@ -336,6 +336,25 @@ class DjangoOrganizationStore(DjangoStaffRequestMixin):
             get_user_model().objects.using(DB).filter(id=row.user_id).update(is_active=False)
             revoke_credentials(row.user_id)
         return _member(self._members(company_id).get(id=membership_id))
+
+    def delete_member(self, company_id: UUID, membership_id: UUID) -> None:
+        with transaction.atomic(using=DB):
+            row = (
+                Membership.objects.using(DB)
+                .select_for_update()
+                .get(organization_id=company_id, id=membership_id)
+            )
+            user_id = row.user_id
+            try:
+                row.delete(using=DB)
+                others = Membership.objects.using(DB).filter(user_id=user_id).exists()
+                if not others:
+                    revoke_credentials(user_id)
+                    get_user_model().objects.using(DB).filter(id=user_id).delete()
+            except ProtectedError as exc:
+                raise ConflictError(
+                    "The account is still referenced by company records; deactivate it instead."
+                ) from exc
 
     def set_temporary_password(self, company_id: UUID, membership_id: UUID, password: str) -> None:
         row = self._members(company_id).get(id=membership_id)

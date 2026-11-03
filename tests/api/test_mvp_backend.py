@@ -378,9 +378,9 @@ def test_head_of_sales_dismisses_a_manager_and_takes_over_open_work(
     _ok(c["rop_north"].post(f"/api/v1/staff/{membership.id}/deactivate/"))
     rop_id = users["rop_north"].id
     assert ActivityRecord.objects.using("tenant_acme").get(id=task["id"]).assignee_user_id == rop_id
-    assert _ok(c["rop_north"].get(f"/api/v1/sales/deals/{deal['id']}/"))["owner_user_id"] == str(
-        rop_id
-    )
+    # The deal stays with the dismissed manager until reassigned by hand.
+    rep_id = str(users["rep_north"].id)
+    assert _ok(c["rop_north"].get(f"/api/v1/sales/deals/{deal['id']}/"))["owner_user_id"] == rep_id
     assert c["rep_north"].get("/api/v1/customers/").status_code == 401
 
 
@@ -418,50 +418,35 @@ def test_work_handed_to_the_director_stays_visible_to_the_department(
     task = _ok(_task(c["rep_north"], deal["id"], "Call"), 201)
     membership = Membership.objects.get(user=users["rep_north"])
     _ok(c["director"].post(f"/api/v1/staff/{membership.id}/deactivate/"))
-    moved = _ok(c["director"].get(f"/api/v1/sales/deals/{deal['id']}/"))
-    assert moved["owner_user_id"] == str(users["director"].id)
-    # The director has no department: the deal and task keep North, its head still sees them.
+    # The director has no department: the task keeps North, its head still sees it and the deal.
     assert c["rop_north"].get(f"/api/v1/sales/deals/{deal['id']}/").status_code == 200
     row = ActivityRecord.objects.using("tenant_acme").get(id=task["id"])
     assert row.assignee_user_id == users["director"].id
     assert str(row.team_id) == company["north"]
 
 
-def test_dismissal_hands_over_leads_and_customers(company: dict[str, Any]) -> None:
+def test_dismissal_keeps_leads_customers_and_deals_for_manual_redistribution(
+    company: dict[str, Any],
+) -> None:
     c, users = company["c"], company["users"]
     rep = c["rep_north"]
-    working = _lead(rep, "Working lead", phone="+996555000201")
-    qualified = _lead(rep, "Qualified lead", phone="+996555000202")
-    _ok(rep.post(f"/api/v1/leads/{qualified['id']}/qualify/"))
-    converted = _lead(rep, "Converted lead", phone="+996555000203")
-    _ok(rep.post(f"/api/v1/leads/{converted['id']}/qualify/"))
-    converted_customer = _ok(
-        rep.post(f"/api/v1/leads/{converted['id']}/convert/", {}, format="json")
-    )
-    active = _ok(rep.post("/api/v1/customers/", {"name": "Active client"}, format="json"), 201)
-    archived = _ok(rep.post("/api/v1/customers/", {"name": "Archived client"}, format="json"), 201)
-    _ok(rep.post(f"/api/v1/customers/{archived['id']}/archive/"))
+    lead = _lead(rep, "Working lead", phone="+996555000201")
+    customer = _ok(rep.post("/api/v1/customers/", {"name": "Active client"}, format="json"), 201)
+    deal = _deal(rep, "Open deal")
 
     membership = Membership.objects.get(user=users["rep_north"])
     _ok(c["rop_north"].post(f"/api/v1/staff/{membership.id}/deactivate/"))
-    rop_id = str(users["rop_north"].id)
     rep_id = str(users["rep_north"].id)
-
     rop = c["rop_north"]
-    for lead in (working, qualified):
-        assert _ok(rop.get(f"/api/v1/leads/{lead['id']}/"))["owner_user_id"] == rop_id
-        actions = [
-            e["action"] for e in _ok(rop.get(f"/api/v1/leads/{lead['id']}/history/"))["results"]
-        ]
-        assert "lead.reassigned" in actions
-    # A converted lead is history: it keeps its owner.
-    assert _ok(c["director"].get(f"/api/v1/leads/{converted['id']}/"))["owner_user_id"] == rep_id
-    # Active customers move (the converted lead's new customer too); archived ones keep the owner.
-    assert _ok(rop.get(f"/api/v1/customers/{active['id']}/"))["owner_user_id"] == rop_id
-    customer_id = converted_customer.get("customer_id") or converted_customer["customer"]["id"]
-    assert _ok(rop.get(f"/api/v1/customers/{customer_id}/"))["owner_user_id"] == rop_id
-    kept = _ok(c["director"].get(f"/api/v1/customers/{archived['id']}/"))
-    assert kept["owner_user_id"] == rep_id
+    # Nothing moves on its own: the base stays with the dismissed employee.
+    assert _ok(rop.get(f"/api/v1/leads/{lead['id']}/"))["owner_user_id"] == rep_id
+    assert _ok(rop.get(f"/api/v1/customers/{customer['id']}/"))["owner_user_id"] == rep_id
+    assert _ok(rop.get(f"/api/v1/sales/deals/{deal['id']}/"))["owner_user_id"] == rep_id
+    # The head of sales reassigns by hand; the previous owner stays in the history.
+    new_owner = str(users["rop_north"].id)
+    _ok(rop.post(f"/api/v1/leads/{lead['id']}/assign/", {"owner_user_id": new_owner}, format="json"))
+    actions = [e["action"] for e in _ok(rop.get(f"/api/v1/leads/{lead['id']}/history/"))["results"]]
+    assert "lead.reassigned" in actions
 
 
 def test_payment_metrics_per_department_with_prepayments(company: dict[str, Any]) -> None:

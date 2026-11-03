@@ -35,13 +35,17 @@ from modules.organizations.application.ports import (
     Company,
     DepartmentHeadTakenError,
     DepartmentInfo,
+    DepartmentRequiredError,
+    HasWorkHistoryError,
     NewAccount,
     NewStaffRequest,
+    NoDepartmentError,
     OrganizationStore,
     PasswordGenerator,
     StaffMember,
     StaffRequestInfo,
     WorkHandover,
+    WorkHistory,
 )
 from shared.application.ports import UnitOfWork
 from shared.domain.errors import (
@@ -56,6 +60,8 @@ _CURRENCY = re.compile(r"^[A-Z]{3}$")
 _LOGIN = re.compile(r"^[A-Za-z0-9._@+-]{3,150}$")
 MAX_NAME = 150
 _REQUEST_STATUSES = ("pending", "approved", "rejected", "cancelled")
+# Leadership of the company itself: not attached to a sales department.
+_UNATTACHED_ROLES = frozenset({Role.DIRECTOR.value, Role.OWNER.value, Role.ADMIN.value})
 
 
 class OrganizationService:
@@ -67,9 +73,11 @@ class OrganizationService:
         passwords: PasswordGenerator,
         *,
         handover: WorkHandover | None = None,
+        history: WorkHistory | None = None,
         policy: AccessPolicy | None = None,
     ) -> None:
         self._handover = handover
+        self._history = history
         self._store = store
         self._audit = audit
         self._uow = uow
@@ -218,6 +226,7 @@ class OrganizationService:
         scope = self._policy.require(principal, Permission.STAFF_MANAGE)
         new_role = self._allowed_role(principal, role)
         department = self._target_department(principal, scope, department_id)
+        self._require_department(principal, new_role.value, department)
         with self._uow:
             self._check_single_head(principal, new_role.value, department)
             return self._create_account(
@@ -432,12 +441,12 @@ class OrganizationService:
     ) -> StaffMember:
         """Deactivate an account (sign-in blocked) and hand over its work.
 
-        Rule: open tasks, OPEN deals, leads still being worked (new, qualified) and active
-        customers go to ``recipient`` — the head of sales who requested the dismissal, or
-        whoever deactivated directly (director or head of sales); if that person is no longer
-        active, the deciding director. Closed deals, converted and unqualified leads,
-        archived customers, done tasks, meetings, calls and the audit trail keep their owner
-        and author as history. Nothing is deleted.
+        Rule: open tasks go to ``recipient`` — the head of sales who requested the dismissal,
+        or whoever deactivated directly (director or head of sales); if that person is no
+        longer active, the deciding director — so no deadline is lost. Leads, customers and
+        deals stay with the dismissed employee: the director or the head of sales reassigns
+        them by hand from the employee's profile (each reassignment is audited). Meetings,
+        calls and the audit trail keep their owner and author as history. Nothing is deleted.
 
         Two databases are involved: the account (control plane) and the work (company
         database). Callers make this the LAST step of their transaction, so a failure
@@ -496,6 +505,8 @@ class OrganizationService:
                 if clear_department
                 else department_id or (member.department.id if member.department else None)
             )
+            if clear_department or (new_role is not None and target_department is None):
+                self._require_department(principal, new_role or member.role, target_department)
             self._check_single_head(
                 principal, new_role or member.role, target_department, member.membership_id
             )
@@ -523,6 +534,37 @@ class OrganizationService:
             if not member.is_active:
                 return member
             return self._offboard(principal, member, recipient=principal.user_id)
+
+    def member_detail(
+        self, principal: Principal, membership_id: UUID
+    ) -> tuple[StaffMember, dict[str, int]]:
+        """One member with the amount of work they own or did (for the profile of a dismissed
+        employee and for the delete decision). A head of sales sees their own department."""
+        scope = self._policy.require(principal, Permission.STAFF_MANAGE)
+        member = self._managed(principal, scope, membership_id)
+        history = self._history.count(member.user_id) if self._history is not None else {}
+        return member, history
+
+    def delete_member(self, principal: Principal, membership_id: UUID) -> None:
+        """Permanently remove an account that never did any work.
+
+        Only the director, only a dismissed employee or one without a department, and only
+        when the company's database holds nothing of theirs: anyone with history is archived
+        (deactivated) instead, so no lead, deal or report loses its owner."""
+        scope = self._require_director(principal)
+        with self._uow:
+            member = self._managed(principal, scope, membership_id)
+            if member.user_id == principal.user_id:
+                raise DomainValidationError("You cannot delete your own account.")
+            if member.is_active and member.department is not None:
+                raise ConflictError(
+                    "Dismiss the employee first; only an archived account can be deleted."
+                )
+            history = self._history.count(member.user_id) if self._history is not None else {}
+            if any(history.values()):
+                raise HasWorkHistoryError()
+            self._record(principal, "staff.deleted", "membership", str(membership_id), ())
+            self._store.delete_member(principal.tenant_id, membership_id)
 
     def reset_password(self, principal: Principal, membership_id: UUID) -> str:
         scope = self._policy.require(principal, Permission.STAFF_MANAGE)
@@ -556,6 +598,18 @@ class OrganizationService:
             return
         if self._store.active_head(principal.tenant_id, department_id, exclude) is not None:
             raise DepartmentHeadTakenError()
+
+    def _require_department(
+        self, principal: Principal, role: str, department_id: UUID | None
+    ) -> None:
+        """No employee without a department, except the company's own leadership."""
+        if department_id is not None or role in _UNATTACHED_ROLES:
+            return
+        if role in (Role.HEAD_OF_SALES.value, Role.MANAGER.value) and not any(
+            d.is_active for d in self._store.departments(principal.tenant_id)
+        ):
+            raise NoDepartmentError()
+        raise DepartmentRequiredError()
 
     def _allowed_role(self, principal: Principal, role: str) -> Role:
         try:

@@ -217,6 +217,49 @@ class StaffCreateOptionsView(_Scoped):
 class StaffDetailView(_Scoped):
     @extend_schema(
         tags=_TAGS,
+        operation_id="staff_detail",
+        summary="One staff member with their work history counts",
+        description=(
+            "For the profile of a dismissed employee and the delete decision. `history` counts "
+            "what the person owns or did in the company's database (leads, customers, deals, "
+            "tasks, meetings, calls, payments, shifts, actions); `can_delete` is true only for "
+            "a dismissed or department-less employee without any history. The director sees "
+            "anyone, a head of sales the staff of their own department."
+        ),
+        parameters=[_TENANT_HEADER],
+        responses=OpenApiTypes.OBJECT,
+    )
+    def get(self, request: Request, membership_id: UUID) -> Response:
+        member, history = organization_service().member_detail(self.principal(), membership_id)
+        detachable = not member.is_active or member.department is None
+        return Response(
+            {
+                **staff_to_dict(member),
+                "history": history,
+                "has_history": any(history.values()),
+                "can_delete": detachable and not any(history.values()),
+            }
+        )
+
+    @extend_schema(
+        tags=_TAGS,
+        operation_id="staff_delete",
+        summary="Permanently delete an account without work history",
+        description=(
+            "Director only. Allowed for a dismissed or department-less employee whose company "
+            "database holds nothing of theirs; otherwise 409 `has_history` (deactivate instead, "
+            "history is kept). The user account is removed when it has no other membership."
+        ),
+        parameters=[_TENANT_HEADER],
+        request=None,
+        responses={204: None},
+    )
+    def delete(self, request: Request, membership_id: UUID) -> Response:
+        organization_service().delete_member(self.principal(), membership_id)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    @extend_schema(
+        tags=_TAGS,
         operation_id="staff_update",
         summary="Change a staff member's role or department",
         description="Only the director moves staff between departments.",
