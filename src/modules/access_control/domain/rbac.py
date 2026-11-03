@@ -72,6 +72,8 @@ class Permission(StrEnum):
     TEAM_CABINET_VIEW = "team_cabinet.view"
     # Numeric call-quality ratings: managers never see their own (spec §7).
     CALL_RATINGS_VIEW = "calls.ratings.view"
+    # Journal of user actions: the director sees the company, a head of sales own department.
+    AUDIT_VIEW = "audit.view"
 
 
 class Scope(IntEnum):
@@ -199,6 +201,7 @@ _HEAD_OF_SALES: Mapping[Permission, Scope] = {
     Permission.ABSENCES_MANAGE: Scope.TEAM,
     Permission.TEAM_CABINET_VIEW: Scope.TEAM,
     Permission.CALL_RATINGS_VIEW: Scope.TEAM,
+    Permission.AUDIT_VIEW: Scope.TEAM,
 }
 ROLE_GRANTS: Mapping[Role, Mapping[Permission, Scope]] = {
     Role.OWNER: dict.fromkeys(Permission, _ALL),

@@ -10,7 +10,8 @@ from rest_framework.response import Response
 
 from modules.access_control.domain.rbac import Principal, Role
 from modules.subscriptions.application.service import SubscriptionView
-from modules.subscriptions.composition import subscription_service
+from modules.subscriptions.application.usage import PlanUsage
+from modules.subscriptions.composition import plan_usage_service, subscription_service
 from modules.subscriptions.domain.plan import PlanCode, all_plans
 from platform_core.presentation.tenancy import TenantScopedAPIView
 
@@ -148,3 +149,38 @@ class SubscriptionReactivateView(_Scoped):
     )
     def post(self, request: Request) -> Response:
         return Response(_view_to_dict(subscription_service().reactivate(self.principal())))
+
+
+def usage_to_dict(usage: PlanUsage) -> dict[str, Any]:
+    """Limits with usage. ``limit`` -1 = unlimited; ``state`` ok | warning (>= 80%) | reached."""
+    return {
+        "plan_code": usage.plan_code.value,
+        "metrics": [
+            {
+                "metric": m.metric,
+                "used": m.used,
+                "limit": m.limit,
+                "state": m.state,
+                "overridden": m.metric in usage.overridden,
+            }
+            for m in usage.metrics
+        ],
+    }
+
+
+class PlanUsageView(_Scoped):
+    @extend_schema(
+        tags=_TAGS,
+        operation_id="subscription_usage",
+        summary="Plan limits and current usage",
+        description=(
+            "Accounts, customers (not archived) and deals of the company against the plan's "
+            "limits (with the platform's per-company overrides). `state` is `warning` from 80% "
+            "and `reached` at the limit; creating one more record over a limit is refused "
+            "with 403 `plan_limit_reached`. Requires subscriptions.view."
+        ),
+        parameters=[_TENANT_HEADER],
+        responses=OpenApiTypes.OBJECT,
+    )
+    def get(self, request: Request) -> Response:
+        return Response(usage_to_dict(plan_usage_service().usage(self.principal())))

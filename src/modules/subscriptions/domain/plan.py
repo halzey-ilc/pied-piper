@@ -12,6 +12,10 @@ from enum import StrEnum
 from shared.domain.errors import NotFoundError
 
 UNLIMITED = -1
+# Metrics a plan can cap: active accounts, customers and deals of the company.
+LIMIT_METRICS = ("users", "customers", "deals")
+# Share of a limit from which the company is warned that it is running out.
+LIMIT_WARNING_RATIO = 0.8
 
 
 class Feature(StrEnum):

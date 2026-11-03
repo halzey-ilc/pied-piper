@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any, ClassVar
 from uuid import UUID, uuid4
 
-from modules.subscriptions.domain.plan import Feature, PlanCode
+from modules.subscriptions.domain.plan import LIMIT_METRICS, UNLIMITED, Feature, Plan, PlanCode
 from shared.domain.errors import AccessDeniedError, ConflictError, DomainValidationError
 from shared.domain.events import DomainEvent
 
@@ -33,6 +34,24 @@ class FeatureNotInPlanError(AccessDeniedError):
     """The module is not switched on for this company's subscription."""
 
     code = "feature_not_in_plan"
+
+
+class PlanLimitReachedError(AccessDeniedError):
+    """Creating one more record would exceed the company's plan limit."""
+
+    code = "plan_limit_reached"
+
+
+def validate_limit_overrides(overrides: Mapping[str, int]) -> dict[str, int]:
+    """Known metrics only; a limit is a whole number >= 0, or -1 for unlimited."""
+    clean: dict[str, int] = {}
+    for metric, value in overrides.items():
+        if metric not in LIMIT_METRICS:
+            raise DomainValidationError(f"Unknown limit '{metric}'.")
+        if isinstance(value, bool) or not isinstance(value, int) or value < UNLIMITED:
+            raise DomainValidationError("A limit is a whole number, 0 or more, or -1 for none.")
+        clean[metric] = value
+    return clean
 
 
 class AccessState(StrEnum):
@@ -100,6 +119,20 @@ class Subscription:
     # None = no module restriction (subscriptions created before the module catalog).
     features: frozenset[Feature] | None = None
     version: int = 1
+    # Per-company limits set by the platform administrator; None = the plan's own limits.
+    limit_overrides: dict[str, int] | None = None
+
+    def effective_limits(self, plan: Plan) -> dict[str, int]:
+        """The plan's limits with this company's overrides on top (UNLIMITED = no cap)."""
+        limits = {metric: plan.limit_for(metric) for metric in LIMIT_METRICS}
+        limits.update(self.limit_overrides or {})
+        return limits
+
+    def set_limits(self, overrides: Mapping[str, int] | None) -> None:
+        """Replace the company's overrides; None or empty returns to the plan's limits."""
+        clean = validate_limit_overrides(overrides or {})
+        self.limit_overrides = clean or None
+        self.version += 1
 
     @classmethod
     def start(

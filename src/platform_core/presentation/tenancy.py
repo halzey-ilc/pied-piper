@@ -51,7 +51,12 @@ class TenantScopedAPIView(APIView):
             raise TenantNotFoundError("Tenant not found.")
         gate = tenant_access_gate()
         if gate is not None:
-            gate.check(resolved.context.tenant_id, request.path)
+            gate.check(
+                resolved.context.tenant_id,
+                request.path,
+                method=request.method or "GET",
+                db_alias=resolved.context.db_alias,
+            )
         self.tenant = resolved.context
         self.membership = resolved.membership
         self._tenant_token = activate_tenant(resolved.context)

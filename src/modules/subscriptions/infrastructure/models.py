@@ -29,6 +29,8 @@ class SubscriptionRecord(models.Model):
     cancelled_at = models.DateTimeField(null=True, blank=True)
     # Switched-on modules (Feature values); NULL = no restriction (pre-catalog subscriptions).
     features = models.JSONField(null=True, blank=True)
+    # Per-company limits set by the platform administrator ({metric: limit}); NULL = plan's.
+    limit_overrides = models.JSONField(null=True, blank=True)
     version = models.PositiveIntegerField(default=1)
     updated_at = models.DateTimeField(auto_now=True)
 

@@ -41,7 +41,12 @@ class TenantAccessGate(Protocol):
     Raises an AccessDeniedError subclass when the path is closed for the tenant.
     """
 
-    def check(self, tenant_id: UUID, path: str) -> None: ...
+    def check(
+        self, tenant_id: UUID, path: str, *, method: str = "GET", db_alias: str | None = None
+    ) -> None:
+        """``method`` and ``db_alias`` let the gate refuse a creating request over a plan
+        limit; a gate that does not use them may ignore them."""
+        ...
 
 
 class ErrorRecorder(Protocol):

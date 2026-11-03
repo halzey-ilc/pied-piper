@@ -14,7 +14,7 @@ from uuid import UUID
 
 from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import extend_schema
-from rest_framework import status
+from rest_framework import serializers, status
 from rest_framework.permissions import BasePermission, IsAuthenticated
 from rest_framework.request import Request
 from rest_framework.response import Response
@@ -42,9 +42,12 @@ from modules.platform_admin.presentation.serializers import (
     ticket_to_dict,
 )
 from modules.subscriptions.application.ports import PaymentFilter
+from modules.subscriptions.application.usage import plan_usage
 from modules.subscriptions.domain.payment import PaymentStatus
 from modules.subscriptions.domain.plan import Feature, PlanCode
-from modules.subscriptions.domain.subscription import AccessState, SubscriptionStatus
+from modules.subscriptions.domain.subscription import AccessState, Subscription, SubscriptionStatus
+from modules.subscriptions.infrastructure.usage import company_usage
+from modules.subscriptions.presentation.views import usage_to_dict
 from platform_core.presentation.tenancy import TenantScopedAPIView
 from shared.domain.errors import AccessDeniedError, DomainValidationError
 
@@ -268,6 +271,57 @@ class PlatformCompanySubscriptionView(_Platform):
             self.actor(), company_id, _terms(s.validated_data)
         )
         return Response(detail_to_dict(detail))
+
+
+class LimitsSerializer(serializers.Serializer[dict[str, Any]]):
+    # {metric: limit}; -1 = unlimited; an empty object returns to the plan's limits.
+    limits = serializers.DictField(child=serializers.IntegerField(min_value=-1), allow_empty=True)
+
+
+class PlatformCompanyLimitsView(_Platform):
+    @extend_schema(
+        operation_id="platform_company_limits",
+        tags=_TAGS,
+        summary="Plan limits and usage of a company",
+        description=(
+            "Effective limits (plan + per-company overrides), which ones are overridden and "
+            "current usage. `used` is null while the company's database is not ready."
+        ),
+        responses=OpenApiTypes.OBJECT,
+    )
+    def get(self, request: Request, company_id: UUID) -> Response:
+        subscription = platform_admin_service().subscription_of(self.actor(), company_id)
+        return Response(_limits_to_dict(subscription, company_usage(company_id)))
+
+    @extend_schema(
+        operation_id="platform_company_limits_set",
+        tags=_TAGS,
+        summary="Override plan limits for a company",
+        description=(
+            "Replaces the company's overrides of `users`, `customers`, `deals` (-1 = "
+            "unlimited). Metrics left out use the plan's limit; `{}` removes all overrides. "
+            "Audited. 409 if the company has no subscription yet."
+        ),
+        request=LimitsSerializer,
+        responses=OpenApiTypes.OBJECT,
+    )
+    def put(self, request: Request, company_id: UUID) -> Response:
+        s = LimitsSerializer(data=request.data)
+        s.is_valid(raise_exception=True)
+        subscription = platform_admin_service().set_limits(
+            self.actor(), company_id, dict(s.validated_data["limits"])
+        )
+        return Response(_limits_to_dict(subscription, company_usage(company_id)))
+
+
+def _limits_to_dict(subscription: Subscription | None, used: dict[str, int] | None) -> Any:
+    usage = plan_usage(subscription, used or {})
+    data = usage_to_dict(usage)
+    if used is None:
+        for metric in data["metrics"]:
+            metric["used"] = None
+            metric["state"] = "ok"
+    return data
 
 
 class PlatformCompanyPaymentsView(_Platform):

@@ -337,6 +337,34 @@ class PlatformAdminService:
             )
         return self.company(actor, company_id)
 
+    # --- plan limits ----------------------------------------------------------------
+
+    def subscription_of(self, actor: PlatformActor, company_id: UUID) -> Subscription | None:
+        """The company's subscription (None before one is assigned); 404 for no company."""
+        self.company(actor, company_id)
+        return self._subscriptions.get_by_org(company_id)
+
+    def set_limits(
+        self, actor: PlatformActor, company_id: UUID, overrides: dict[str, int] | None
+    ) -> Subscription:
+        """Per-company limits on top of the plan; empty or None returns to the plan's own."""
+        _require(actor)
+        with self._uow:
+            self.company(actor, company_id)
+            subscription = self._subscriptions.get_by_org(company_id)
+            if subscription is None:
+                raise ConflictError("Assign a subscription before changing its limits.")
+            version = subscription.version
+            subscription.set_limits(overrides)
+            self._subscriptions.save(subscription, expected_version=version)
+            self._record(
+                actor,
+                "platform.limits_changed",
+                company_id,
+                tuple(sorted((overrides or {}).keys())) or ("limits",),
+            )
+        return subscription
+
     # --- subscription payments --------------------------------------------------
 
     def record_payment(

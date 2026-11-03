@@ -15,7 +15,7 @@ from modules.subscriptions.domain.payment import (
     PaymentStatus,
     SubscriptionPayment,
 )
-from modules.subscriptions.domain.plan import Feature, PlanCode
+from modules.subscriptions.domain.plan import LIMIT_METRICS, Feature, PlanCode
 from modules.subscriptions.domain.subscription import Subscription, SubscriptionStatus
 from modules.subscriptions.infrastructure.models import (
     SubscriptionPaymentRecord,
@@ -38,12 +38,21 @@ def _to_domain(row: SubscriptionRecord) -> Subscription:
         cancelled_at=row.cancelled_at,
         features=None if row.features is None else _features(row.features),
         version=row.version,
+        limit_overrides=_overrides(row.limit_overrides),
     )
 
 
 def _features(values: list[str]) -> frozenset[Feature]:
     # Unknown values (a module removed from the catalog) are dropped, not fatal.
     return frozenset(Feature(v) for v in values if v in Feature.__members__.values())
+
+
+def _overrides(values: dict[str, int] | None) -> dict[str, int] | None:
+    # A metric dropped from the catalog is ignored rather than fatal.
+    if not values:
+        return None
+    kept = {k: int(v) for k, v in values.items() if k in LIMIT_METRICS}
+    return kept or None
 
 
 def _stored(features: frozenset[Feature] | None) -> list[str] | None:
@@ -69,6 +78,7 @@ class DjangoSubscriptionRepository:
                     current_period_end=subscription.current_period_end,
                     cancelled_at=subscription.cancelled_at,
                     features=_stored(subscription.features),
+                    limit_overrides=subscription.limit_overrides,
                 )
         except IntegrityError:
             raise ConflictError("A subscription already exists for this organization.") from None
@@ -82,6 +92,7 @@ class DjangoSubscriptionRepository:
                 status=subscription.status.value,
                 started_at=subscription.started_at,
                 features=_stored(subscription.features),
+                limit_overrides=subscription.limit_overrides,
                 current_period_end=subscription.current_period_end,
                 cancelled_at=subscription.cancelled_at,
                 version=F("version") + 1,

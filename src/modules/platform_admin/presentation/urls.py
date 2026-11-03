@@ -4,6 +4,7 @@ from modules.platform_admin.presentation.views import (
     PlatformCatalogView,
     PlatformCompaniesView,
     PlatformCompanyDetailView,
+    PlatformCompanyLimitsView,
     PlatformCompanyPaymentsView,
     PlatformCompanySubscriptionView,
     PlatformDirectorCredentialsView,
@@ -35,6 +36,11 @@ urlpatterns = [
         "companies/<uuid:company_id>/subscription/",
         PlatformCompanySubscriptionView.as_view(),
         name="platform-company-subscription",
+    ),
+    path(
+        "companies/<uuid:company_id>/limits/",
+        PlatformCompanyLimitsView.as_view(),
+        name="platform-company-limits",
     ),
     path(
         "companies/<uuid:company_id>/payments/",
