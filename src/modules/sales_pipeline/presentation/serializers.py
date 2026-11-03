@@ -4,13 +4,14 @@ from __future__ import annotations
 
 from decimal import Decimal
 from typing import Any
+from uuid import UUID
 
 from rest_framework import serializers
 
 from modules.sales_pipeline.domain.custom_field import CustomFieldDefinition, CustomFieldType
 from modules.sales_pipeline.domain.deal import MAX_TITLE_LENGTH, Deal
 from modules.sales_pipeline.domain.loss_reason import LossReason
-from modules.sales_pipeline.domain.pipeline import MAX_STAGES, Pipeline, StageKind
+from modules.sales_pipeline.domain.pipeline import MAX_STAGES, Pipeline, Stage, StageKind
 from modules.sales_pipeline.domain.stage_change import StageChange
 
 # --- pipelines --------------------------------------------------------------
@@ -27,6 +28,12 @@ class StageDefinitionSerializer(serializers.Serializer[dict[str, Any]]):
 class PipelineCreateSerializer(serializers.Serializer[dict[str, Any]]):
     name = serializers.CharField(max_length=100)
     is_default = serializers.BooleanField(default=False)
+    department_id = serializers.UUIDField(
+        required=False,
+        allow_null=True,
+        help_text="Director only: owning sales department (omit for company-wide). A head "
+        "of sales always creates their own department's pipeline.",
+    )
     # many=True forwards min_length/max_length to the generated ListSerializer (stubs miss this).
     stages = StageDefinitionSerializer(  # type: ignore[call-arg]
         many=True, min_length=1, max_length=MAX_STAGES
@@ -74,14 +81,29 @@ class StageReadSerializer(serializers.Serializer[dict[str, Any]]):
     probability = serializers.IntegerField(read_only=True)
     kind = serializers.CharField(read_only=True)
     is_active = serializers.BooleanField(read_only=True)
+    open_deals = serializers.IntegerField(
+        read_only=True, required=False, help_text="Only with ?counts=true"
+    )
+    total_deals = serializers.IntegerField(
+        read_only=True, required=False, help_text="Only with ?counts=true"
+    )
 
 
 class PipelineReadSerializer(serializers.Serializer[dict[str, Any]]):
     id = serializers.UUIDField(read_only=True)
     name = serializers.CharField(read_only=True)
     is_default = serializers.BooleanField(read_only=True)
+    department_id = serializers.UUIDField(read_only=True, allow_null=True)
     stages = StageReadSerializer(many=True, read_only=True)
     created_at = serializers.DateTimeField(read_only=True)
+
+
+class StageRemovalSerializer(serializers.Serializer[dict[str, Any]]):
+    pipeline = PipelineReadSerializer(read_only=True)
+    moved_deals = serializers.IntegerField(read_only=True)
+    archived = serializers.BooleanField(
+        read_only=True, help_text="true: the stage had deals once, so it is archived, not removed"
+    )
 
 
 # --- deals ------------------------------------------------------------------
@@ -227,21 +249,31 @@ class DealListSerializer(serializers.Serializer[dict[str, Any]]):
     results = DealReadSerializer(many=True, read_only=True)
 
 
-def pipeline_to_dict(pipeline: Pipeline) -> dict[str, Any]:
+def pipeline_to_dict(
+    pipeline: Pipeline, counts: dict[UUID, tuple[int, int]] | None = None
+) -> dict[str, Any]:
+    def stage_dict(stage: Stage) -> dict[str, Any]:
+        data: dict[str, Any] = {
+            "id": str(stage.id),
+            "name": stage.name,
+            "position": stage.position,
+            "probability": stage.probability,
+            "kind": stage.kind.value,
+            "is_active": stage.is_active,
+        }
+        if counts is not None:
+            open_deals, total_deals = counts.get(stage.id, (0, 0))
+            data["open_deals"] = open_deals
+            data["total_deals"] = total_deals
+        return data
+
     return {
         "id": str(pipeline.id),
         "name": pipeline.name,
         "is_default": pipeline.is_default,
+        "department_id": str(pipeline.department_id) if pipeline.department_id else None,
         "stages": [
-            {
-                "id": str(stage.id),
-                "name": stage.name,
-                "position": stage.position,
-                "probability": stage.probability,
-                "kind": stage.kind.value,
-                "is_active": stage.is_active,
-            }
-            for stage in sorted(pipeline.stages, key=lambda s: s.position)
+            stage_dict(stage) for stage in sorted(pipeline.stages, key=lambda s: s.position)
         ],
         "created_at": pipeline.created_at.isoformat(),
     }

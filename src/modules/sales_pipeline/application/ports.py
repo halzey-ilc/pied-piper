@@ -57,10 +57,12 @@ class PipelineRepository(Protocol):
 
     def list_all(self) -> list[Pipeline]: ...
 
-    def get_default(self) -> Pipeline | None: ...
+    def get_default(self, department_id: UUID | None = None) -> Pipeline | None:
+        """The default pipeline of a department (None: the company-wide default)."""
+        ...
 
-    def clear_default_flag(self) -> None:
-        """Unset is_default on every pipeline (used before marking a new default)."""
+    def clear_default_flag(self, department_id: UUID | None = None) -> None:
+        """Unset is_default within one scope: a department's pipelines, or company-wide ones."""
         ...
 
     def get_for_update(self, pipeline_id: UUID) -> Pipeline | None:
@@ -86,6 +88,19 @@ class DealRepository(Protocol):
     def count(self, visibility: DealVisibility, filters: DealFilter) -> int: ...
 
     def has_open_deals_in_pipeline(self, pipeline_id: UUID) -> bool: ...
+
+    def stage_counts(self, pipeline_id: UUID) -> dict[UUID, tuple[int, int]]:
+        """Per stage of a pipeline: (open deals, all deals), whoever owns them."""
+        ...
+
+    def move_all_on_stage(self, stage_id: UUID, to_stage_id: UUID) -> list[tuple[UUID, int]]:
+        """Move every deal of a stage (any status) to another stage of the same pipeline;
+        bumps each deal's version. Returns (deal id, new version) per moved deal."""
+        ...
+
+    def stage_ever_used(self, stage_id: UUID) -> bool:
+        """A deal stands on the stage now or did in the past (stage history)."""
+        ...
 
 
 @dataclass(frozen=True, slots=True)

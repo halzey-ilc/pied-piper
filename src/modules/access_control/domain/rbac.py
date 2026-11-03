@@ -169,7 +169,8 @@ _HEAD_OF_SALES: Mapping[Permission, Scope] = {
     Permission.LEADS_UPDATE: Scope.TEAM,
     Permission.LEADS_CONVERT: Scope.TEAM,
     Permission.PIPELINES_VIEW: Scope.ALL,
-    Permission.PIPELINES_MANAGE: Scope.ALL,
+    # Only their own department's pipelines (the service checks the department).
+    Permission.PIPELINES_MANAGE: Scope.TEAM,
     Permission.DEALS_VIEW: Scope.TEAM,
     Permission.DEALS_CREATE: Scope.TEAM,
     Permission.DEALS_UPDATE: Scope.TEAM,

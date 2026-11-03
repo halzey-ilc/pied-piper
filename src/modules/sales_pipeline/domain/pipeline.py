@@ -67,10 +67,18 @@ class Pipeline:
     is_default: bool
     stages: tuple[Stage, ...]
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    # The sales department that owns this pipeline; None = company-wide. A head of sales
+    # configures only their department's pipelines; its managers work in them by default.
+    department_id: UUID | None = None
 
     @classmethod
     def create(
-        cls, *, name: str, stages: list[StageDefinition], is_default: bool = False
+        cls,
+        *,
+        name: str,
+        stages: list[StageDefinition],
+        is_default: bool = False,
+        department_id: UUID | None = None,
     ) -> Pipeline:
         if not stages:
             raise DomainValidationError("A pipeline needs at least one stage.")
@@ -102,6 +110,7 @@ class Pipeline:
             name=_clean_name(name, "Pipeline"),
             is_default=is_default,
             stages=tuple(built),
+            department_id=department_id,
         )
 
     @property
@@ -183,16 +192,41 @@ class Pipeline:
         candidate = tuple(
             replace(st, is_active=active) if st.id == stage_id else st for st in self.stages
         )
-        if not any(st.kind is StageKind.OPEN and st.is_active for st in candidate):
-            raise DomainValidationError("A pipeline needs at least one active open stage.")
+        _check_still_usable(self.stages, candidate, current)
         self.stages = candidate
         return True
+
+    def remove_stage(self, stage_id: UUID) -> Stage:
+        """Delete a stage outright (only one no deal ever stood on); later stages shift up."""
+        removed = self.stage(stage_id)
+        remaining = [
+            st for st in sorted(self.stages, key=lambda st: st.position) if st.id != stage_id
+        ]
+        _check_still_usable(self.stages, tuple(remaining), removed)
+        self.stages = _renumbered(remaining)
+        return removed
 
     def _unique_name(self, name: str, *, exclude: UUID | None = None) -> str:
         cleaned = _clean_name(name, "Stage")
         if any(st.name.lower() == cleaned.lower() and st.id != exclude for st in self.stages):
             raise DomainValidationError(f"Duplicate stage name: {cleaned}.")
         return cleaned
+
+
+def _check_still_usable(
+    before: tuple[Stage, ...], after: tuple[Stage, ...], changed: Stage
+) -> None:
+    """A pipeline keeps an active open stage, and never loses its last active won or lost
+    stage: closing a deal must stay possible."""
+    if not any(st.kind is StageKind.OPEN and st.is_active for st in after):
+        raise DomainValidationError("A pipeline needs at least one active open stage.")
+    if changed.kind is StageKind.OPEN:
+        return
+    had = any(st.kind is changed.kind and st.is_active for st in before)
+    if had and not any(st.kind is changed.kind and st.is_active for st in after):
+        raise DomainValidationError(
+            f"A pipeline needs at least one active {changed.kind.value} stage."
+        )
 
 
 def _check_probability(probability: int) -> None:

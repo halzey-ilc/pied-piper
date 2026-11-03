@@ -32,6 +32,7 @@ def pipeline_service() -> PipelineService:
         uow=DjangoUnitOfWork(alias),
         audit=DjangoAuditLog(alias),
         deals=DjangoDealRepository(alias),
+        stage_changes=DjangoStageChangeRepository(alias),
     )
 
 

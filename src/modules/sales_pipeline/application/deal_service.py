@@ -153,7 +153,7 @@ class DealService:
     def open_deal(self, principal: Principal, command: OpenDeal) -> Deal:
         self._policy.require(principal, Permission.DEALS_CREATE)
         with self._uow:
-            pipeline = self._resolve_pipeline(command.pipeline_id)
+            pipeline = self._resolve_pipeline(command.pipeline_id, principal.department_id)
             if command.customer_id is not None:
                 self._check_customer(principal, command.customer_id)
             custom_fields = self._validated_custom_fields(command.custom_fields, require_all=True)
@@ -351,12 +351,15 @@ class DealService:
         definitions = self._custom_fields.list_all(active_only=True) if self._custom_fields else []
         return validate_custom_fields(definitions, values, require_all=require_all)
 
-    def _resolve_pipeline(self, pipeline_id: UUID | None) -> Pipeline:
-        pipeline = (
-            self._pipelines.get(pipeline_id)
-            if pipeline_id is not None
-            else self._pipelines.get_default()
-        )
+    def _resolve_pipeline(self, pipeline_id: UUID | None, department_id: UUID | None) -> Pipeline:
+        """The requested pipeline, else the department's default (the funnel its head of
+        sales configured), else the company-wide default."""
+        if pipeline_id is not None:
+            pipeline = self._pipelines.get(pipeline_id)
+        else:
+            pipeline = (
+                self._pipelines.get_default(department_id) if department_id is not None else None
+            ) or self._pipelines.get_default()
         if pipeline is None:
             raise DomainValidationError(
                 "No pipeline available. Create one, or mark a pipeline as default."

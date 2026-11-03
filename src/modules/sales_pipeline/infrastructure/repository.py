@@ -4,7 +4,7 @@ from typing import Any
 from uuid import UUID
 
 from django.db import transaction
-from django.db.models import F, Q, QuerySet
+from django.db.models import Count, F, Q, QuerySet
 
 from modules.sales_pipeline.application.ports import ORDERING_FIELDS, DealFilter, DealVisibility
 from modules.sales_pipeline.domain.custom_field import CustomFieldDefinition, CustomFieldType
@@ -42,6 +42,7 @@ def _pipeline_to_domain(row: PipelineRecord) -> Pipeline:
         is_default=row.is_default,
         stages=stages,
         created_at=row.created_at,
+        department_id=row.department_id,
     )
 
 
@@ -87,6 +88,7 @@ class DjangoPipelineRepository:
                 name=pipeline.name,
                 is_default=pipeline.is_default,
                 created_at=pipeline.created_at,
+                department_id=pipeline.department_id,
             )
             StageRecord.objects.using(self.using).bulk_create(
                 StageRecord(
@@ -129,17 +131,19 @@ class DjangoPipelineRepository:
         )
         return [_pipeline_to_domain(row) for row in rows]
 
-    def get_default(self) -> Pipeline | None:
+    def get_default(self, department_id: UUID | None = None) -> Pipeline | None:
         row = (
             PipelineRecord.objects.using(self.using)
-            .filter(is_default=True)
+            .filter(is_default=True, department_id=department_id)
             .prefetch_related("stages")
             .first()
         )
         return None if row is None else _pipeline_to_domain(row)
 
-    def clear_default_flag(self) -> None:
-        PipelineRecord.objects.using(self.using).filter(is_default=True).update(is_default=False)
+    def clear_default_flag(self, department_id: UUID | None = None) -> None:
+        PipelineRecord.objects.using(self.using).filter(
+            is_default=True, department_id=department_id
+        ).update(is_default=False)
 
     def save(self, pipeline: Pipeline) -> None:
         """Persist name, default flag and the stage set (positions are rewritten)."""
@@ -148,6 +152,8 @@ class DjangoPipelineRepository:
                 name=pipeline.name, is_default=pipeline.is_default
             )
             stages = StageRecord.objects.using(self.using).filter(pipeline_id=pipeline.id)
+            # A stage removed from the pipeline goes (only never-used stages are removed).
+            stages.exclude(id__in=[stage.id for stage in pipeline.stages]).delete()
             # Move every position out of the way first: (pipeline, position) is unique.
             stages.update(position=F("position") + _POSITION_SHIFT)
             for stage in pipeline.stages:
@@ -298,6 +304,37 @@ class DjangoDealRepository:
 
     def has_open_deals_in_pipeline(self, pipeline_id: UUID) -> bool:
         return self._qs().filter(pipeline_id=pipeline_id, status=DealStatus.OPEN.value).exists()
+
+    def stage_counts(self, pipeline_id: UUID) -> dict[UUID, tuple[int, int]]:
+        rows = (
+            self._qs()
+            .filter(pipeline_id=pipeline_id)
+            .values("stage_id")
+            .annotate(total=Count("id"), open=Count("id", filter=Q(status=DealStatus.OPEN.value)))
+        )
+        return {row["stage_id"]: (row["open"], row["total"]) for row in rows}
+
+    def move_all_on_stage(self, stage_id: UUID, to_stage_id: UUID) -> list[tuple[UUID, int]]:
+        with transaction.atomic(using=self.using):
+            ids = list(
+                self._qs()
+                .select_for_update()
+                .filter(stage_id=stage_id)
+                .values_list("id", flat=True)
+            )
+            if not ids:
+                return []
+            self._qs().filter(id__in=ids).update(stage_id=to_stage_id, version=F("version") + 1)
+            return list(self._qs().filter(id__in=ids).values_list("id", "version"))
+
+    def stage_ever_used(self, stage_id: UUID) -> bool:
+        if self._qs().filter(stage_id=stage_id).exists():
+            return True
+        return (
+            DealStageChangeRecord.objects.using(self.using)
+            .filter(Q(from_stage_id=stage_id) | Q(to_stage_id=stage_id))
+            .exists()
+        )
 
 
 class DjangoLossReasonRepository:

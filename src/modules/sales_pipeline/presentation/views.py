@@ -53,6 +53,7 @@ from modules.sales_pipeline.presentation.serializers import (
     StageAddSerializer,
     StageChangeListSerializer,
     StageOrderSerializer,
+    StageRemovalSerializer,
     StageUpdateSerializer,
     custom_field_to_dict,
     deal_to_dict,
@@ -61,7 +62,7 @@ from modules.sales_pipeline.presentation.serializers import (
     stage_change_to_dict,
 )
 from platform_core.presentation.tenancy import TenantScopedAPIView
-from shared.domain.errors import NotFoundError
+from shared.domain.errors import DomainValidationError, NotFoundError
 
 _TENANT_HEADER = OpenApiParameter(
     "X-Tenant",
@@ -147,7 +148,11 @@ class PipelineListCreateView(_Scoped):
         tags=_PIPELINE_TAGS,
         operation_id="pipelines_list",
         summary="List pipelines",
-        description="Returns all pipelines in the company with their ordered stages.",
+        description=(
+            "Pipelines you can see, with their ordered stages: the company-wide ones and, for "
+            "a department member, their department's own (`department_id`), which come first "
+            "— default first. The director sees every department's pipelines."
+        ),
         parameters=[_TENANT_HEADER],
         responses=PipelineReadSerializer(many=True),
     )
@@ -162,7 +167,10 @@ class PipelineListCreateView(_Scoped):
         description=(
             "Creates a pipeline with ordered stages (1-20). Stages are positioned in the "
             "order given. Setting `is_default` makes this the pipeline used when a deal is "
-            "created without one. Requires the pipelines.manage permission."
+            "created without one (within its department, or company-wide). A head of sales "
+            "creates their department's pipeline (`department_id` is set for them; a "
+            "department's first pipeline becomes its default); the director may pass any "
+            "`department_id` or none. Requires the pipelines.manage permission."
         ),
         parameters=[_TENANT_HEADER],
         request=PipelineCreateSerializer,
@@ -192,6 +200,7 @@ class PipelineListCreateView(_Scoped):
             CreatePipeline(
                 name=data["name"],
                 is_default=data["is_default"],
+                department_id=data.get("department_id"),
                 stages=[
                     StageDefinition(
                         name=s["name"],
@@ -210,12 +219,26 @@ class PipelineDetailView(_Scoped):
         tags=_PIPELINE_TAGS,
         operation_id="pipelines_retrieve",
         summary="Get one pipeline",
-        description="Returns a pipeline and its stages by id, or 404 if it does not exist.",
-        parameters=[_TENANT_HEADER],
+        description=(
+            "Returns a pipeline and its stages by id, or 404 if it does not exist or belongs "
+            "to another department. `counts=true` (for whoever may configure it) adds "
+            "`open_deals` and `total_deals` per stage, across all owners."
+        ),
+        parameters=[
+            _TENANT_HEADER,
+            OpenApiParameter("counts", bool, OpenApiParameter.QUERY, description="Add deal counts"),
+        ],
         responses=PipelineReadSerializer,
     )
     def get(self, request: Request, pipeline_id: UUID) -> Response:
-        return Response(pipeline_to_dict(pipeline_service().get(self.principal(), pipeline_id)))
+        service = pipeline_service()
+        pipeline = service.get(self.principal(), pipeline_id)
+        counts = (
+            service.stage_counts(self.principal(), pipeline_id)
+            if request.query_params.get("counts") == "true"
+            else None
+        )
+        return Response(pipeline_to_dict(pipeline, counts))
 
     @extend_schema(
         tags=_PIPELINE_TAGS,
@@ -291,6 +314,44 @@ class PipelineStageDetailView(_Scoped):
             is_active=data.get("is_active"),
         )
         return Response(pipeline_to_dict(pipeline))
+
+    @extend_schema(
+        tags=_PIPELINE_TAGS,
+        operation_id="pipelines_stage_delete",
+        summary="Delete a stage, moving its deals",
+        description=(
+            "Deletes a stage of a pipeline you may configure. If deals stand on it (any "
+            "status), `move_to_stage_id` is required (400 `move_target_required`): another "
+            "active stage of the same kind in this pipeline; every deal moves there and the "
+            "move is written to its stage history. A stage that ever held a deal is archived "
+            "(`archived: true`, its name stays in history); a never-used one is removed. "
+            "The last active open, won or lost stage cannot be deleted."
+        ),
+        parameters=[
+            _TENANT_HEADER,
+            OpenApiParameter(
+                "move_to_stage_id", UUID, OpenApiParameter.QUERY, description="Where deals go"
+            ),
+        ],
+        request=None,
+        responses=StageRemovalSerializer,
+    )
+    def delete(self, request: Request, pipeline_id: UUID, stage_id: UUID) -> Response:
+        raw = request.query_params.get("move_to_stage_id")
+        try:
+            move_to = UUID(raw) if raw else None
+        except ValueError as exc:
+            raise DomainValidationError("move_to_stage_id must be a UUID.") from exc
+        result = pipeline_service().delete_stage(
+            self.principal(), pipeline_id, stage_id, move_to_stage_id=move_to
+        )
+        return Response(
+            {
+                "pipeline": pipeline_to_dict(result.pipeline),
+                "moved_deals": result.moved_deals,
+                "archived": result.archived,
+            }
+        )
 
 
 class PipelineStageOrderView(_Scoped):

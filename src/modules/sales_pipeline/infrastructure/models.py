@@ -13,15 +13,23 @@ class PipelineRecord(models.Model):
     name = models.CharField(max_length=100)
     is_default = models.BooleanField(default=False)
     created_at = models.DateTimeField()
+    # Owning sales department (organizations department id); null = company-wide pipeline.
+    department_id = models.UUIDField(null=True, blank=True, db_index=True)
 
     class Meta:
         db_table = "sales_pipeline"
         constraints = [
-            # At most one default pipeline per tenant database.
+            # At most one company-wide default pipeline per tenant database...
             models.UniqueConstraint(
                 fields=["is_default"],
-                condition=Q(is_default=True),
+                condition=Q(is_default=True, department_id__isnull=True),
                 name="sales_pipeline_one_default",
+            ),
+            # ...and at most one default pipeline per department.
+            models.UniqueConstraint(
+                fields=["department_id"],
+                condition=Q(is_default=True, department_id__isnull=False),
+                name="sales_pipeline_one_department_default",
             ),
         ]
 
