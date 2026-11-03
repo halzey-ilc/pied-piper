@@ -21,6 +21,7 @@ from modules.communications.presentation.serializers import (
     message_to_dict,
 )
 from platform_core.presentation.tenancy import TenantScopedAPIView
+from shared.domain.errors import DomainValidationError
 
 _TENANT_HEADER = OpenApiParameter(
     "X-Tenant",
@@ -35,6 +36,9 @@ _CHANNEL = OpenApiParameter(
     OpenApiParameter.QUERY,
     description="Filter by channel.",
     enum=[c.value for c in Channel],
+)
+_CUSTOMER = OpenApiParameter(
+    "customer_id", str, OpenApiParameter.QUERY, description="Only conversations of this customer."
 )
 _STATUS = OpenApiParameter(
     "status",
@@ -82,7 +86,7 @@ class ConversationListView(_Scoped):
             "Conversations visible to you (own/team/all by role; unassigned ones are visible "
             "so they can be picked up), most recent activity first."
         ),
-        parameters=[_TENANT_HEADER, _CHANNEL, _STATUS, _LIMIT, _OFFSET],
+        parameters=[_TENANT_HEADER, _CHANNEL, _STATUS, _CUSTOMER, _LIMIT, _OFFSET],
         responses=ConversationListSerializer,
     )
     def get(self, request: Request) -> Response:
@@ -91,9 +95,15 @@ class ConversationListView(_Scoped):
         statuses = {s.value for s in ConversationStatus}
         ch = request.query_params.get("channel")
         st = request.query_params.get("status")
+        customer = request.query_params.get("customer_id")
+        try:
+            customer_id = UUID(customer) if customer else None
+        except ValueError as exc:
+            raise DomainValidationError("customer_id must be a UUID.") from exc
         filters = ConversationFilter(
             channel=Channel(ch) if ch in channels else None,
             status=ConversationStatus(st) if st in statuses else None,
+            customer_id=customer_id,
         )
         page = conversation_service().list_conversations(
             self.principal(), filters, limit=limit, offset=offset

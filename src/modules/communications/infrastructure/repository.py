@@ -100,6 +100,8 @@ class DjangoConversationRepository:
             qs = qs.filter(channel=filters.channel.value)
         if filters.status is not None:
             qs = qs.filter(status=filters.status.value)
+        if filters.customer_id is not None:
+            qs = qs.filter(customer_id=filters.customer_id)
         return qs
 
     def list_visible(

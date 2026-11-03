@@ -59,6 +59,8 @@ INSTALLED_APPS = [
     "modules.risk.infrastructure.apps.RiskConfig",
     "modules.planning.infrastructure.apps.PlanningConfig",
     "modules.workspace.infrastructure.apps.WorkspaceConfig",
+    "modules.imports.infrastructure.apps.ImportsConfig",
+    "modules.reference_lists.infrastructure.apps.ReferenceListsConfig",
 ]
 
 MIDDLEWARE = [
@@ -178,6 +180,8 @@ TENANCY: dict[str, Any] = {
         "risk",
         "planning",
         "workspace",
+        "imports",
+        "reference_lists",
     },
     "SHARED_APPS": {"messaging", "audit"},
     "IGNORED_APPS": {"rest_framework", "corsheaders", "drf_spectacular"},
@@ -554,6 +558,11 @@ CELERY_BEAT_SCHEDULE = {
     "settle-stale-work-sessions": {
         "task": "reports.settle_stale_work_sessions",
         "schedule": crontab(minute=7),
+    },
+    # Task reminders, overdue alerts and escalations to the head of sales (idempotent).
+    "task-deadline-alerts": {
+        "task": "notifications.task_deadlines",
+        "schedule": crontab(minute="*/15"),
     },
     # AI operations digests for users with findings; does nothing while AI is off.
     "daily-ai-operations-digests": {

@@ -23,6 +23,7 @@ class ConversationVisibility:
 class ConversationFilter:
     channel: Channel | None = None
     status: ConversationStatus | None = None
+    customer_id: UUID | None = None
 
 
 class ConversationRepository(Protocol):

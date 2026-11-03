@@ -1,5 +1,10 @@
 from django.urls import path
 
+from modules.communications.presentation.template_views import (
+    ChannelsView,
+    TemplateDetailView,
+    TemplateListView,
+)
 from modules.communications.presentation.views import (
     AssignView,
     CloseView,
@@ -11,6 +16,13 @@ from modules.communications.presentation.views import (
 )
 
 urlpatterns = [
+    path("templates/", TemplateListView.as_view(), name="message-template-list"),
+    path(
+        "templates/<uuid:template_id>/",
+        TemplateDetailView.as_view(),
+        name="message-template-detail",
+    ),
+    path("channels/", ChannelsView.as_view(), name="communication-channels"),
     path("conversations/", ConversationListView.as_view(), name="conversation-list"),
     path(
         "conversations/<uuid:conversation_id>/",

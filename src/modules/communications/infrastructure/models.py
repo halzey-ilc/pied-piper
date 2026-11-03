@@ -80,3 +80,19 @@ class MessageRecord(models.Model):
 
     def __str__(self) -> str:
         return f"{self.direction}:{self.id}"
+
+
+class MessageTemplateRecord(models.Model):
+    id = models.UUIDField(primary_key=True)
+    title = models.CharField(max_length=120)
+    body = models.TextField()
+    created_by = models.UUIDField()
+    created_at = models.DateTimeField()
+    updated_at = models.DateTimeField()
+
+    class Meta:
+        db_table = "communications_message_template"
+        ordering = ["title"]
+
+    def __str__(self) -> str:
+        return self.title
