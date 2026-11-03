@@ -8,7 +8,7 @@ managed by the director, or by a head of sales for their own department.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 from uuid import UUID
@@ -26,7 +26,15 @@ from modules.planning.application.ports import (
     PlanVisibility,
 )
 from modules.planning.domain.absence import Absence, AbsenceKind
-from modules.planning.domain.plan import Plan, PlanChange, PlanMetric, PlanScope, period_dates
+from modules.planning.domain.plan import (
+    MONEY_METRICS,
+    Plan,
+    PlanChange,
+    PlanMetric,
+    PlanScope,
+    period_dates,
+    plan_currency,
+)
 from shared.application.ports import UnitOfWork
 from shared.domain.errors import AccessDeniedError, DomainValidationError, NotFoundError
 
@@ -49,13 +57,24 @@ class PlanPart:
 
 
 @dataclass(frozen=True, slots=True)
-class DistributePlan:
-    """Split the company plan of (metric, period) between departments: the parts must add
-    up to the company target. Department plans change only through this explicit call."""
+class MetricDistribution:
+    """Parts of one metric's company plan. ``currency`` (money metrics only) also switches
+    the currency of the company plan and of every department plan of that period."""
 
     metric: PlanMetric
-    period: str
     parts: tuple[PlanPart, ...]
+    currency: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class DistributePlan:
+    """Split the company plans of one period between departments: for every metric the
+    parts must add up to the company target. All metrics are validated first and written
+    in one transaction — nothing is saved if any of them is invalid. Department plans
+    change only through this explicit call."""
+
+    period: str
+    distributions: tuple[MetricDistribution, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -124,6 +143,7 @@ class PlanningService:
 
     def set_plan(self, principal: Principal, command: SetPlan) -> Plan:
         scope = self._policy.require(principal, Permission.PLANS_MANAGE)
+        command = self._check_currency(command)
         # Company/department targets are the director's; user targets may also be
         # set by a head of sales (TEAM scope).
         if command.scope in (PlanScope.COMPANY, PlanScope.DEPARTMENT) and scope is not Scope.ALL:
@@ -138,44 +158,130 @@ class PlanningService:
             return self._upsert(principal, command)
 
     def distribute_plan(self, principal: Principal, command: DistributePlan) -> list[Plan]:
-        """Director only: set every listed department's plan in one transaction, provided
-        the parts add up exactly to the company plan of the same metric and period. Each
-        department plan keeps its own change history; the money currency follows the
-        company plan."""
+        """Director only: set the listed departments' plans for every metric in one
+        transaction, provided each metric's parts add up exactly to its company plan. Each
+        department plan keeps its own change history; money parts take the company plan's
+        currency (or the new ``currency`` of the distribution, applied to the company plan
+        too)."""
         scope = self._policy.require(principal, Permission.PLANS_MANAGE)
         if scope is not Scope.ALL:
             raise AccessDeniedError("Only a director distributes the company plan.")
-        company = self._plans.find(PlanScope.COMPANY, None, command.metric, command.period)
-        if company is None:
-            raise DomainValidationError("Set the company plan for this period first.")
-        departments = self._roster.active_departments()
-        ids = [part.department_id for part in command.parts]
-        if len(set(ids)) != len(ids):
-            raise DomainValidationError("Each department may appear only once.")
-        if any(department_id not in departments for department_id in ids):
-            raise NotFoundError("Department not found.")
-        if any(part.target < Decimal(0) for part in command.parts):
-            raise DomainValidationError("Plan target must not be negative.")
-        total = sum((part.target for part in command.parts), Decimal(0))
-        if total != company.target:
-            raise DomainValidationError(
-                f"The parts add up to {total}, the company plan is {company.target}."
-            )
+        if not command.distributions:
+            raise DomainValidationError("Nothing to distribute.")
+        metrics = [d.metric for d in command.distributions]
+        if len(set(metrics)) != len(metrics):
+            raise DomainValidationError("Each metric may appear only once.")
+        writes = self._validated(command)
         with self._uow:
-            return [
-                self._upsert(
-                    principal,
-                    SetPlan(
-                        scope=PlanScope.DEPARTMENT,
-                        scope_id=part.department_id,
-                        metric=command.metric,
-                        period=command.period,
-                        target=part.target,
-                        currency=company.currency,
-                    ),
+            saved: list[Plan] = []
+            for item, company, currency in writes:
+                if currency is not None and currency != company.currency:
+                    # The company plan and its departments switch currency together.
+                    self._upsert(
+                        principal,
+                        SetPlan(
+                            scope=PlanScope.COMPANY,
+                            scope_id=None,
+                            metric=item.metric,
+                            period=command.period,
+                            target=company.target,
+                            currency=currency,
+                        ),
+                    )
+                    for other in self._department_plans(item.metric, command.period):
+                        if other.scope_id not in {p.department_id for p in item.parts}:
+                            self._upsert(
+                                principal,
+                                SetPlan(
+                                    scope=PlanScope.DEPARTMENT,
+                                    scope_id=other.scope_id,
+                                    metric=item.metric,
+                                    period=command.period,
+                                    target=other.target,
+                                    currency=currency,
+                                ),
+                            )
+                saved.extend(
+                    self._upsert(
+                        principal,
+                        SetPlan(
+                            scope=PlanScope.DEPARTMENT,
+                            scope_id=part.department_id,
+                            metric=item.metric,
+                            period=command.period,
+                            target=part.target,
+                            currency=currency,
+                        ),
+                    )
+                    for part in item.parts
                 )
-                for part in command.parts
-            ]
+            return saved
+
+    def _validated(
+        self, command: DistributePlan
+    ) -> list[tuple[MetricDistribution, Plan, str | None]]:
+        """Check every metric of a distribution before anything is written."""
+        departments = self._roster.active_departments()
+        # Validate every metric before writing anything.
+        writes: list[tuple[MetricDistribution, Plan, str | None]] = []
+        for item in command.distributions:
+            company = self._plans.find(PlanScope.COMPANY, None, item.metric, command.period)
+            if company is None:
+                raise DomainValidationError("Set the company plan for this period first.")
+            ids = [part.department_id for part in item.parts]
+            if len(set(ids)) != len(ids):
+                raise DomainValidationError("Each department may appear only once.")
+            if any(department_id not in departments for department_id in ids):
+                raise NotFoundError("Department not found.")
+            if any(part.target < Decimal(0) for part in item.parts):
+                raise DomainValidationError("Plan target must not be negative.")
+            total = sum((part.target for part in item.parts), Decimal(0))
+            if total != company.target:
+                raise DomainValidationError(
+                    f"The parts add up to {total}, the company plan is {company.target}."
+                )
+            currency = (
+                plan_currency(item.metric, item.currency or company.currency)
+                if item.metric in MONEY_METRICS
+                else None
+            )
+            writes.append((item, company, currency))
+        return writes
+
+    def _department_plans(self, metric: PlanMetric, period: str) -> list[Plan]:
+        filters = PlanFilter(scope=PlanScope.DEPARTMENT, metric=metric, period=period)
+        return self._plans.list_all(filters, limit=self._plans.count(filters) or 1, offset=0)
+
+    def _check_currency(self, command: SetPlan) -> SetPlan:
+        """Company and department money plans of one period share one currency, so their
+        amounts can be compared and added. A department plan follows the company plan; the
+        company plan's currency changes only together with its distribution."""
+        if command.metric not in MONEY_METRICS or command.scope is PlanScope.USER:
+            return command
+        if command.scope is PlanScope.DEPARTMENT:
+            company = self._plans.find(PlanScope.COMPANY, None, command.metric, command.period)
+            if company is None or company.currency is None:
+                return command
+            # Omitted currency = the company plan's (also aligns an older mismatched plan).
+            wanted = plan_currency(command.metric, command.currency or company.currency)
+            if wanted != company.currency:
+                raise DomainValidationError(
+                    f"A department plan must be in the company plan currency ({company.currency})."
+                )
+            return replace(command, currency=wanted)
+        company = self._plans.find(PlanScope.COMPANY, None, command.metric, command.period)
+        if company is None or command.currency is None:
+            return command
+        wanted = plan_currency(command.metric, command.currency)
+        if wanted != company.currency and any(
+            plan.currency != wanted
+            for plan in self._department_plans(command.metric, command.period)
+        ):
+            raise DomainValidationError(
+                "The company plan is already distributed in another currency; "
+                "change the currency through the distribution."
+            )
+        return command
 
     def _upsert(self, principal: Principal, command: SetPlan) -> Plan:
         """Create the plan or change its target/currency, recording history (inside a UoW)."""

@@ -28,10 +28,29 @@ class PlanPartSerializer(serializers.Serializer[dict[str, Any]]):
     target = serializers.DecimalField(max_digits=16, decimal_places=2, min_value=Decimal(0))
 
 
-class PlanDistributeSerializer(serializers.Serializer[dict[str, Any]]):
+class PlanMetricDistributionSerializer(serializers.Serializer[dict[str, Any]]):
     metric = serializers.ChoiceField(choices=[m.value for m in PlanMetric])
-    period = serializers.CharField(max_length=10)
     parts = PlanPartSerializer(many=True)
+    # Money metrics only: switch the company plan and its departments to this currency.
+    currency = serializers.CharField(max_length=3, required=False, allow_null=True)
+
+
+class PlanDistributeSerializer(serializers.Serializer[dict[str, Any]]):
+    """Either ``distributions`` (several metrics at once, atomically) or the single-metric
+    shorthand ``metric`` + ``parts``."""
+
+    period = serializers.CharField(max_length=10)
+    distributions = PlanMetricDistributionSerializer(many=True, required=False)
+    metric = serializers.ChoiceField(choices=[m.value for m in PlanMetric], required=False)
+    parts = PlanPartSerializer(many=True, required=False)
+
+    def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
+        if attrs.get("distributions"):
+            return attrs
+        if "metric" in attrs and "parts" in attrs:
+            attrs["distributions"] = [{"metric": attrs["metric"], "parts": attrs["parts"]}]
+            return attrs
+        raise serializers.ValidationError("Send distributions, or metric with parts.")
 
 
 class PlanReadSerializer(serializers.Serializer[dict[str, Any]]):

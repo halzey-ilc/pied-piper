@@ -241,3 +241,87 @@ def test_distribute_company_plan_between_departments(
         ).status_code
         == 404
     )
+
+
+def test_distribution_of_count_and_money_is_atomic(
+    make_user: Callable[..., Any],
+    tenants: dict[str, TenantFixture],
+    client_for: Callable[..., APIClient],
+) -> None:
+    owner = client_for(make_user("owner", tenant=tenants["acme"]), "acme")
+    north = _in_department(tenants["acme"], "North")
+    south = _in_department(tenants["acme"], "South")
+    assert _set_plan(owner, target="10").status_code == 200
+    money = _set_plan(owner, metric="monthly_turnover", target="1000", currency="USD")
+    assert money.status_code == 200, money.content
+
+    def body(money_parts: list[tuple[str, str]]) -> dict[str, Any]:
+        return {
+            "period": "2026-11",
+            "distributions": [
+                {
+                    "metric": "monthly_sales",
+                    "parts": [
+                        {"department_id": north, "target": "6"},
+                        {"department_id": south, "target": "4"},
+                    ],
+                },
+                {
+                    "metric": "monthly_turnover",
+                    "parts": [{"department_id": d, "target": t} for d, t in money_parts],
+                },
+            ],
+        }
+
+    # The money parts don't add up: nothing is saved, not even the valid count parts.
+    bad = owner.post(
+        "/api/v1/plans/distribute/", body([(north, "700"), (south, "200")]), format="json"
+    )
+    assert bad.status_code == 400, bad.content
+    assert owner.get("/api/v1/plans/?scope=department").json()["count"] == 0
+
+    good = owner.post(
+        "/api/v1/plans/distribute/", body([(north, "700"), (south, "300")]), format="json"
+    )
+    assert good.status_code == 200, good.content
+    saved = {(p["metric"], p["scope_id"]): p for p in good.json()["results"]}
+    assert len(saved) == 4
+    assert saved[("monthly_turnover", north)]["currency"] == "USD"
+    assert saved[("monthly_sales", north)]["currency"] is None
+
+
+def test_company_and_department_money_plans_share_one_currency(
+    make_user: Callable[..., Any],
+    tenants: dict[str, TenantFixture],
+    client_for: Callable[..., APIClient],
+) -> None:
+    owner = client_for(make_user("owner", tenant=tenants["acme"]), "acme")
+    north = _in_department(tenants["acme"], "North")
+    money: dict[str, Any] = {"metric": "monthly_turnover", "target": "1000"}
+    assert _set_plan(owner, currency="USD", **money).status_code == 200
+
+    # A department plan follows the company plan's currency; another one is refused.
+    department = {**money, "scope": "department", "scope_id": north, "target": "400"}
+    assert _set_plan(owner, currency="KGS", **department).status_code == 400
+    followed = _set_plan(owner, **department)
+    assert followed.status_code == 200 and followed.json()["currency"] == "USD"
+
+    # Once distributed, the company currency changes only through the distribution.
+    assert _set_plan(owner, currency="KGS", **money).status_code == 400
+    switched = owner.post(
+        "/api/v1/plans/distribute/",
+        {
+            "period": "2026-11",
+            "distributions": [
+                {
+                    "metric": "monthly_turnover",
+                    "currency": "KGS",
+                    "parts": [{"department_id": north, "target": "1000"}],
+                }
+            ],
+        },
+        format="json",
+    )
+    assert switched.status_code == 200, switched.content
+    plans = owner.get("/api/v1/plans/?metric=monthly_turnover").json()["results"]
+    assert {p["scope"]: p["currency"] for p in plans} == {"company": "KGS", "department": "KGS"}
