@@ -87,6 +87,7 @@ class MeetingOutcomeSerializer(serializers.Serializer[dict[str, Any]]):
     new_start = serializers.DateTimeField(required=False, allow_null=True)
     new_end = serializers.DateTimeField(required=False, allow_null=True)
     comment = serializers.CharField(required=False, allow_blank=True, max_length=2000)
+    reason = serializers.CharField(required=False, allow_blank=True, max_length=200)
 
 
 class ParticipantResponseSerializer(serializers.Serializer[dict[str, Any]]):
@@ -123,6 +124,7 @@ class MeetingReadSerializer(serializers.Serializer[dict[str, Any]]):
     reminders = serializers.ListField(child=serializers.IntegerField(), read_only=True)
     outcome = serializers.CharField(read_only=True, allow_null=True)
     cancel_reason = serializers.CharField(read_only=True, allow_null=True)
+    outcome_reason = serializers.CharField(read_only=True, allow_null=True)
     version = serializers.IntegerField(read_only=True)
     created_at = serializers.DateTimeField(read_only=True)
 
@@ -169,6 +171,7 @@ def meeting_to_dict(meeting: Meeting) -> dict[str, Any]:
         "reminders": list(meeting.reminders),
         "outcome": meeting.outcome,
         "cancel_reason": meeting.cancel_reason,
+        "outcome_reason": meeting.outcome_reason,
         "version": meeting.version,
         "created_at": meeting.created_at.isoformat(),
     }

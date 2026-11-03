@@ -73,6 +73,7 @@ def _to_domain(row: MeetingRecord) -> Meeting:
         reminders=tuple(row.reminders),
         outcome=row.outcome,
         cancel_reason=row.cancel_reason,
+        outcome_reason=row.outcome_reason,
         created_at=row.created_at,
         version=row.version,
     )
@@ -165,4 +166,5 @@ class DjangoMeetingRepository:
             "reminders": list(meeting.reminders),
             "outcome": meeting.outcome,
             "cancel_reason": meeting.cancel_reason,
+            "outcome_reason": meeting.outcome_reason,
         }

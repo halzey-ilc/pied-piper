@@ -408,6 +408,7 @@ class MeetingOutcomeView(_Scoped):
             new_start=data.get("new_start"),
             new_end=data.get("new_end"),
             comment=data.get("comment") or None,
+            reason=data.get("reason") or None,
         )
         return Response(meeting_to_dict(meeting))
 

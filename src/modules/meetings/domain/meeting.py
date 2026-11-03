@@ -18,6 +18,7 @@ from shared.domain.value_objects import EmailAddress
 
 MAX_TITLE_LENGTH = 200
 MAX_TEXT_LENGTH = 2000
+MAX_REASON_LENGTH = 200
 MAX_PARTICIPANTS = 50
 MAX_REMINDERS = 10
 MAX_DURATION = timedelta(hours=24)
@@ -203,6 +204,8 @@ class Meeting:
     reminders: tuple[int, ...] = ()
     outcome: str | None = None
     cancel_reason: str | None = None
+    # Why the client did not come (from the company's reason list or free text).
+    outcome_reason: str | None = None
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     version: int = 1
 
@@ -268,11 +271,16 @@ class Meeting:
         self.confirmation_source = source
         self.version += 1
 
-    def mark_no_show(self, comment: str | None = None) -> MeetingCompleted:
+    def mark_no_show(
+        self, comment: str | None = None, reason: str | None = None
+    ) -> MeetingCompleted:
         self._require_scheduled("marked as a no-show")
         self.status = MeetingStatus.NO_SHOW
         self.outcome = _clean(
             comment or "", label="Outcome", max_length=MAX_TEXT_LENGTH, required=False
+        )
+        self.outcome_reason = _clean(
+            reason or "", label="Reason", max_length=MAX_REASON_LENGTH, required=False
         )
         self.version += 1
         return MeetingCompleted(meeting_id=self.id)

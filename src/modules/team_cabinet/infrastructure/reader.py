@@ -57,8 +57,10 @@ class DjangoTeamRoster:
 
 
 class DjangoCabinetReader:
-    def __init__(self, using: str) -> None:
+    def __init__(self, using: str, currency: str = "KGS") -> None:
         self.using = using
+        # Money sums use this currency only; other currencies are not added to them.
+        self.currency = currency
 
     def day_metrics(
         self,
@@ -191,7 +193,7 @@ class DjangoCabinetReader:
             PaymentRecord.objects.using(self.using)
             .filter(seller_user_id__in=user_ids, paid_on=today, is_refund=False)
             .values("seller_user_id")
-            .annotate(n=Count("id"), total=Sum("amount"))
+            .annotate(n=Count("id"), total=Sum("amount", filter=Q(currency=self.currency)))
         )
         for row in rows:
             raw = out.get(row["seller_user_id"])
@@ -240,6 +242,7 @@ class DjangoCabinetReader:
                 seller_user_id__in=user_ids,
                 paid_on__gte=month_start,
                 paid_on__lte=month_end,
+                currency=self.currency,
             )
             .values("seller_user_id")
             .annotate(total=Sum(signed))
@@ -335,7 +338,7 @@ class DjangoCabinetReader:
             seller_user_id__in=user_ids, paid_on__gte=start, paid_on__lte=end, is_refund=False
         )
         for row in payments.values("seller_user_id", "paid_on").annotate(
-            n=Count("id"), total=Sum("amount")
+            n=Count("id"), total=Sum("amount", filter=Q(currency=self.currency))
         ):
             m = out[row["seller_user_id"]]
             m.payments_count += row["n"]

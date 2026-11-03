@@ -23,8 +23,11 @@ from modules.team_cabinet.presentation.serializers import (
     PlanFactSerializer,
     TodayBoardSerializer,
     board_to_dict,
+    funnel_to_dict,
+    losses_to_dict,
     member_card_to_dict,
     plan_fact_to_dict,
+    score_history_to_dict,
     team_report_to_dict,
 )
 from platform_core.presentation.tenancy import TenantScopedAPIView
@@ -72,6 +75,10 @@ class _Scoped(TenantScopedAPIView):
     def _timezone(self) -> str:
         return str(company_settings(self.tenant.tenant_id)["timezone"])
 
+    def _currency(self) -> str:
+        """Money in cabinet responses is summed in this currency only."""
+        return str(company_settings(self.tenant.tenant_id)["currency"])
+
     def _department(self, request: Request) -> UUID | None:
         raw = request.query_params.get("department_id")
         if not raw:
@@ -111,7 +118,7 @@ class TeamTodayView(_Scoped):
             thresholds=self._thresholds(),
             department_id=self._department(request),
         )
-        return Response(board_to_dict(board))
+        return Response({**board_to_dict(board), "currency": self._currency()})
 
 
 class TeamInactivityView(_Scoped):
@@ -134,7 +141,7 @@ class TeamInactivityView(_Scoped):
             thresholds=self._thresholds(),
             department_id=self._department(request),
         )
-        return Response(board_to_dict(board))
+        return Response({**board_to_dict(board), "currency": self._currency()})
 
 
 _MONTH = OpenApiParameter(
@@ -171,7 +178,7 @@ class TeamPlanFactView(_Scoped):
             timezone_name=timezone_name,
             department_id=self._department(request),
         )
-        return Response(plan_fact_to_dict(plan_fact))
+        return Response({**plan_fact_to_dict(plan_fact), "currency": self._currency()})
 
 
 _DATE_FROM = OpenApiParameter("date_from", str, OpenApiParameter.QUERY, description="YYYY-MM-DD")
@@ -215,7 +222,7 @@ class TeamMemberCardView(_Scoped):
         card = team_cabinet_service().member_card(
             self.principal(), user_id, start=start, end=end, timezone_name=timezone_name
         )
-        return Response(member_card_to_dict(card))
+        return Response({**member_card_to_dict(card), "currency": self._currency()})
 
 
 _PERIOD = OpenApiParameter(
@@ -269,7 +276,7 @@ class TeamReportsView(_Scoped):
             timezone_name=timezone_name,
             department_id=self._department(request),
         )
-        data = team_report_to_dict(report)
+        data = {**team_report_to_dict(report), "currency": self._currency()}
         data["period"] = period
         if q.get("export") != "csv":
             return Response(data)
@@ -282,3 +289,136 @@ class TeamReportsView(_Scoped):
         name = f"team-report-{period}-{start.isoformat()}.csv"
         response["Content-Disposition"] = f'attachment; filename="{name}"'
         return response
+
+
+def _range(request: Request, timezone_name: str, default_days: int) -> tuple[date, date]:
+    today = datetime.now(ZoneInfo(timezone_name)).date()
+    end = _date(request.query_params.get("date_to"), today)
+    start = _date(request.query_params.get("date_from"), end - timedelta(days=default_days - 1))
+    if start > end or (end - start).days > _MAX_DAYS:
+        raise DomainValidationError("Period must be 1 to 366 days, start before end.")
+    return start, end
+
+
+_PIPELINE = OpenApiParameter(
+    "pipeline_id",
+    str,
+    OpenApiParameter.QUERY,
+    description="Pipeline (default: the department's default, else the company default).",
+)
+_STALE_DAYS = OpenApiParameter(
+    "stale_days",
+    int,
+    OpenApiParameter.QUERY,
+    description="An open deal is stale after this many days on its stage (1-365, default 14).",
+)
+_DEFAULT_STALE_DAYS = 14
+
+
+class TeamFunnelView(_Scoped):
+    @extend_schema(
+        tags=_TAGS,
+        operation_id="team_funnel",
+        summary="Funnel: stage conversion, stage age and the bottleneck",
+        description=(
+            "Stages of one pipeline. Now: open deals on each stage, their amount (company "
+            "currency only), the median days since they entered the stage and how many sit "
+            "there longer than `stale_days`. For the period (default: last 30 days): "
+            "`reached` — deals that entered the stage in the period (creation on the stage "
+            "or a move to it), `moved_on` — of those, how many later reached a later stage or "
+            "won, `conversion` = moved_on / reached; `reached_previous` — the same for the "
+            "previous period of equal length. Bottleneck: the open stage with the lowest "
+            "conversion among stages with at least 3 deals reached, else the one with the "
+            "most stale deals. Also won/lost closings in the period and the previous one. "
+            "Needs team_cabinet.view; a head of sales sees their department's deals."
+        ),
+        parameters=[_TENANT_HEADER, _PIPELINE, _DATE_FROM, _DATE_TO, _STALE_DAYS, _DEPARTMENT],
+        responses=None,
+    )
+    def get(self, request: Request) -> Response:
+        timezone_name = self._timezone()
+        start, end = _range(request, timezone_name, 30)
+        raw_pipeline = request.query_params.get("pipeline_id")
+        raw_stale = request.query_params.get("stale_days")
+        try:
+            pipeline_id = UUID(raw_pipeline) if raw_pipeline else None
+            stale_days = int(raw_stale) if raw_stale else _DEFAULT_STALE_DAYS
+        except ValueError as exc:
+            raise DomainValidationError("pipeline_id or stale_days is invalid.") from exc
+        if not 1 <= stale_days <= 365:
+            raise DomainValidationError("stale_days must be 1 to 365.")
+        report = team_cabinet_service().funnel(
+            self.principal(),
+            start=start,
+            end=end,
+            timezone_name=timezone_name,
+            stale_days=stale_days,
+            pipeline_id=pipeline_id,
+            department_id=self._department(request),
+        )
+        return Response({**funnel_to_dict(report), "currency": self._currency()})
+
+
+class TeamLossesView(_Scoped):
+    @extend_schema(
+        tags=_TAGS,
+        operation_id="team_losses",
+        summary="Losses: loss reasons, meeting cancellations and no-shows, lead response",
+        description=(
+            "For the period (default: last 90 days) and per month in the company timezone: "
+            "deals closed as lost by loss reason (the company list, else the free-text reason, "
+            "else «Причина не указана»); meetings cancelled by cancel reason and no-shows by "
+            "no-show reason (both by the meeting's start time); counts for the previous period "
+            "of equal length. Lead response: leads created in the period, how many got a first "
+            "response (the earliest activity on the lead, or its qualification, "
+            "disqualification, conversion or edit by a person) and the median minutes to it, "
+            "with the count within 15 and 60 minutes. Needs team_cabinet.view; a head of sales "
+            "sees their department."
+        ),
+        parameters=[_TENANT_HEADER, _DATE_FROM, _DATE_TO, _DEPARTMENT],
+        responses=None,
+    )
+    def get(self, request: Request) -> Response:
+        timezone_name = self._timezone()
+        start, end = _range(request, timezone_name, 90)
+        report = team_cabinet_service().losses(
+            self.principal(),
+            start=start,
+            end=end,
+            timezone_name=timezone_name,
+            department_id=self._department(request),
+        )
+        return Response(losses_to_dict(report))
+
+
+class TeamMemberScoresView(_Scoped):
+    @extend_schema(
+        tags=_TAGS,
+        operation_id="team_member_scores",
+        summary="Day score history of one manager",
+        description=(
+            "The day score (0-100, grade 5/4/3/2) for every day of the period (default: last "
+            "30 days), computed with the Today board rule from that day's calls, meetings and "
+            "payments and the month's plan and sales up to that day. Open and overdue tasks "
+            "are as they stood at the end of the day; cancelled tasks are left out because "
+            "their cancellation time is not stored. `points` is null with reason `silent` (no "
+            "activity), `absent` (planned absence), or for days not yet over. Needs "
+            "team_cabinet.view; a head of sales sees only their department."
+        ),
+        parameters=[_TENANT_HEADER, _DATE_FROM, _DATE_TO],
+        responses=None,
+    )
+    def get(self, request: Request, user_id: UUID) -> Response:
+        timezone_name = self._timezone()
+        start, end = _range(request, timezone_name, 30)
+        if (end - start).days > 92:
+            raise DomainValidationError("Score history covers at most 93 days.")
+        history = team_cabinet_service().score_history(
+            self.principal(),
+            user_id,
+            start=start,
+            end=end,
+            timezone_name=timezone_name,
+            thresholds=self._thresholds(),
+        )
+        return Response(score_history_to_dict(history))

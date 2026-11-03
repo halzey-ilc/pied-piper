@@ -4,7 +4,14 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Protocol
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
+from modules.team_cabinet.domain.analytics import (
+    LeadResponse,
+    MeetingReasons,
+    ReasonCount,
+    StageStat,
+)
 from modules.team_cabinet.domain.board import Member, RawDay
 from modules.team_cabinet.domain.period import Discipline, PeriodMetrics
 
@@ -65,3 +72,42 @@ class CabinetReader(Protocol):
     ) -> dict[UUID, Discipline]:
         """Current CRM tails per user."""
         ...
+
+
+class AnalyticsReader(Protocol):
+    """Funnel, losses and history read from the tenant's records."""
+
+    def pipeline_for(
+        self, pipeline_id: UUID | None, department_id: UUID | None
+    ) -> tuple[UUID, str, UUID | None] | None: ...
+
+    def funnel_stages(
+        self,
+        pipeline_id: UUID,
+        owner_ids: list[UUID] | None,
+        *,
+        period: tuple[datetime, datetime],
+        previous: tuple[datetime, datetime],
+        now: datetime,
+        stale_days: int,
+    ) -> tuple[list[StageStat], dict[str, int]]: ...
+
+    def lost_reasons(
+        self, owner_ids: list[UUID] | None, start: datetime, end: datetime, tz: ZoneInfo
+    ) -> tuple[list[ReasonCount], int]: ...
+
+    def lost_count(self, owner_ids: list[UUID] | None, start: datetime, end: datetime) -> int: ...
+
+    def meeting_reasons(
+        self, owner_ids: list[UUID] | None, start: datetime, end: datetime, tz: ZoneInfo
+    ) -> MeetingReasons: ...
+
+    def meeting_counts(
+        self, owner_ids: list[UUID] | None, start: datetime, end: datetime
+    ) -> tuple[int, int]: ...
+
+    def lead_response(
+        self, owner_ids: list[UUID] | None, start: datetime, end: datetime
+    ) -> LeadResponse: ...
+
+    def tasks_as_of(self, user_id: UUID, day_end: datetime, day: date) -> tuple[int, int]: ...

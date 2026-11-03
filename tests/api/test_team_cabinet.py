@@ -131,8 +131,22 @@ def test_plan_fact_plan_versus_actual(
         format="json",
     )
     assert paid.status_code == 201, paid.content
+    # A payment in another currency is never added to the company-currency money figures.
+    other = rep.post(
+        "/api/v1/payments/",
+        {
+            "deal_id": deal_id,
+            "amount": "50.00",
+            "currency": "EUR",
+            "kind": "additional",
+            "paid_on": f"{month}-16",
+        },
+        format="json",
+    )
+    assert other.status_code == 201, other.content
 
     pf = director.get(f"/api/v1/team/plan-fact/?month={month}").json()
+    assert len(pf["currency"]) == 3 and pf["currency"] != "EUR"
     row = next(r for r in pf["rows"] if r["username"] == "rep")
     assert row["plan_sales"] == "5.00"
     assert row["sales_actual"] == 1

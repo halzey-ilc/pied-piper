@@ -53,6 +53,7 @@ class MeetingRecord(models.Model):
     reminders = models.JSONField(default=list)
     outcome = models.TextField(null=True, blank=True)  # noqa: DJ001
     cancel_reason = models.CharField(max_length=500, null=True, blank=True)  # noqa: DJ001
+    outcome_reason = models.CharField(max_length=200, null=True, blank=True)  # noqa: DJ001
     version = models.PositiveIntegerField(default=1)
     created_at = models.DateTimeField()
     updated_at = models.DateTimeField(auto_now=True)

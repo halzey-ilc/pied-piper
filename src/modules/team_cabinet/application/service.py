@@ -15,7 +15,14 @@ from uuid import UUID
 from zoneinfo import ZoneInfo
 
 from modules.access_control.domain.rbac import AccessPolicy, Permission, Principal, Scope
-from modules.team_cabinet.application.ports import CabinetReader, TeamRoster
+from modules.team_cabinet.application.ports import AnalyticsReader, CabinetReader, TeamRoster
+from modules.team_cabinet.domain.analytics import (
+    DayScorePoint,
+    FunnelReport,
+    LossReport,
+    ScoreHistory,
+    finish_funnel,
+)
 from modules.team_cabinet.domain.board import (
     DepartmentTotals,
     ManagerDay,
@@ -77,10 +84,12 @@ class TeamCabinetService:
         roster: TeamRoster,
         reader: CabinetReader,
         policy: AccessPolicy | None = None,
+        analytics: AnalyticsReader | None = None,
     ) -> None:
         self._roster = roster
         self._reader = reader
         self._policy = policy or AccessPolicy()
+        self._analytics = analytics
 
     def today_board(
         self,
@@ -302,6 +311,192 @@ class TeamCabinetService:
         ]
         return TeamReport(start=start, end=end, department_id=department_id, rows=rows)
 
+    # --- analytics ------------------------------------------------------------
+
+    def _owners(
+        self, principal: Principal, department_id: UUID | None
+    ) -> tuple[list[UUID] | None, UUID | None]:
+        """Whose records the caller analyses: a head of sales — their department; a director —
+        one department (department_id) or the whole company (None = no owner filter)."""
+        scope = self._policy.require(principal, Permission.TEAM_CABINET_VIEW)
+        if scope is not Scope.ALL:
+            department_id = principal.department_id
+        if department_id is None and scope is Scope.ALL:
+            return None, None
+        members = self._roster.members(principal.tenant_id, department_id)
+        return [m.user_id for m in members], department_id
+
+    def _analytics_reader(self) -> AnalyticsReader:
+        if self._analytics is None:  # pragma: no cover - wiring error
+            raise RuntimeError("Analytics reader is not configured.")
+        return self._analytics
+
+    def funnel(
+        self,
+        principal: Principal,
+        *,
+        start: date,
+        end: date,
+        timezone_name: str,
+        stale_days: int,
+        pipeline_id: UUID | None = None,
+        department_id: UUID | None = None,
+    ) -> FunnelReport:
+        """Stages of one pipeline: open deals with money and age now; deals that entered each
+        stage in [start, end] (and in the previous period of equal length), how many of them
+        moved on, the conversion and the bottleneck."""
+        owners, department_id = self._owners(principal, department_id)
+        reader = self._analytics_reader()
+        found = reader.pipeline_for(pipeline_id, department_id)
+        scope = self._policy.scope_for(principal, Permission.TEAM_CABINET_VIEW)
+        if found is None or (
+            scope is not Scope.ALL and found[2] not in (None, principal.department_id)
+        ):
+            raise NotFoundError("Pipeline not found.")
+        tz = ZoneInfo(timezone_name)
+        period, previous, prev_start, prev_end = _windows(start, end, tz)
+        stages, totals = reader.funnel_stages(
+            found[0],
+            owners,
+            period=period,
+            previous=previous,
+            now=datetime.now(tz),
+            stale_days=stale_days,
+        )
+        finish_funnel(stages)
+        return FunnelReport(
+            pipeline_id=found[0],
+            pipeline_name=found[1],
+            start=start,
+            end=end,
+            previous_start=prev_start,
+            previous_end=prev_end,
+            stale_days=stale_days,
+            stages=stages,
+            won=totals["won"],
+            lost=totals["lost"],
+            won_previous=totals["won_previous"],
+            lost_previous=totals["lost_previous"],
+        )
+
+    def losses(
+        self,
+        principal: Principal,
+        *,
+        start: date,
+        end: date,
+        timezone_name: str,
+        department_id: UUID | None = None,
+    ) -> LossReport:
+        """Lost deals by reason and month, meeting cancellations and no-shows by reason, and
+        how fast new leads got a first response — for the period and the previous one."""
+        owners, _ = self._owners(principal, department_id)
+        reader = self._analytics_reader()
+        tz = ZoneInfo(timezone_name)
+        (p_from, p_to), (q_from, q_to), prev_start, prev_end = _windows(start, end, tz)
+        reasons, lost = reader.lost_reasons(owners, p_from, p_to, tz)
+        meetings = reader.meeting_reasons(owners, p_from, p_to, tz)
+        cancelled_prev, no_show_prev = reader.meeting_counts(owners, q_from, q_to)
+        months = []
+        cursor = start.replace(day=1)
+        while cursor <= end:
+            months.append(f"{cursor.year:04d}-{cursor.month:02d}")
+            cursor = (cursor + timedelta(days=32)).replace(day=1)
+        return LossReport(
+            start=start,
+            end=end,
+            previous_start=prev_start,
+            previous_end=prev_end,
+            months=months,
+            lost_deals=lost,
+            lost_previous=reader.lost_count(owners, q_from, q_to),
+            loss_reasons=reasons,
+            meetings_total=meetings.total,
+            meetings_cancelled=meetings.cancelled,
+            meetings_no_show=meetings.no_show,
+            cancelled_previous=cancelled_prev,
+            no_show_previous=no_show_prev,
+            cancel_reasons=meetings.cancel_reasons,
+            no_show_reasons=meetings.no_show_reasons,
+            lead_response=reader.lead_response(owners, p_from, p_to),
+        )
+
+    def score_history(
+        self,
+        principal: Principal,
+        user_id: UUID,
+        *,
+        start: date,
+        end: date,
+        timezone_name: str,
+        thresholds: TrafficThresholds,
+    ) -> ScoreHistory:
+        """The day score of one member for every day of the period, computed with the same
+        rule as today's board. Meetings, payments and sales are the day's own; open and overdue
+        tasks are as they stood at the end of that day. No score on a silent day, a planned
+        absence or a day not yet over."""
+        scope = self._policy.require(principal, Permission.TEAM_CABINET_VIEW)
+        member = next(
+            (m for m in self._roster.members(principal.tenant_id, None) if m.user_id == user_id),
+            None,
+        )
+        if member is None or (
+            scope is not Scope.ALL and member.department_id != principal.department_id
+        ):
+            raise NotFoundError("No such member in your department.")
+        reader = self._analytics_reader()
+        tz = ZoneInfo(timezone_name)
+        now = datetime.now(tz)
+        points: list[DayScorePoint] = []
+        day = start
+        while day <= end:
+            points.append(self._day_point(member, day, now, tz, thresholds, reader))
+            day += timedelta(days=1)
+        return ScoreHistory(user_id=user_id, start=start, end=end, points=points, generated_at=now)
+
+    def _day_point(
+        self,
+        member: Member,
+        day: date,
+        now: datetime,
+        tz: ZoneInfo,
+        thresholds: TrafficThresholds,
+        reader: AnalyticsReader,
+    ) -> DayScorePoint:
+        if day > now.date():
+            return DayScorePoint(day=day, points=None, grade=None, reason=None)
+        day_start = datetime(day.year, day.month, day.day, tzinfo=tz)
+        day_end = min(day_start + timedelta(days=1), now)
+        uid = member.user_id
+        raw = self._reader.day_metrics(
+            [uid],
+            day_start=day_start,
+            day_end=day_end,
+            now=day_end,
+            outcome_cutoff=day_end - timedelta(minutes=thresholds.meeting_outcome_minutes),
+            morning_cutoff=day_start + timedelta(hours=thresholds.morning_cutoff_hour),
+            today=day,
+        ).get(uid)
+        absent = self._reader.absent_user_ids([uid], day)
+        point = member_day(member, raw, absent)
+        point.open_tasks, point.overdue_tasks = reader.tasks_as_of(uid, day_end, day)
+        if point.on_absence:
+            return DayScorePoint(day=day, points=None, grade=None, reason="absent")
+        if not point.has_activity:
+            return DayScorePoint(day=day, points=None, grade=None, reason="silent")
+        month = f"{day.year:04d}-{day.month:02d}"
+        point.plan_sales = self._reader.monthly_sales_targets([uid], month).get(uid)
+        point.sales_month = self._reader.monthly_sales_counts([uid], day.replace(day=1), day).get(
+            uid, 0
+        )
+        score = evaluate_day_score(
+            point,
+            days_elapsed=day.day,
+            days_total=calendar.monthrange(day.year, day.month)[1],
+            thresholds=ScoreThresholds(),
+        )
+        return DayScorePoint(day=day, points=score.points, grade=score.grade, reason=None)
+
     @staticmethod
     def _score(day: ManagerDay, now_hour: int, thresholds: TrafficThresholds) -> ManagerDay:
         # No working-day calendar yet, so every day is treated as a working day.
@@ -336,3 +531,20 @@ def member_day(member: Member, raw: RawDay | None, absent: set[UUID]) -> Manager
         tasks_done_today=r.tasks_done_today,
         on_absence=member.user_id in absent,
     )
+
+
+def _windows(
+    start: date, end: date, tz: ZoneInfo
+) -> tuple[tuple[datetime, datetime], tuple[datetime, datetime], date, date]:
+    """[start, end] in company-local days and the previous period of equal length, as
+    half-open datetime ranges, plus the previous period's dates."""
+    length = (end - start).days + 1
+    prev_end = start - timedelta(days=1)
+    prev_start = prev_end - timedelta(days=length - 1)
+
+    def local(day: date) -> datetime:
+        return datetime(day.year, day.month, day.day, tzinfo=tz)
+
+    period = (local(start), local(end) + timedelta(days=1))
+    previous = (local(prev_start), local(prev_end) + timedelta(days=1))
+    return period, previous, prev_start, prev_end

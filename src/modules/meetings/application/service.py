@@ -207,9 +207,11 @@ class MeetingService:
         new_start: datetime | None = None,
         new_end: datetime | None = None,
         comment: str | None = None,
+        reason: str | None = None,
     ) -> Meeting:
         """Record how a scheduled meeting turned out: held / no_show / rescheduled
-        (with or without a new date) / cancelled."""
+        (with or without a new date) / cancelled. ``reason`` — why the client did not
+        come (no_show) or why the meeting was cancelled."""
         with self._uow:
             meeting = self._load_for_write(principal, meeting_id)
             version = meeting.version
@@ -217,9 +219,9 @@ class MeetingService:
             if outcome == "held":
                 event = meeting.complete(comment)
             elif outcome == "no_show":
-                event = meeting.mark_no_show(comment)
+                event = meeting.mark_no_show(comment, reason)
             elif outcome == "cancelled":
-                event = meeting.cancel(comment or "Cancelled.")
+                event = meeting.cancel(reason or comment or "Cancelled.")
             elif outcome == "rescheduled":
                 if new_start is not None and new_end is not None:
                     event = meeting.reschedule(new_start, new_end)

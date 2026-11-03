@@ -7,6 +7,14 @@ from typing import Any
 from rest_framework import serializers
 
 from modules.team_cabinet.application.service import MemberCard, TeamReport, TodayBoard
+from modules.team_cabinet.domain.analytics import (
+    FunnelReport,
+    LeadResponse,
+    LossReport,
+    ReasonCount,
+    ScoreHistory,
+    StageStat,
+)
 from modules.team_cabinet.domain.board import DayScore, DepartmentTotals, ManagerDay
 from modules.team_cabinet.domain.period import Discipline, PeriodMetrics
 from modules.team_cabinet.domain.plan_fact import PlanFact, PlanFactRow
@@ -329,4 +337,87 @@ def board_to_dict(board: TodayBoard) -> dict[str, Any]:
         "as_of": board.as_of.isoformat(),
         "managers": [manager_day_to_dict(m) for m in board.managers],
         "totals": totals_to_dict(board.totals),
+    }
+
+
+def stage_to_dict(stage: StageStat) -> dict[str, Any]:
+    return {
+        "stage_id": stage.stage_id,
+        "name": stage.name,
+        "kind": stage.kind,
+        "position": stage.position,
+        "open_deals": stage.open_deals,
+        "open_amount": _dec(stage.open_amount),
+        "median_age_days": _dec(stage.median_age_days),
+        "stale_deals": stage.stale_deals,
+        "reached": stage.reached,
+        "reached_previous": stage.reached_previous,
+        "moved_on": stage.moved_on,
+        "conversion": _ratio(stage.conversion),
+        "is_bottleneck": stage.is_bottleneck,
+    }
+
+
+def funnel_to_dict(report: FunnelReport) -> dict[str, Any]:
+    return {
+        "pipeline_id": report.pipeline_id,
+        "pipeline_name": report.pipeline_name,
+        "date_from": report.start,
+        "date_to": report.end,
+        "previous_from": report.previous_start,
+        "previous_to": report.previous_end,
+        "stale_days": report.stale_days,
+        "stages": [stage_to_dict(s) for s in report.stages],
+        "won": report.won,
+        "lost": report.lost,
+        "won_previous": report.won_previous,
+        "lost_previous": report.lost_previous,
+    }
+
+
+def reason_to_dict(reason: ReasonCount) -> dict[str, Any]:
+    return {"reason": reason.reason, "total": reason.total, "by_month": dict(reason.by_month)}
+
+
+def lead_response_to_dict(lead: LeadResponse) -> dict[str, Any]:
+    return {
+        "leads": lead.leads,
+        "responded": lead.responded,
+        "median_minutes": _dec(lead.median_minutes),
+        "within_15_min": lead.within_15_min,
+        "within_60_min": lead.within_60_min,
+    }
+
+
+def losses_to_dict(report: LossReport) -> dict[str, Any]:
+    return {
+        "date_from": report.start,
+        "date_to": report.end,
+        "previous_from": report.previous_start,
+        "previous_to": report.previous_end,
+        "months": report.months,
+        "lost_deals": report.lost_deals,
+        "lost_previous": report.lost_previous,
+        "loss_reasons": [reason_to_dict(r) for r in report.loss_reasons],
+        "meetings_total": report.meetings_total,
+        "meetings_cancelled": report.meetings_cancelled,
+        "meetings_no_show": report.meetings_no_show,
+        "cancelled_previous": report.cancelled_previous,
+        "no_show_previous": report.no_show_previous,
+        "cancel_reasons": [reason_to_dict(r) for r in report.cancel_reasons],
+        "no_show_reasons": [reason_to_dict(r) for r in report.no_show_reasons],
+        "lead_response": lead_response_to_dict(report.lead_response),
+    }
+
+
+def score_history_to_dict(history: ScoreHistory) -> dict[str, Any]:
+    return {
+        "user_id": history.user_id,
+        "date_from": history.start,
+        "date_to": history.end,
+        "generated_at": history.generated_at,
+        "points": [
+            {"day": p.day, "points": p.points, "grade": p.grade, "reason": p.reason}
+            for p in history.points
+        ],
     }
