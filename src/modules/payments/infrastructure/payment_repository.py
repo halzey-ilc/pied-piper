@@ -1,4 +1,7 @@
-"""PaymentRepository adapter and the aggregates behind the sales metrics."""
+"""PaymentRepository adapter and the aggregates behind the sales metrics.
+
+Aggregates read CONFIRMED payments only (``PaymentRecord.counted``); a payment waiting
+for verification or rejected never counts as money, a sale or a prepayment."""
 
 from __future__ import annotations
 
@@ -17,9 +20,19 @@ from django.db.models import (
     When,
 )
 
-from modules.payments.application.ports import PaymentFilter, PaymentVisibility
-from modules.payments.domain.payment import Payment, PaymentKind
-from modules.payments.infrastructure.models import PaymentRecord
+from modules.payments.application.ports import (
+    DealPaymentTotals,
+    PaymentFilter,
+    PaymentVisibility,
+)
+from modules.payments.domain.payment import (
+    Payment,
+    PaymentKind,
+    PaymentStatus,
+    VerificationMethod,
+)
+from modules.payments.domain.receipt import Receipt, ReceiptInfo
+from modules.payments.infrastructure.models import PaymentReceiptRecord, PaymentRecord
 from modules.payments.infrastructure.sales import deal_sales, new_clients
 from shared.domain.value_objects import Money
 
@@ -45,6 +58,15 @@ def _to_domain(row: PaymentRecord) -> Payment:
         reference=row.reference,
         team_id=row.team_id,
         created_at=row.created_at,
+        status=PaymentStatus(row.status),
+        receipt_id=row.receipt_id,
+        close_sale=row.close_sale,
+        verified_at=row.verified_at,
+        verified_by_user_id=row.verified_by_user_id,
+        verification_method=(
+            VerificationMethod(row.verification_method) if row.verification_method else None
+        ),
+        rejection_reason=row.rejection_reason,
     )
 
 
@@ -55,8 +77,13 @@ class DjangoPaymentRepository:
     def _qs(self) -> QuerySet[PaymentRecord]:
         return PaymentRecord.objects.using(self.using)
 
-    def _visible(self, visibility: PaymentVisibility) -> QuerySet[PaymentRecord]:
-        qs = self._qs()
+    def _counted(self) -> QuerySet[PaymentRecord]:
+        return PaymentRecord.counted.using(self.using)
+
+    def _visible(
+        self, visibility: PaymentVisibility, *, counted: bool = True
+    ) -> QuerySet[PaymentRecord]:
+        qs = self._counted() if counted else self._qs()
         if visibility.department_id is not None:
             qs = qs.filter(team_id=visibility.department_id)
         if visibility.owner_user_id is None:
@@ -69,7 +96,9 @@ class DjangoPaymentRepository:
     def _filtered(
         self, visibility: PaymentVisibility, filters: PaymentFilter
     ) -> QuerySet[PaymentRecord]:
-        qs = self._visible(visibility)
+        qs = self._visible(visibility, counted=False)
+        if filters.status is not None:
+            qs = qs.filter(status=filters.status.value)
         if filters.deal_id is not None:
             qs = qs.filter(deal_id=filters.deal_id)
         if filters.customer_id is not None:
@@ -101,6 +130,64 @@ class DjangoPaymentRepository:
             owner_user_id=payment.owner_user_id,
             team_id=payment.team_id,
             created_at=payment.created_at,
+            status=payment.status.value,
+            receipt_id=payment.receipt_id,
+            close_sale=payment.close_sale,
+            verified_at=payment.verified_at,
+            verified_by_user_id=payment.verified_by_user_id,
+            verification_method=(
+                payment.verification_method.value if payment.verification_method else None
+            ),
+            rejection_reason=payment.rejection_reason,
+        )
+
+    def save(self, payment: Payment) -> None:
+        self._qs().filter(id=payment.id).update(
+            status=payment.status.value,
+            verified_at=payment.verified_at,
+            verified_by_user_id=payment.verified_by_user_id,
+            verification_method=(
+                payment.verification_method.value if payment.verification_method else None
+            ),
+            rejection_reason=payment.rejection_reason,
+        )
+
+    def deal_totals(self, deal_id: UUID, currency: str) -> DealPaymentTotals:
+        rows = self._qs().filter(deal_id=deal_id)
+        confirmed = Q(status=PaymentStatus.CONFIRMED.value)
+        paid = Q(is_refund=False)
+        same = Q(currency=currency)
+        agg = rows.aggregate(
+            received=Sum("amount", filter=confirmed & paid & same),
+            refunded=Sum("amount", filter=confirmed & Q(is_refund=True) & same),
+            pending=Sum(
+                "amount", filter=Q(status=PaymentStatus.PENDING_VERIFICATION.value) & paid & same
+            ),
+            payments=Count("id", filter=paid),
+            confirmed_n=Count("id", filter=confirmed & paid),
+            pending_n=Count("id", filter=Q(status=PaymentStatus.PENDING_VERIFICATION.value) & paid),
+            rejected_n=Count("id", filter=Q(status=PaymentStatus.REJECTED.value) & paid),
+            prepayments=Count("id", filter=confirmed & paid & Q(kind="prepayment")),
+        )
+        refunded = agg["refunded"] or Decimal(0)
+        return DealPaymentTotals(
+            confirmed_received=(agg["received"] or Decimal(0)) - refunded,
+            pending_amount=agg["pending"] or Decimal(0),
+            refunded=refunded,
+            payments_count=agg["payments"] or 0,
+            confirmed_count=agg["confirmed_n"] or 0,
+            pending_count=agg["pending_n"] or 0,
+            rejected_count=agg["rejected_n"] or 0,
+            prepayments_count=agg["prepayments"] or 0,
+            currencies=tuple(
+                sorted(
+                    set(
+                        rows.exclude(status=PaymentStatus.REJECTED.value).values_list(
+                            "currency", flat=True
+                        )
+                    )
+                )
+            ),
         )
 
     def get(self, payment_id: UUID) -> Payment | None:
@@ -178,6 +265,62 @@ class DjangoPaymentRepository:
         if not deal_ids:
             return {}
         rows = (
-            self._qs().filter(deal_id__in=deal_ids).values("deal_id").annotate(total=Sum(_SIGNED))
+            self._counted()
+            .filter(deal_id__in=deal_ids)
+            .values("deal_id")
+            .annotate(total=Sum(_SIGNED))
         )
         return {row["deal_id"]: row["total"] or Decimal(0) for row in rows}
+
+
+class DjangoReceiptRepository:
+    def __init__(self, using: str) -> None:
+        self.using = using
+
+    def add(self, receipt: Receipt) -> None:
+        PaymentReceiptRecord.objects.using(self.using).create(
+            id=receipt.id,
+            content=receipt.content,
+            content_type=receipt.content_type,
+            size=receipt.size,
+            filename=receipt.filename,
+            sha256=receipt.sha256,
+            uploaded_by_user_id=receipt.uploaded_by_user_id,
+            uploaded_at=receipt.uploaded_at,
+        )
+
+    def get(self, receipt_id: UUID) -> Receipt | None:
+        row = PaymentReceiptRecord.objects.using(self.using).filter(id=receipt_id).first()
+        if row is None:
+            return None
+        return Receipt(
+            id=row.id,
+            content=bytes(row.content),
+            content_type=row.content_type,
+            size=row.size,
+            filename=row.filename,
+            sha256=row.sha256,
+            uploaded_by_user_id=row.uploaded_by_user_id,
+            uploaded_at=row.uploaded_at,
+        )
+
+    def info(self, receipt_ids: list[UUID]) -> dict[UUID, ReceiptInfo]:
+        if not receipt_ids:
+            return {}
+        rows = (
+            PaymentReceiptRecord.objects.using(self.using)
+            .filter(id__in=receipt_ids)
+            .defer("content")
+        )
+        return {
+            row.id: ReceiptInfo(
+                id=row.id,
+                content_type=row.content_type,
+                size=row.size,
+                filename=row.filename,
+                sha256=row.sha256,
+                uploaded_by_user_id=row.uploaded_by_user_id,
+                uploaded_at=row.uploaded_at,
+            )
+            for row in rows
+        }

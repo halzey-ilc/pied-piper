@@ -190,7 +190,7 @@ class DjangoCabinetReader:
 
     def _add_payments(self, out: dict[UUID, RawDay], user_ids: list[UUID], today: date) -> None:
         rows = (
-            PaymentRecord.objects.using(self.using)
+            PaymentRecord.counted.using(self.using)
             .filter(seller_user_id__in=user_ids, paid_on=today, is_refund=False)
             .values("seller_user_id")
             .annotate(n=Count("id"), total=Sum("amount", filter=Q(currency=self.currency)))
@@ -237,7 +237,7 @@ class DjangoCabinetReader:
             output_field=DecimalField(max_digits=18, decimal_places=2),
         )
         rows = (
-            PaymentRecord.objects.using(self.using)
+            PaymentRecord.counted.using(self.using)
             .filter(
                 seller_user_id__in=user_ids,
                 paid_on__gte=month_start,
@@ -334,7 +334,7 @@ class DjangoCabinetReader:
             out[row["author_user_id"]].stage_changes += row["n"]
             bump(row["author_user_id"], row["day"], "stage_changes", row["n"])
 
-        payments = PaymentRecord.objects.using(self.using).filter(
+        payments = PaymentRecord.counted.using(self.using).filter(
             seller_user_id__in=user_ids, paid_on__gte=start, paid_on__lte=end, is_refund=False
         )
         for row in payments.values("seller_user_id", "paid_on").annotate(

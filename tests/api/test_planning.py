@@ -9,6 +9,7 @@ import pytest
 from rest_framework.test import APIClient
 
 from modules.access_control.domain.rbac import Role
+from tests.api.payment_helpers import pay_confirmed
 from tests.conftest import ALL_DATABASES, TenantFixture
 
 pytestmark = pytest.mark.django_db(databases=ALL_DATABASES)
@@ -153,6 +154,8 @@ def test_money_plan_currency_and_actual_in_that_currency(
     client_for: Callable[..., APIClient],
 ) -> None:
     client = client_for(make_user("owner", tenant=tenants["acme"]), "acme")
+    # Payments count once confirmed by someone other than the one who recorded them.
+    verifier = client_for(make_user("director", tenant=tenants["acme"], role=Role.DIRECTOR), "acme")
     # Count plans carry no currency; money plans default to the company currency.
     assert _set_plan(client, target="10").json()["currency"] is None
     default = _set_plan(client, metric="monthly_turnover", target="1000")
@@ -168,18 +171,15 @@ def test_money_plan_currency_and_actual_in_that_currency(
     # The actual counts only payments in the plan's currency.
     customer = client.post("/api/v1/customers/", {"name": "Acme"}, format="json").json()["id"]
     for amount, currency, day in (("300", "USD", "10"), ("500", "KGS", "11")):
-        paid = client.post(
-            "/api/v1/payments/",
-            {
-                "amount": amount,
-                "currency": currency,
-                "kind": "full",
-                "paid_on": f"2026-11-{day}",
-                "customer_id": customer,
-            },
-            format="json",
+        pay_confirmed(
+            client,
+            verifier,
+            amount=amount,
+            currency=currency,
+            kind="full",
+            paid_on=f"2026-11-{day}",
+            customer_id=customer,
         )
-        assert paid.status_code == 201, paid.content
     progress = client.get(
         "/api/v1/plans/progress/?metric=monthly_turnover&period=2026-11&scope=company"
     ).json()["results"][0]

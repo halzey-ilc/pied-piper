@@ -9,6 +9,7 @@ import pytest
 from rest_framework.test import APIClient
 
 from modules.access_control.domain.rbac import Role
+from tests.api.payment_helpers import pay_confirmed, post_payment
 from tests.conftest import ALL_DATABASES, TenantFixture
 
 pytestmark = pytest.mark.django_db(databases=ALL_DATABASES)
@@ -31,9 +32,7 @@ def _deal(client: APIClient, amount: str) -> str:
 
 
 def _pay(client: APIClient, **body: Any) -> Any:
-    body.setdefault("kind", "prepayment")
-    body.setdefault("paid_on", "2026-11-10")
-    return client.post("/api/v1/payments/", body, format="json")
+    return post_payment(client, **body)
 
 
 def test_register_and_list_payment(
@@ -51,6 +50,8 @@ def test_register_and_list_payment(
     assert body["kind"] == "prepayment" and body["amount"] == "500.00"
     assert body["currency"] == "KGS"  # company default
     assert body["seller_user_id"] == body["owner_user_id"]  # seller defaults to recorder
+    assert body["status"] == "pending_verification"  # counts only once confirmed
+    assert body["receipt"]["content_type"] == "application/pdf"
 
     listed = client.get(f"/api/v1/payments/?deal_id={deal_id}").json()
     assert listed["count"] == 1 and listed["results"][0]["id"] == body["id"]
@@ -79,6 +80,11 @@ def test_sales_metrics_counts_turnover_received_and_debt(
     client_for: Callable[..., APIClient],
 ) -> None:
     client = client_for(make_user("owner", tenant=tenants["acme"]), "acme")
+    verifier = client_for(make_user("director", tenant=tenants["acme"], role=Role.DIRECTOR), "acme")
+
+    def _pay(client: APIClient, **body: Any) -> Any:
+        return pay_confirmed(client, verifier, **body)
+
     _pipeline(client)
     deal1 = _deal(client, "1000")
     deal2 = _deal(client, "2000")

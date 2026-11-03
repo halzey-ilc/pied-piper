@@ -133,7 +133,7 @@ class DjangoPlanActuals:
     def _payments(
         self, start: date, end: date, user_ids: frozenset[UUID] | None
     ) -> QuerySet[PaymentRecord]:
-        qs = PaymentRecord.objects.using(self.using).filter(paid_on__gte=start, paid_on__lte=end)
+        qs = PaymentRecord.counted.using(self.using).filter(paid_on__gte=start, paid_on__lte=end)
         return _scoped(qs, "seller_user_id", user_ids)
 
     def _turnover(

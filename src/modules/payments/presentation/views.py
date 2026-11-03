@@ -1,32 +1,44 @@
 from __future__ import annotations
 
 from datetime import date, datetime
+from urllib.parse import quote
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
+from django.http import HttpResponse
+from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import OpenApiParameter, extend_schema
 from rest_framework import status
+from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.request import Request
 from rest_framework.response import Response
 
 from modules.access_control.domain.rbac import Principal, Role
 from modules.organizations.composition import company_settings
-from modules.payments.application.payment_service import RegisterPayment
+from modules.payments.application.payment_service import (
+    PaymentService,
+    ReceiptUpload,
+    RegisterPayment,
+)
 from modules.payments.application.ports import InvoiceFilter, PaymentFilter
 from modules.payments.application.service import CreateInvoice
 from modules.payments.composition import invoice_service, payment_service
 from modules.payments.domain.invoice import InvoiceStatus
-from modules.payments.domain.payment import PaymentKind
+from modules.payments.domain.payment import Payment, PaymentKind, PaymentStatus
+from modules.payments.domain.receipt import MAX_RECEIPT_BYTES, ReceiptRejectedError
 from modules.payments.presentation.serializers import (
+    DealPaymentSummarySerializer,
     InvoiceCreateSerializer,
     InvoiceListSerializer,
     InvoiceReadSerializer,
     PaymentRecordCreateSerializer,
     PaymentRecordListSerializer,
     PaymentRecordReadSerializer,
+    PaymentRejectSerializer,
     PaymentSerializer,
     SalesMetricsSerializer,
     VoidSerializer,
+    deal_summary_to_dict,
     invoice_to_dict,
     metrics_to_dict,
     payment_to_dict,
@@ -83,6 +95,34 @@ def _uuid(value: str | None) -> UUID | None:
         return None
 
 
+def _payments_to_dicts(
+    service: PaymentService,
+    principal: Principal,
+    payments: list[Payment],
+    *,
+    with_deals: bool = False,
+) -> list[dict[str, object]]:
+    receipts = service.receipt_info(payments)
+    deals = (
+        service.deals([p.deal_id for p in payments if p.deal_id is not None]) if with_deals else {}
+    )
+    return [
+        payment_to_dict(
+            p,
+            receipts.get(p.receipt_id) if p.receipt_id else None,
+            can_verify=(
+                p.status is PaymentStatus.PENDING_VERIFICATION and service.can_verify(principal, p)
+            ),
+            deal=deals.get(p.deal_id) if p.deal_id else None,
+        )
+        for p in payments
+    ]
+
+
+def _one(service: PaymentService, principal: Principal, payment: Payment) -> dict[str, object]:
+    return _payments_to_dicts(service, principal, [payment])[0]
+
+
 def _date(value: str | None) -> date | None:
     if not value:
         return None
@@ -119,21 +159,33 @@ _PAID_FROM = OpenApiParameter(
 _PAID_TO = OpenApiParameter(
     "paid_to", str, OpenApiParameter.QUERY, description="Paid on/before (YYYY-MM-DD)."
 )
+_PAYMENT_STATUS = OpenApiParameter(
+    "status",
+    str,
+    OpenApiParameter.QUERY,
+    description="Filter by verification status.",
+    enum=[s.value for s in PaymentStatus],
+)
 
 
 class PaymentListCreateView(_Scoped):
+    parser_classes = [JSONParser, MultiPartParser, FormParser]
+
     @extend_schema(
         tags=_TAGS,
         operation_id="payments_list",
         summary="List payments",
         description=(
             "Individual payment records (prepayments, instalments, full payments, refunds) "
-            "visible to you. Filter by deal, customer, seller, kind, refund flag and paid-on "
-            "date range; page with limit/offset."
+            "visible to you (and every payment of a deal you can see). Filter by deal, "
+            "customer, seller, kind, refund flag, verification status and paid-on date range; "
+            "page with limit/offset. Each payment carries its status, receipt metadata and "
+            "`can_verify`."
         ),
         parameters=[
             _TENANT_HEADER,
             _DEAL,
+            _PAYMENT_STATUS,
             _CUSTOMER,
             _PAYMENT_KIND,
             _PAID_FROM,
@@ -153,6 +205,7 @@ class PaymentListCreateView(_Scoped):
         kind_value = q.get("kind")
         valid_kinds = {k.value for k in PaymentKind}
         refund = q.get("is_refund")
+        status_value = q.get("status")
         filters = PaymentFilter(
             deal_id=_uuid(q.get("deal_id")),
             customer_id=_uuid(q.get("customer_id")),
@@ -161,32 +214,57 @@ class PaymentListCreateView(_Scoped):
             is_refund=(refund in {"1", "true", "True"}) if refund is not None else None,
             paid_from=_date(q.get("paid_from")),
             paid_to=_date(q.get("paid_to")),
+            status=(
+                PaymentStatus(status_value)
+                if status_value in {s.value for s in PaymentStatus}
+                else None
+            ),
         )
-        page = payment_service().list_payments(
-            self.principal(), filters, limit=limit, offset=offset
+        service = payment_service()
+        principal = self.principal()
+        page = service.list_payments(principal, filters, limit=limit, offset=offset)
+        return Response(
+            {"count": page.total, "results": _payments_to_dicts(service, principal, page.items)}
         )
-        return Response({"count": page.total, "results": [payment_to_dict(p) for p in page.items]})
 
     @extend_schema(
         tags=_TAGS,
         operation_id="payments_register",
         summary="Register a payment",
         description=(
-            "Records a received payment (or a refund) against a deal and/or a customer. "
-            "`kind` is prepayment/additional/full. A `reference` makes registration "
-            "idempotent: repeating it returns the first record instead of a duplicate. "
-            "`currency` defaults to the company currency; `seller_user_id` to the recorder."
+            "Records a received payment (or a refund) against a deal and/or a customer, as "
+            "multipart/form-data with the `receipt` file (PDF/JPEG/PNG/WEBP/HEIC, at most "
+            "10 MB; the type is detected from the file's content). Every payment needs its "
+            "receipt (400 `receipt_required`); a refund may come without one (JSON is fine). "
+            "A payment is created `pending_verification` and counts in sales, KPI, plans and "
+            "reports only once confirmed (automatically, or by the head of sales / director: "
+            "`POST /payments/{id}/confirm/`). A refund is confirmed when recorded. "
+            "`close_sale=true` (recorded from the system stage «Продажа») wins the deal on "
+            "confirmation. `kind` is prepayment/additional/full. A `reference` makes "
+            "registration idempotent. `currency` defaults to the company currency; "
+            "`seller_user_id` to the recorder."
         ),
         parameters=[_TENANT_HEADER],
-        request=PaymentRecordCreateSerializer,
+        request={
+            "multipart/form-data": PaymentRecordCreateSerializer,
+            "application/json": PaymentRecordCreateSerializer,
+        },
         responses={201: PaymentRecordReadSerializer},
     )
     def post(self, request: Request) -> Response:
         serializer = PaymentRecordCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
-        payment = payment_service().register(
-            self.principal(),
+        upload = data.get("receipt")
+        receipt: ReceiptUpload | None = None
+        if upload is not None:
+            if upload.size is not None and upload.size > MAX_RECEIPT_BYTES:
+                raise ReceiptRejectedError("The receipt must be at most 10 MB.")
+            receipt = ReceiptUpload(content=upload.read(), filename=upload.name or "receipt")
+        service = payment_service()
+        principal = self.principal()
+        payment = service.register(
+            principal,
             RegisterPayment(
                 amount=data["amount"],
                 currency=data.get("currency")
@@ -198,9 +276,11 @@ class PaymentListCreateView(_Scoped):
                 seller_user_id=data.get("seller_user_id"),
                 is_refund=data["is_refund"],
                 reference=data.get("reference") or None,
+                close_sale=data["close_sale"],
             ),
+            receipt,
         )
-        return Response(payment_to_dict(payment), status=status.HTTP_201_CREATED)
+        return Response(_one(service, principal, payment), status=status.HTTP_201_CREATED)
 
 
 class PaymentDetailView(_Scoped):
@@ -213,7 +293,135 @@ class PaymentDetailView(_Scoped):
         responses=PaymentRecordReadSerializer,
     )
     def get(self, request: Request, payment_id: UUID) -> Response:
-        return Response(payment_to_dict(payment_service().get(self.principal(), payment_id)))
+        service = payment_service()
+        principal = self.principal()
+        return Response(_one(service, principal, service.get(principal, payment_id)))
+
+
+class PaymentConfirmView(_Scoped):
+    @extend_schema(
+        tags=_TAGS,
+        operation_id="payments_confirm",
+        summary="Confirm a payment by its receipt",
+        description=(
+            "The head of sales (payments of their own department) or the director confirms "
+            "a pending payment after checking its receipt; never the seller or the person "
+            "who recorded it (403). From now on it counts in sales, KPI, plans and reports. "
+            "A payment recorded from «Продажа» (`close_sale`) wins its open deal on the "
+            "pipeline's «Продажа» stage. 409 `payment_already_verified` if already decided."
+        ),
+        parameters=[_TENANT_HEADER],
+        request=None,
+        responses=PaymentRecordReadSerializer,
+    )
+    def post(self, request: Request, payment_id: UUID) -> Response:
+        service = payment_service()
+        principal = self.principal()
+        return Response(_one(service, principal, service.confirm(principal, payment_id)))
+
+
+class PaymentRejectView(_Scoped):
+    @extend_schema(
+        tags=_TAGS,
+        operation_id="payments_reject",
+        summary="Reject a payment",
+        description=(
+            "Same people as confirm. The payment stays in the history with the `reason`, "
+            "never counts, the deal keeps its stage, and the seller gets a notification."
+        ),
+        parameters=[_TENANT_HEADER],
+        request=PaymentRejectSerializer,
+        responses=PaymentRecordReadSerializer,
+    )
+    def post(self, request: Request, payment_id: UUID) -> Response:
+        serializer = PaymentRejectSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        service = payment_service()
+        principal = self.principal()
+        payment = service.reject(principal, payment_id, serializer.validated_data["reason"])
+        return Response(_one(service, principal, payment))
+
+
+class PaymentReceiptView(_Scoped):
+    @extend_schema(
+        tags=_TAGS,
+        operation_id="payments_receipt",
+        summary="Download the payment's receipt",
+        description=(
+            "Streams the uploaded receipt to whoever can see the payment. Shown inline "
+            "(images, PDF); `?download=1` asks the browser to save it."
+        ),
+        parameters=[
+            _TENANT_HEADER,
+            OpenApiParameter("download", str, OpenApiParameter.QUERY, description="1 to save"),
+        ],
+        responses={(200, "application/octet-stream"): OpenApiTypes.BINARY},
+    )
+    def get(self, request: Request, payment_id: UUID) -> HttpResponse:
+        file = payment_service().receipt(self.principal(), payment_id)
+        response = HttpResponse(file.content, content_type=file.content_type)
+        disposition = "attachment" if request.query_params.get("download") == "1" else "inline"
+        # An ASCII fallback for old clients; the real (e.g. Cyrillic) name goes in filename*.
+        stem, dot, ext = file.filename.rpartition(".")
+        ascii_stem = (stem if dot else file.filename).encode("ascii", "ignore").decode().strip()
+        ascii_ext = ext.encode("ascii", "ignore").decode() if dot else ""
+        ascii_name = (ascii_stem or "receipt") + (f".{ascii_ext}" if ascii_ext else "")
+        response["Content-Disposition"] = (
+            f"{disposition}; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(file.filename)}"
+        )
+        response["Content-Length"] = str(len(file.content))
+        response["Cache-Control"] = "private, no-store"
+        response["X-Content-Type-Options"] = "nosniff"
+        response["Content-Security-Policy"] = "default-src 'none'; img-src 'self'; sandbox"
+        return response
+
+
+class PaymentReviewQueueView(_Scoped):
+    @extend_schema(
+        tags=_TAGS,
+        operation_id="payments_review_queue",
+        summary="Payments waiting for verification",
+        description=(
+            "«Проверка оплат»: pending payments you can see, newest first, with the deal "
+            "(title, amount), receipt metadata and `can_verify`. For the head of sales "
+            "(their department) and the director; others get 403."
+        ),
+        parameters=[_TENANT_HEADER, _LIMIT, _OFFSET],
+        responses=PaymentRecordListSerializer,
+    )
+    def get(self, request: Request) -> Response:
+        try:
+            limit = min(max(int(request.query_params.get("limit", 50)), 1), MAX_PAGE_SIZE)
+            offset = max(int(request.query_params.get("offset", 0)), 0)
+        except ValueError:
+            limit, offset = 50, 0
+        service = payment_service()
+        principal = self.principal()
+        page = service.review_queue(principal, limit=limit, offset=offset)
+        return Response(
+            {
+                "count": page.total,
+                "results": _payments_to_dicts(service, principal, page.items, with_deals=True),
+            }
+        )
+
+
+class DealPaymentSummaryView(_Scoped):
+    @extend_schema(
+        tags=_TAGS,
+        operation_id="payments_deal_summary",
+        summary="Money of one deal",
+        description=(
+            "For the deal card: deal amount, confirmed received money (refunds subtracted), "
+            "money waiting for verification, refunds and the client's debt (deal amount "
+            "minus confirmed money), plus payment counts by status — in the deal's currency."
+        ),
+        parameters=[_TENANT_HEADER],
+        responses=DealPaymentSummarySerializer,
+    )
+    def get(self, request: Request, deal_id: UUID) -> Response:
+        summary = payment_service().deal_summary(self.principal(), deal_id)
+        return Response(deal_summary_to_dict(summary))
 
 
 class PaymentMetricsView(_Scoped):

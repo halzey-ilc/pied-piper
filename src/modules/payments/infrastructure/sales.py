@@ -16,6 +16,10 @@ NEW CLIENT — a client whose first payment ever (refunds excluded) falls within
 period, counted once. The client of a payment is its customer, else the customer of
 its deal, else — for a deal without a customer — the deal itself. A separate metric:
 never mixed with the number of sales, payments or the amount of money.
+
+ONLY CONFIRMED PAYMENTS COUNT (owner decision of 03.11.2026): a payment waiting for
+receipt verification or rejected is not money, not a sale and not a new client. The
+sale's date is the paid-on date of the deal's first confirmed payment.
 """
 
 from __future__ import annotations
@@ -97,7 +101,7 @@ def _restricted(
         rows = [row for row in rows if row["seller_user_id"] in wanted]
     if restrict is not None and rows:
         allowed = set(
-            PaymentRecord.objects.using(using)
+            PaymentRecord.counted.using(using)
             .filter(id__in=[row["id"] for row in rows])
             .filter(restrict)
             .values_list("id", flat=True)
@@ -116,7 +120,7 @@ def deal_sales(
 ) -> list[DealSale]:
     """Sales of the period. ``sellers`` keeps those credited to these users; ``restrict``
     keeps those whose first payment matches a row filter (e.g. the caller's visibility)."""
-    payments = PaymentRecord.objects.using(using).filter(deal_id__isnull=False)
+    payments = PaymentRecord.counted.using(using).filter(deal_id__isnull=False)
     sold = [
         row["deal_id"]
         for row in payments.filter(is_refund=False)
@@ -153,7 +157,7 @@ def deal_sales(
 def _with_client(using: str) -> QuerySet[_Annotated]:
     deal_customer = DealRecord.objects.using(using).filter(id=OuterRef("deal_id"))
     return (
-        PaymentRecord.objects.using(using)
+        PaymentRecord.counted.using(using)
         .filter(is_refund=False)
         .annotate(
             client_key=Coalesce(

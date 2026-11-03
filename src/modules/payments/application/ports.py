@@ -3,11 +3,13 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import date
 from decimal import Decimal
+from enum import StrEnum
 from typing import Protocol
 from uuid import UUID
 
 from modules.payments.domain.invoice import Invoice, InvoiceStatus
-from modules.payments.domain.payment import Payment, PaymentKind
+from modules.payments.domain.payment import Payment, PaymentKind, PaymentStatus
+from modules.payments.domain.receipt import Receipt, ReceiptInfo
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,6 +67,7 @@ class PaymentFilter:
     is_refund: bool | None = None
     paid_from: date | None = None
     paid_to: date | None = None
+    status: PaymentStatus | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -85,7 +88,18 @@ class SalesMetrics:
 
 
 class PaymentRepository(Protocol):
+    """Every aggregate below (received, sales, prepayments, new clients, per deal) counts
+    CONFIRMED payments only; listing and ``get`` return payments in any status."""
+
     def add(self, payment: Payment) -> None: ...
+
+    def save(self, payment: Payment) -> None:
+        """Persist the verification fields (status, verifier, method, reason)."""
+        ...
+
+    def deal_totals(self, deal_id: UUID, currency: str) -> DealPaymentTotals:
+        """Totals of one deal's payments in ``currency`` (plus the currencies used)."""
+        ...
 
     def get(self, payment_id: UUID) -> Payment | None: ...
 
@@ -137,3 +151,92 @@ class DealValueLookup(Protocol):
     def values(self, deal_ids: list[UUID]) -> dict[UUID, Decimal]:
         """Deal amount by id, for computing turnover and debt."""
         ...
+
+
+@dataclass(frozen=True, slots=True)
+class DealPaymentTotals:
+    """Money on one deal by verification status (all time, in the deal's records)."""
+
+    confirmed_received: Decimal  # confirmed payments minus refunds
+    pending_amount: Decimal  # payments waiting for verification
+    refunded: Decimal  # refunds
+    payments_count: int  # payments (not refunds) in any status
+    confirmed_count: int
+    pending_count: int
+    rejected_count: int
+    prepayments_count: int  # confirmed prepayments
+    currencies: tuple[str, ...]  # currencies the deal was paid in
+
+
+class ReceiptRepository(Protocol):
+    def add(self, receipt: Receipt) -> None: ...
+
+    def get(self, receipt_id: UUID) -> Receipt | None: ...
+
+    def info(self, receipt_ids: list[UUID]) -> dict[UUID, ReceiptInfo]: ...
+
+
+class ReceiptCheck(StrEnum):
+    MATCHED = "matched"  # the receipt proves this payment (amount, date, recipient)
+    MISMATCH = "mismatch"  # the receipt contradicts the payment
+    NEEDS_MANUAL_REVIEW = "needs_manual_review"  # nothing conclusive: a person checks it
+
+
+@dataclass(frozen=True, slots=True)
+class ReceiptVerdict:
+    check: ReceiptCheck
+    note: str | None = None
+
+
+class ReceiptVerifier(Protocol):
+    """Automatic receipt check. ``MATCHED`` confirms the payment right away (method auto);
+    anything else leaves it for the head of sales / director. Adapters: see
+    ``infrastructure.receipt_verifier``."""
+
+    def verify(self, receipt: Receipt, payment: Payment) -> ReceiptVerdict: ...
+
+
+class SaleCloser(Protocol):
+    """Closes a deal as won on its pipeline's system «Продажа» stage (sales_pipeline)."""
+
+    def close_deal_as_sale(self, deal_id: UUID, actor_user_id: UUID) -> bool:
+        """True if the deal was closed now; False if it was already closed."""
+        ...
+
+
+class SellerNotifier(Protocol):
+    def payment_rejected(self, payment: Payment, reason: str) -> None: ...
+
+
+@dataclass(frozen=True, slots=True)
+class DealSummary:
+    """What the deal card shows about money (computed here, never on the frontend)."""
+
+    deal_id: UUID
+    deal_amount: Decimal
+    currency: str
+    confirmed_received: Decimal
+    pending_amount: Decimal
+    refunded: Decimal
+    debt: Decimal  # deal amount minus confirmed received money, never below zero
+    payments_count: int
+    confirmed_count: int
+    pending_count: int
+    rejected_count: int
+    prepayments_count: int
+    # Payments in another currency than the deal's are not added up (shown as a warning).
+    other_currencies: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class DealRef:
+    id: UUID
+    amount: Decimal
+    currency: str
+    owner_user_id: UUID
+    team_id: UUID | None
+    title: str
+
+
+class DealRefLookup(Protocol):
+    def find(self, deal_id: UUID) -> DealRef | None: ...
