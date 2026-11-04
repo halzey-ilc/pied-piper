@@ -151,6 +151,7 @@ def overview_to_dict(o: Overview) -> dict[str, Any]:
     c = o.counts
     return {
         "period_days": o.period_days,
+        "plan": o.plan.value if o.plan is not None else None,
         "companies": {
             "total": c.companies,
             "active": c.active_companies,
@@ -165,6 +166,16 @@ def overview_to_dict(o: Overview) -> dict[str, Any]:
         },
         "users": {"active": c.users},
         "revenue": {
+            # Per catalog plan: subscriptions giving access and their monthly list price sum.
+            "by_plan": [
+                {
+                    "plan": r.plan_code.value,
+                    "companies": r.companies,
+                    "currency": r.currency,
+                    "amount": str(r.monthly),
+                }
+                for r in o.assigned_by_plan
+            ],
             # List prices of the plans that give access now: an assignment, not a payment.
             "assigned_monthly": [
                 {"currency": cur, "amount": str(amount)}
@@ -198,6 +209,7 @@ def catalog_to_dict() -> dict[str, Any]:
                 "currency": p.currency,
                 "limits": p.limits,
                 "features": sorted(f.value for f in p.features),
+                "trial_days": p.trial_days,
             }
             for p in all_plans()
         ],

@@ -231,8 +231,14 @@ class DjangoPlatformStore(DjangoDirectorCredentialsMixin):
             ],
         )
 
-    def counts(self, now: datetime, since: datetime) -> PlatformCounts:
+    def counts(
+        self, now: datetime, since: datetime, plan: PlanCode | None = None
+    ) -> PlatformCounts:
+        # Narrowed to one plan: companies, users, subscriptions and tickets of that plan's
+        # companies. Server errors are not tied to a company and stay platform-wide.
         orgs = Organization.objects.using(DB)
+        if plan is not None:
+            orgs = orgs.filter(subscription__plan_code=plan.value)
         companies = orgs.count()
         active = orgs.filter(is_active=True).count()
         access = {
@@ -244,11 +250,20 @@ class DjangoPlatformStore(DjangoDirectorCredentialsMixin):
             .filter(organization__is_active=True)
             .exclude(status=SubscriptionStatus.CANCELLED.value)
             .filter(Q(current_period_end__isnull=True) | Q(current_period_end__gt=now))
+            .filter(**({"plan_code": plan.value} if plan is not None else {}))
             .values("plan_code")
             .annotate(n=Count("id"))
         )
         errors = ErrorEvent.objects.using(DB)
         tickets = SupportTicket.objects.using(DB)
+        # One filter() call so the membership conditions apply to the same membership row.
+        membership: dict[str, object] = {
+            "memberships__is_active": True,
+            "memberships__organization__is_active": True,
+        }
+        if plan is not None:
+            tickets = tickets.filter(organization__subscription__plan_code=plan.value)
+            membership["memberships__organization__subscription__plan_code"] = plan.value
         open_statuses = (TicketStatus.NEW.value, TicketStatus.IN_PROGRESS.value)
         return PlatformCounts(
             companies=companies,
@@ -257,11 +272,7 @@ class DjangoPlatformStore(DjangoDirectorCredentialsMixin):
             new_companies=orgs.filter(created_at__gte=since).count(),
             users=get_user_model()
             .objects.using(DB)
-            .filter(
-                is_active=True,
-                memberships__is_active=True,
-                memberships__organization__is_active=True,
-            )
+            .filter(is_active=True, **membership)
             .distinct()
             .count(),
             access=access,

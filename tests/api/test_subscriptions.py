@@ -63,7 +63,7 @@ def test_plans_listing(
 ) -> None:
     client = client_for(make_user("owner", tenant=tenants["acme"]), "acme")
     plans = client.get("/api/v1/subscription/plans/").json()["plans"]
-    assert {p["code"] for p in plans} == {"free", "pro", "enterprise"}
+    assert {p["code"] for p in plans} == {"trial", "free", "pro", "enterprise"}
 
 
 def test_rbac(

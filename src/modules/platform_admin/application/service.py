@@ -106,6 +106,17 @@ class Overview:
     assigned_monthly: dict[str, Decimal]
     # CONFIRMED subscription payments paid within the period, per currency.
     received: dict[str, Decimal]
+    # The same assigned list prices split by plan, for every plan in the catalog.
+    assigned_by_plan: tuple[PlanRevenue, ...] = ()
+    plan: PlanCode | None = None  # the plan the overview is narrowed to; None = all
+
+
+@dataclass(frozen=True, slots=True)
+class PlanRevenue:
+    plan_code: PlanCode
+    companies: int  # subscriptions on this plan that give access now
+    currency: str
+    monthly: Decimal
 
 
 @dataclass(frozen=True, slots=True)
@@ -123,9 +134,13 @@ class RecordPayment:
 def period_bounds(terms: Terms) -> tuple[datetime, datetime | None]:
     """Dates -> instants: access from the first day 00:00 UTC through the last day."""
     start = datetime.combine(terms.starts_on, time.min, tzinfo=UTC)
+    ends_on = terms.ends_on
+    trial_days = get_plan(terms.plan_code).trial_days
+    if ends_on is None and trial_days is not None:
+        ends_on = terms.starts_on + timedelta(days=trial_days - 1)
     end = (
-        datetime.combine(terms.ends_on + timedelta(days=1), time.min, tzinfo=UTC)
-        if terms.ends_on is not None
+        datetime.combine(ends_on + timedelta(days=1), time.min, tzinfo=UTC)
+        if ends_on is not None
         else None
     )
     return start, end
@@ -160,24 +175,31 @@ class PlatformAdminService:
 
     # --- overview -------------------------------------------------------------
 
-    def overview(self, actor: PlatformActor, period_days: int) -> Overview:
+    def overview(
+        self, actor: PlatformActor, period_days: int, plan: PlanCode | None = None
+    ) -> Overview:
         _require(actor)
         if period_days not in (7, 30, 90, 365):
             raise DomainValidationError("period_days must be 7, 30, 90 or 365.")
         now = self._now()
-        counts = self._store.counts(now, now - timedelta(days=period_days))
+        counts = self._store.counts(now, now - timedelta(days=period_days), plan)
         assigned: dict[str, Decimal] = {}
-        for plan in all_plans():
-            n = counts.paying_plans.get(plan.code, 0)
-            if n and plan.monthly_price:
-                assigned[plan.currency] = assigned.get(plan.currency, Decimal(0)) + (
-                    plan.monthly_price * n
-                )
+        by_plan: list[PlanRevenue] = []
+        for p in all_plans():
+            n = counts.paying_plans.get(p.code, 0)
+            by_plan.append(PlanRevenue(p.code, n, p.currency, p.monthly_price * n))
+            if n and p.monthly_price:
+                assigned[p.currency] = assigned.get(p.currency, Decimal(0)) + (p.monthly_price * n)
         received = self._payments.confirmed_totals(
             (now - timedelta(days=period_days)).date(), now.date()
         )
         return Overview(
-            counts=counts, period_days=period_days, assigned_monthly=assigned, received=received
+            counts=counts,
+            period_days=period_days,
+            assigned_monthly=assigned,
+            received=received,
+            assigned_by_plan=tuple(by_plan),
+            plan=plan,
         )
 
     # --- companies ------------------------------------------------------------

@@ -126,7 +126,14 @@ class PlatformOverviewView(_Platform):
             days = int(request.query_params.get("period_days", 30))
         except ValueError as exc:
             raise DomainValidationError("period_days must be an integer.") from exc
-        return Response(overview_to_dict(platform_admin_service().overview(self.actor(), days)))
+        raw_plan = request.query_params.get("plan") or None
+        try:
+            plan = PlanCode(raw_plan) if raw_plan is not None else None
+        except ValueError as exc:
+            raise DomainValidationError("Unknown plan.") from exc
+        return Response(
+            overview_to_dict(platform_admin_service().overview(self.actor(), days, plan))
+        )
 
 
 class PlatformCatalogView(_Platform):

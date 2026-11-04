@@ -35,6 +35,7 @@ class Feature(StrEnum):
 
 
 class PlanCode(StrEnum):
+    TRIAL = "trial"
     FREE = "free"
     PRO = "pro"
     ENTERPRISE = "enterprise"
@@ -53,6 +54,8 @@ class Plan:
     limits: dict[str, int] = field(default_factory=dict)
     # Modules a new subscription on this plan starts with; the platform admin may change them.
     features: frozenset[Feature] = frozenset()
+    # A trial lasts this many days unless the platform admin sets an end date; None = no term.
+    trial_days: int | None = None
 
     def limit_for(self, metric: str) -> int:
         """Max allowed for ``metric`` (UNLIMITED if uncapped or unknown)."""
@@ -64,9 +67,17 @@ class Plan:
 
 
 _CATALOG: dict[PlanCode, Plan] = {
+    PlanCode.TRIAL: Plan(
+        code=PlanCode.TRIAL,
+        name="Trial",
+        monthly_price=Decimal(0),
+        currency="USD",
+        limits={"users": 3, "customers": 100, "deals": 200},
+        trial_days=7,
+    ),
     PlanCode.FREE: Plan(
         code=PlanCode.FREE,
-        name="Free",
+        name="Standard",
         monthly_price=Decimal(0),
         currency="USD",
         limits={"users": 3, "customers": 100, "deals": 200},
@@ -83,7 +94,7 @@ _CATALOG: dict[PlanCode, Plan] = {
     ),
     PlanCode.ENTERPRISE: Plan(
         code=PlanCode.ENTERPRISE,
-        name="Enterprise",
+        name="Premium",
         monthly_price=Decimal(499),
         currency="USD",
         limits={"users": UNLIMITED, "customers": UNLIMITED, "deals": UNLIMITED},

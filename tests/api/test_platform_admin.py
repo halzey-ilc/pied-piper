@@ -548,3 +548,27 @@ def test_company_staff_counts_follow_the_current_structure(
     listed = _ok(admin.get("/api/v1/platform/companies/?search=acme"))["results"]
     assert [row["staff"] for row in listed] == [expected]
     assert _ok(admin.get(f"/api/v1/platform/companies/{company_id}/"))["staff"] == expected
+
+
+def test_trial_lasts_seven_days_and_the_overview_narrows_to_a_plan(
+    admin: APIClient, provisioner: None
+) -> None:
+    trial = _connect(admin, "acme", plan_code="trial", ends_on=None)
+    _connect(admin, "globex")
+    # A trial without an end date ends on the seventh day, inclusive.
+    assert trial["company"]["subscription"]["ends_on"] == str(_today() + timedelta(days=6))
+
+    everything = _ok(admin.get("/api/v1/platform/overview/"))
+    assert everything["plan"] is None and everything["companies"]["total"] == 2
+    by_plan = {row["plan"]: row for row in everything["revenue"]["by_plan"]}
+    assert list(by_plan) == ["trial", "free", "pro", "enterprise"]
+    assert by_plan["pro"]["companies"] == 1 and by_plan["pro"]["amount"] == "49"
+    assert by_plan["trial"]["companies"] == 1 and by_plan["trial"]["amount"] == "0"
+
+    narrowed = _ok(admin.get("/api/v1/platform/overview/?plan=trial"))
+    assert narrowed["plan"] == "trial"
+    assert narrowed["companies"]["total"] == 1 and narrowed["users"]["active"] == 1
+    assert narrowed["subscriptions"]["active"] == 0 and narrowed["subscriptions"]["expiring"] == 1
+    assert {r["plan"]: r["companies"] for r in narrowed["revenue"]["by_plan"]}["pro"] == 0
+
+    assert admin.get("/api/v1/platform/overview/?plan=gold").status_code == 400
