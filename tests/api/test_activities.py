@@ -469,3 +469,35 @@ def test_search_tasks_by_text(
     found = client.get("/api/v1/activities/?kind=task&search=contract").json()
     assert found["count"] == 2
     assert {a["title"] for a in found["results"]} == {"Send the contract", "Call back"}
+
+
+def test_a_task_without_a_record_belongs_to_its_assignee(
+    make_user: Callable[..., Any],
+    tenants: dict[str, TenantFixture],
+    client_for: Callable[..., APIClient],
+) -> None:
+    owner = client_for(make_user("owner", tenant=tenants["acme"]), "acme")
+    rep1 = make_user("rep1", tenant=tenants["acme"], role=Role.SALES_REP)
+    rep2 = make_user("rep2", tenant=tenants["acme"], role=Role.SALES_REP)
+
+    task = _log(
+        owner, kind="task", title="Prepare the weekly report", assignee_user_id=str(rep1.id)
+    )
+    assert task.status_code == 201, task.content
+    body = task.json()
+    assert body["subject_type"] == "member" and body["subject_id"] == str(rep1.id)
+
+    moved = owner.post(
+        f"/api/v1/activities/{body['id']}/reassign/",
+        {"assignee_user_id": str(rep2.id)},
+        format="json",
+    )
+    assert moved.status_code == 200, moved.content
+    assert moved.json()["subject_id"] == str(rep2.id)
+
+    # Only a task may go without a record; "member" is never sent by a client.
+    assert _log(owner, kind="note", body="Loose note").status_code == 400
+    member = _log(owner, kind="task", title="Typed", subject_type="member", subject_id=str(rep1.id))
+    assert member.status_code == 400
+    half = _log(owner, kind="task", title="Half", subject_type="customer")
+    assert half.status_code == 400

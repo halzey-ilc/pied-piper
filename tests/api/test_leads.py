@@ -207,3 +207,70 @@ def test_cross_tenant_isolation(
     assert client_for(alice, "acme").get(f"/api/v1/leads/{bob_lead}/").status_code == 404
     assert LeadRecord.objects.using("tenant_globex").get().name == "Globex lead"
     assert LeadRecord.objects.using("tenant_acme").count() == 0
+
+
+def test_the_creator_may_choose_the_responsible_member(
+    make_user: Callable[..., Any],
+    tenants: dict[str, TenantFixture],
+    client_for: Callable[..., APIClient],
+) -> None:
+    director = client_for(make_user("owner", tenant=tenants["acme"]), "acme")
+    rep_user = make_user("rep1", tenant=tenants["acme"], role=Role.SALES_REP)
+    other = make_user("rep2", tenant=tenants["acme"], role=Role.SALES_REP)
+
+    created = director.post(
+        "/api/v1/leads/",
+        {"name": "Bek", "phone": "+996708546557", "owner_user_id": str(rep_user.id)},
+        format="json",
+    )
+    assert created.status_code == 201, created.content
+    assert created.json()["owner_user_id"] == str(rep_user.id)
+
+    # A manager cannot hand a new lead to someone else.
+    rep = client_for(rep_user, "acme")
+    refused = rep.post(
+        "/api/v1/leads/",
+        {"name": "Aida", "phone": "+996700000001", "owner_user_id": str(other.id)},
+        format="json",
+    )
+    assert refused.status_code == 403
+
+
+def test_convert_places_the_deal_on_a_stage_with_a_next_step(
+    make_user: Callable[..., Any],
+    tenants: dict[str, TenantFixture],
+    client_for: Callable[..., APIClient],
+) -> None:
+    director = client_for(make_user("owner", tenant=tenants["acme"]), "acme")
+    rep = make_user("rep1", tenant=tenants["acme"], role=Role.SALES_REP)
+    pipeline = director.post(
+        "/api/v1/sales/pipelines/",
+        {"name": "P", "is_default": True, "stages": [{"name": "New"}, {"name": "Thinking"}]},
+        format="json",
+    ).json()
+    thinking = next(s["id"] for s in pipeline["stages"] if s["name"] == "Thinking")
+    lead_id = _capture(director, name="Bek", phone="+996708546557", owner_user_id=str(rep.id))["id"]
+    director.post(f"/api/v1/leads/{lead_id}/qualify/", {}, format="json")
+
+    response = director.post(
+        f"/api/v1/leads/{lead_id}/convert/",
+        {
+            "create_deal": {
+                "title": "Bek",
+                "amount": "23444.00",
+                "stage_id": thinking,
+                "next_step": {"title": "Call back about the offer", "due_date": "2099-01-10"},
+            }
+        },
+        format="json",
+    )
+    assert response.status_code == 200, response.content
+    deal = director.get(f"/api/v1/sales/deals/{response.json()['deal_id']}/").json()
+    # The deal lands on the chosen stage and belongs to the lead's manager.
+    assert deal["stage_id"] == thinking and deal["owner_user_id"] == str(rep.id)
+    tasks = director.get(
+        f"/api/v1/activities/?subject_type=deal&subject_id={deal['id']}&kind=task"
+    ).json()["results"]
+    assert [(t["title"], t["due_date"]) for t in tasks] == [
+        ("Call back about the offer", "2099-01-10")
+    ]

@@ -7,6 +7,7 @@ from typing import Any
 
 from rest_framework import serializers
 
+from modules.activities.presentation.serializers import NextStepSerializer
 from modules.leads.application.ports import DuplicateCandidate
 from modules.leads.domain.lead import MAX_NAME_LENGTH, Lead, LeadSource
 
@@ -19,6 +20,8 @@ class LeadCreateSerializer(serializers.Serializer[dict[str, Any]]):
     )
     email = serializers.EmailField(required=False, allow_blank=True, max_length=254)
     phone = serializers.CharField(required=False, allow_blank=True, max_length=32)
+    # Responsible member chosen at creation (head of sales / director); skips auto-assignment.
+    owner_user_id = serializers.UUIDField(required=False, allow_null=True)
 
 
 class LeadUpdateSerializer(serializers.Serializer[dict[str, Any]]):
@@ -56,6 +59,9 @@ class ConvertDealSerializer(serializers.Serializer[dict[str, Any]]):
     amount = serializers.DecimalField(max_digits=16, decimal_places=2, min_value=Decimal(0))
     currency = serializers.CharField(required=False, max_length=3)
     pipeline_id = serializers.UUIDField(required=False)
+    # Where the new deal starts (an open stage of that pipeline); default the first stage.
+    stage_id = serializers.UUIDField(required=False)
+    next_step = NextStepSerializer(required=False)
 
 
 class LeadConvertSerializer(serializers.Serializer[dict[str, Any]]):

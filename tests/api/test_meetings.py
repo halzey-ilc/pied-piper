@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
@@ -15,8 +16,12 @@ from tests.conftest import ALL_DATABASES, TenantFixture
 
 pytestmark = pytest.mark.django_db(databases=ALL_DATABASES)
 
-_START = "2026-11-05T10:00:00Z"
-_END = "2026-11-05T10:30:00Z"
+# Always in the future: a fixed date turns into a past meeting (outcome required) once it passes.
+_START_AT = datetime.now(UTC).replace(hour=10, minute=0, second=0, microsecond=0) + timedelta(
+    days=30
+)
+_START = _START_AT.isoformat()
+_END = (_START_AT + timedelta(minutes=30)).isoformat()
 
 
 def _customer(client: APIClient, name: str = "Acme") -> str:

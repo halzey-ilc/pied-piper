@@ -31,6 +31,9 @@ class SubjectType(StrEnum):
     CUSTOMER = "customer"
     DEAL = "deal"
     LEAD = "lead"
+    # A task set straight to a member, not tied to a deal, customer or lead; the subject id
+    # is the assignee and follows them on reassignment. Tasks only.
+    MEMBER = "member"
 
 
 class TaskStatus(StrEnum):
@@ -302,6 +305,8 @@ class Activity:
         if assignee_user_id != self.assignee_user_id:
             self.assignee_user_id = assignee_user_id
             self.owner_user_id = assignee_user_id
+            if self.subject.type is SubjectType.MEMBER:
+                self.subject = SubjectRef(type=SubjectType.MEMBER, id=assignee_user_id)
             changed = True
         if set_team and team_id != self.team_id:
             self.team_id, changed = team_id, True

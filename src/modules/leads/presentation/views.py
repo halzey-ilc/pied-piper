@@ -10,6 +10,8 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 
 from modules.access_control.domain.rbac import Principal, Role
+from modules.activities.application.next_step import NextStep
+from modules.activities.infrastructure.next_steps import ActivityNextSteps
 from modules.leads.application.ports import LeadFilter
 from modules.leads.application.service import CaptureLead, UpdateLead
 from modules.leads.composition import lead_service
@@ -28,7 +30,7 @@ from modules.leads.presentation.serializers import (
     lead_to_dict,
 )
 from modules.organizations.composition import company_settings, people_in_details
-from modules.sales_pipeline.application.deal_service import OpenDeal
+from modules.sales_pipeline.application.deal_service import OpenDeal, StageMoveExtras
 from modules.sales_pipeline.composition import deal_service
 from platform_core.presentation.tenancy import TenantScopedAPIView
 from shared.domain.errors import DomainValidationError
@@ -171,6 +173,7 @@ class LeadListCreateView(LeadBaseView):
                 source=LeadSource(data["source"]),
                 email=data.get("email") or None,
                 phone=data.get("phone") or None,
+                owner_user_id=data.get("owner_user_id"),
             ),
         )
         return Response(lead_to_dict(lead), status=status.HTTP_201_CREATED)
@@ -296,6 +299,28 @@ class LeadConvertView(LeadBaseView):
                         customer_id=result.customer_id,
                     ),
                 )
+                deals = deal_service()
+                # The deal goes to whoever is responsible for the lead.
+                owner = result.lead.owner_user_id
+                if owner != principal.user_id:
+                    deals.assign(principal, deal.id, owner)
+                raw_step = create_deal.get("next_step")
+                step = (
+                    NextStep(title=raw_step["title"], due_date=raw_step["due_date"])
+                    if raw_step
+                    else None
+                )
+                stage_id = create_deal.get("stage_id")
+                if stage_id is not None and stage_id != deal.stage_id:
+                    # The usual stage rules apply (a won stage is refused, the rescheduled
+                    # meeting needs a date, another open stage needs the next step).
+                    deals.move_stage(
+                        principal, deal.id, stage_id, extras=StageMoveExtras(next_step=step)
+                    )
+                elif step is not None:
+                    ActivityNextSteps().create(
+                        principal, "deal", deal.id, step, default_assignee=owner
+                    )
                 deal_id = str(deal.id)
         return Response(
             {

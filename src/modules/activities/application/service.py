@@ -37,6 +37,7 @@ from platform_core.application.ports import EventOutbox
 from shared.application.ports import UnitOfWork
 from shared.domain.errors import (
     ConflictError,
+    DomainValidationError,
     NotFoundError,
 )
 from shared.domain.events import DomainEvent
@@ -49,7 +50,7 @@ _Factory = Callable[[], tuple["Activity", "DomainEvent"]]
 
 @dataclass(frozen=True, slots=True)
 class LogTask:
-    subject: SubjectRef
+    subject: SubjectRef | None  # None: a task for the assignee, not tied to a record
     title: str
     body: str | None = None
     due_date: date | None = None
@@ -148,23 +149,25 @@ class ActivityService:
         scope = self._policy.require(principal, Permission.ACTIVITIES_CREATE)
         assignee = command.assignee_user_id or principal.user_id
         self._check_assignee(principal, scope, assignee)
+        subject = command.subject or SubjectRef(type=SubjectType.MEMBER, id=assignee)
         with self._uow:
             # A record outside the caller's scope is treated as missing: nobody links work
             # to (or uses up the open-task cap of) a deal or customer they cannot see.
-            if not self._subjects.visible_to(principal, command.subject.type, command.subject.id):
-                raise NotFoundError(
-                    f"The {command.subject.type.value} this task refers to was not found."
-                )
+            if subject.type is SubjectType.MEMBER and command.subject is not None:
+                raise DomainValidationError("Leave the subject out for a task without a record.")
+            if subject.type is not SubjectType.MEMBER and not self._subjects.visible_to(
+                principal, subject.type, subject.id
+            ):
+                raise NotFoundError(f"The {subject.type.value} this task refers to was not found.")
             if (
-                command.subject.type is SubjectType.DEAL
-                and self._repo.count_open_tasks_for_subject(command.subject)
-                >= MAX_OPEN_TASKS_PER_DEAL
+                subject.type is SubjectType.DEAL
+                and self._repo.count_open_tasks_for_subject(subject) >= MAX_OPEN_TASKS_PER_DEAL
             ):
                 raise ConflictError(
                     f"A deal can have at most {MAX_OPEN_TASKS_PER_DEAL} open tasks."
                 )
             activity, event = Activity.log_task(
-                subject=command.subject,
+                subject=subject,
                 created_by=principal.user_id,
                 assignee_user_id=assignee,
                 team_id=principal.department_id,

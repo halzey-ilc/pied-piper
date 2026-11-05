@@ -43,6 +43,8 @@ class CaptureLead:
     source: LeadSource = LeadSource.OTHER
     email: str | None = None
     phone: str | None = None
+    # Chosen by the creator (a head of sales or director): skips auto-assignment.
+    owner_user_id: UUID | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -185,14 +187,29 @@ class LeadService:
         """Every intake path (form, import) comes here. With routing on for the department,
         a lead captured by a non-manager goes in turn to an eligible manager; if nobody is
         eligible it stays with the creator and the department's head of sales is told."""
-        self._policy.require(principal, Permission.LEADS_CREATE)
+        scope = self._policy.require(principal, Permission.LEADS_CREATE)
+        chosen = command.owner_user_id
         with self._uow:
-            pick = pick_assignee(self._routing, principal) if self._routing else None
+            team_id = principal.department_id
+            if chosen is not None and chosen != principal.user_id:
+                # The same rule as handing a lead over: a manager cannot, a head of sales
+                # within their department, a director to any active member.
+                member = self._members.active_member(chosen) if self._members is not None else None
+                check_assignable(principal, scope, chosen, member, what="leads")
+                if member is not None:
+                    team_id = member.department_id
+            pick = (
+                pick_assignee(self._routing, principal)
+                if self._routing and chosen is None
+                else None
+            )
             routed_to = pick.user_id if pick is not None else None
+            if routed_to and pick:
+                team_id = pick.department_id
             lead, event = Lead.capture(
                 name=command.name,
-                owner_user_id=routed_to or principal.user_id,
-                team_id=pick.department_id if routed_to and pick else principal.department_id,
+                owner_user_id=chosen or routed_to or principal.user_id,
+                team_id=team_id,
                 source=command.source,
                 email=command.email,
                 phone=command.phone,

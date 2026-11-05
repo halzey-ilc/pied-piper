@@ -106,7 +106,11 @@ class _Scoped(TenantScopedAPIView):
         return datetime.now(tz).date()
 
 
-def _subject(data: dict[str, Any]) -> SubjectRef:
+def _subject(data: dict[str, Any]) -> SubjectRef | None:
+    if not data.get("subject_type") and not data.get("subject_id"):
+        return None
+    if not data.get("subject_type") or not data.get("subject_id"):
+        raise DomainValidationError("Give both subject_type and subject_id, or neither.")
     return SubjectRef(type=SubjectType(data["subject_type"]), id=data["subject_id"])
 
 
@@ -223,6 +227,8 @@ class ActivityListCreateView(_Scoped):
                     assignee_user_id=data.get("assignee_user_id"),
                 ),
             )
+        if subject is None:
+            raise DomainValidationError("A call or a note needs subject_type and subject_id.")
         if kind is ActivityKind.CALL:
             if not data.get("direction") or not data.get("occurred_at"):
                 raise DomainValidationError("A call needs a direction and occurred_at.")

@@ -41,13 +41,17 @@ def next_step_from(data: dict[str, Any] | None) -> NextStep | None:
     )
 
 
-class _SubjectSerializer(serializers.Serializer[dict[str, Any]]):
-    subject_type = serializers.ChoiceField(choices=[s.value for s in SubjectType])
-    subject_id = serializers.UUIDField()
+class ActivityCreateSerializer(serializers.Serializer[dict[str, Any]]):
+    """Create any activity kind. Required fields depend on `kind` (enforced by the domain).
 
+    A task may leave the subject out: it is then the assignee's own task, not tied to a
+    deal, customer or lead (`subject_type` "member" in responses). Calls and notes need one.
+    """
 
-class ActivityCreateSerializer(_SubjectSerializer):
-    """Create any activity kind. Required fields depend on `kind` (enforced by the domain)."""
+    subject_type = serializers.ChoiceField(
+        required=False, choices=[s.value for s in SubjectType if s is not SubjectType.MEMBER]
+    )
+    subject_id = serializers.UUIDField(required=False)
 
     kind = serializers.ChoiceField(choices=[k.value for k in ActivityKind])
     title = serializers.CharField(required=False, allow_blank=True, max_length=MAX_TITLE_LENGTH)
