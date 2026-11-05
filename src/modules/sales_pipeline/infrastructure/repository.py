@@ -203,6 +203,8 @@ class DjangoDealRepository:
             qs = qs.filter(created_at__date__gte=filters.created_from)
         if filters.created_to is not None:
             qs = qs.filter(created_at__date__lte=filters.created_to)
+        if filters.closed_from is not None:
+            qs = qs.filter(closed_at__date__gte=filters.closed_from)
         return self._with_attention(qs, filters)
 
     @staticmethod

@@ -141,6 +141,10 @@ def test_one_customer_has_independent_deals(company: dict[str, Any]) -> None:
     assert still_open["status"] == "open" and still_open["customer_id"] == customer
     listed = _ok(rep.get(f"/api/v1/sales/deals/?customer_id={customer}"))
     assert listed["count"] == 2
+    # The month's sales column: deals closed since a date, newest first.
+    today = str(_today())
+    sold = _ok(rep.get(f"/api/v1/sales/deals/?status=won&closed_from={today}&ordering=-closed_at"))
+    assert [d["id"] for d in sold["results"]] == [first["id"]]
 
 
 # --- tasks and meetings filters --------------------------------------------------------------

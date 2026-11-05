@@ -118,6 +118,12 @@ _CREATED_TO = OpenApiParameter(
     OpenApiParameter.QUERY,
     description="Created on/before this date (YYYY-MM-DD).",
 )
+_CLOSED_FROM = OpenApiParameter(
+    "closed_from",
+    str,
+    OpenApiParameter.QUERY,
+    description="Closed (won or lost) on/after this date (YYYY-MM-DD).",
+)
 _ATTENTION = OpenApiParameter(
     "attention",
     str,
@@ -478,6 +484,7 @@ class DealListCreateView(_Scoped):
             _CUSTOMER,
             _CREATED_FROM,
             _CREATED_TO,
+            _CLOSED_FROM,
             _ATTENTION,
             _ORDERING,
             _LIMIT,
@@ -506,6 +513,7 @@ class DealListCreateView(_Scoped):
             customer_id=_as_uuid(q.get("customer_id")),
             created_from=_as_date(q.get("created_from")),
             created_to=_as_date(q.get("created_to")),
+            closed_from=_as_date(q.get("closed_from")),
             attention=attention,
             today=self._company_today(),
             ordering=q.get("ordering"),

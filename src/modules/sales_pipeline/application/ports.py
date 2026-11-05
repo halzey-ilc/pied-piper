@@ -32,6 +32,8 @@ class DealFilter:
     customer_id: UUID | None = None
     created_from: date | None = None
     created_to: date | None = None
+    # Closed (won or lost) on/after this date — e.g. the month's sales on the board.
+    closed_from: date | None = None
     # "overdue" (past expected close, still open) or "no_next_step" (open, no next step).
     attention: str | None = None
     # Company-timezone "today", supplied by the caller for the overdue cutoff.
@@ -40,7 +42,7 @@ class DealFilter:
     ordering: str | None = None
 
 
-ORDERING_FIELDS = frozenset({"created_at", "updated_at", "amount", "title"})
+ORDERING_FIELDS = frozenset({"created_at", "updated_at", "closed_at", "amount", "title"})
 
 
 @dataclass(frozen=True, slots=True)
