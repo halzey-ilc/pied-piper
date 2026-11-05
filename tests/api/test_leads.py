@@ -274,3 +274,7 @@ def test_convert_places_the_deal_on_a_stage_with_a_next_step(
     assert [(t["title"], t["due_date"]) for t in tasks] == [
         ("Call back about the offer", "2099-01-10")
     ]
+    # The task is the deal's next step: shown on the deal, and the deal is not "without a step".
+    assert deal["next_task"] == {"title": "Call back about the offer", "due_date": "2099-01-10"}
+    listed = director.get("/api/v1/sales/deals/?attention=no_next_step").json()["results"]
+    assert deal["id"] not in [d["id"] for d in listed]

@@ -35,6 +35,7 @@ from modules.sales_pipeline.composition import (
 from modules.sales_pipeline.domain.custom_field import CustomFieldType
 from modules.sales_pipeline.domain.deal import DealStatus
 from modules.sales_pipeline.domain.pipeline import StageDefinition, StageKind
+from modules.sales_pipeline.infrastructure.next_tasks import next_tasks
 from modules.sales_pipeline.presentation.serializers import (
     AdoptDealsSerializer,
     AdoptionPreviewSerializer,
@@ -519,7 +520,13 @@ class DealListCreateView(_Scoped):
             ordering=q.get("ordering"),
         )
         page = deal_service().list_deals(self.principal(), filters, limit=limit, offset=offset)
-        return Response({"count": page.total, "results": [deal_to_dict(d) for d in page.items]})
+        tasks = next_tasks(self.tenant.db_alias, (d.id for d in page.items))
+        return Response(
+            {
+                "count": page.total,
+                "results": [_with_next_task(deal_to_dict(d), tasks.get(d.id)) for d in page.items],
+            }
+        )
 
     def _company_today(self) -> date:
         tz = ZoneInfo(str(company_settings(self.tenant.tenant_id)["timezone"]))
@@ -599,7 +606,9 @@ class DealDetailView(_Scoped):
     def get(self, request: Request, deal_id: UUID) -> Response:
         principal = self.principal()
         deal = deal_service().get(principal, deal_id)
-        data = deal_to_dict(deal)
+        data = _with_next_task(
+            deal_to_dict(deal), next_tasks(self.tenant.db_alias, [deal.id]).get(deal.id)
+        )
         data["customer"] = _visible_customer(principal, deal.customer_id)
         data["owner"] = {
             "id": str(deal.owner_user_id),
@@ -979,3 +988,9 @@ def _as_date(value: str | None) -> date | None:
         return date.fromisoformat(value)
     except ValueError:
         return None
+
+
+def _with_next_task(data: dict[str, Any], task: tuple[str, date] | None) -> dict[str, Any]:
+    """`next_task`: the deal's nearest open dated task — its next step (null: none planned)."""
+    data["next_task"] = {"title": task[0], "due_date": task[1].isoformat()} if task else None
+    return data

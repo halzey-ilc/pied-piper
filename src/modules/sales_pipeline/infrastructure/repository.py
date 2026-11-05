@@ -4,8 +4,9 @@ from typing import Any
 from uuid import UUID
 
 from django.db import transaction
-from django.db.models import Count, F, Q, QuerySet
+from django.db.models import Count, Exists, F, OuterRef, Q, QuerySet
 
+from modules.activities.infrastructure.models import ActivityRecord
 from modules.sales_pipeline.application.ports import ORDERING_FIELDS, DealFilter, DealVisibility
 from modules.sales_pipeline.domain.custom_field import CustomFieldDefinition, CustomFieldType
 from modules.sales_pipeline.domain.deal import Deal, DealStatus
@@ -214,8 +215,19 @@ class DjangoDealRepository:
             if filters.today is not None:
                 qs = qs.filter(expected_close_date__lt=filters.today)
         elif filters.attention == "no_next_step":
-            qs = qs.filter(status=DealStatus.OPEN.value).filter(
-                Q(next_step__isnull=True) | Q(next_step="")
+            # The next step is an open task with a due date (owner decision 03.11.2026); the
+            # deal's old free-text field still counts when filled.
+            planned = ActivityRecord.objects.filter(
+                kind="task",
+                subject_type="deal",
+                subject_id=OuterRef("id"),
+                task_status="open",
+                due_date__isnull=False,
+            )
+            qs = (
+                qs.filter(status=DealStatus.OPEN.value)
+                .filter(Q(next_step__isnull=True) | Q(next_step=""))
+                .exclude(Exists(planned))
             )
         return qs
 
