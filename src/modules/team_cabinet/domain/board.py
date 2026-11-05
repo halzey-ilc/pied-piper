@@ -37,6 +37,7 @@ class ManagerDay:
     morning_meetings: int = 0
     morning_confirmed: int = 0
     payments_count: int = 0
+    prepayments: int = 0  # of payments_count: prepayments
     received: Decimal = Decimal(0)
     open_tasks: int = 0
     overdue_tasks: int = 0
@@ -183,6 +184,7 @@ class DepartmentTotals:
     meetings_total: int = 0
     meetings_held: int = 0
     payments_count: int = 0
+    prepayments: int = 0  # of payments_count: prepayments
     received: Decimal = Decimal(0)
     meetings_confirmed: int = 0
     meetings_to_confirm: int = 0
@@ -205,6 +207,7 @@ class DepartmentTotals:
             totals.meetings_total += d.meetings_total
             totals.meetings_held += d.meetings_held
             totals.payments_count += d.payments_count
+            totals.prepayments += d.prepayments
             totals.received += d.received
             totals.meetings_confirmed += d.meetings_confirmed
             totals.meetings_to_confirm += d.meetings_to_confirm
@@ -242,6 +245,7 @@ class RawDay:
     morning_meetings: int = 0
     morning_confirmed: int = 0
     payments_count: int = 0
+    prepayments: int = 0  # of payments_count: prepayments
     received: Decimal = Decimal(0)
     open_tasks: int = 0
     overdue_tasks: int = 0

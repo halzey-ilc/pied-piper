@@ -41,6 +41,7 @@ class ManagerDaySerializer(serializers.Serializer[dict[str, Any]]):
     morning_meetings = serializers.IntegerField(read_only=True)
     morning_confirmed = serializers.IntegerField(read_only=True)
     payments_count = serializers.IntegerField(read_only=True)
+    prepayments = serializers.IntegerField(read_only=True)
     received = serializers.DecimalField(max_digits=18, decimal_places=2, read_only=True)
     open_tasks = serializers.IntegerField(read_only=True)
     overdue_tasks = serializers.IntegerField(read_only=True)
@@ -68,6 +69,7 @@ class DepartmentTotalsSerializer(serializers.Serializer[dict[str, Any]]):
     meetings_total = serializers.IntegerField(read_only=True)
     meetings_held = serializers.IntegerField(read_only=True)
     payments_count = serializers.IntegerField(read_only=True)
+    prepayments = serializers.IntegerField(read_only=True)
     received = serializers.DecimalField(max_digits=18, decimal_places=2, read_only=True)
     red = serializers.IntegerField(read_only=True)
     yellow = serializers.IntegerField(read_only=True)
@@ -76,6 +78,7 @@ class DepartmentTotalsSerializer(serializers.Serializer[dict[str, Any]]):
 
 class TodayBoardSerializer(serializers.Serializer[dict[str, Any]]):
     as_of = serializers.DateTimeField(read_only=True)
+    date = serializers.DateField(read_only=True)
     managers = ManagerDaySerializer(many=True, read_only=True)
     totals = DepartmentTotalsSerializer(read_only=True)
 
@@ -95,6 +98,7 @@ def manager_day_to_dict(day: ManagerDay) -> dict[str, Any]:
         "morning_meetings": day.morning_meetings,
         "morning_confirmed": day.morning_confirmed,
         "payments_count": day.payments_count,
+        "prepayments": day.prepayments,
         "received": str(day.received),
         "open_tasks": day.open_tasks,
         "overdue_tasks": day.overdue_tasks,
@@ -143,6 +147,7 @@ def totals_to_dict(totals: DepartmentTotals) -> dict[str, Any]:
         "meetings_total": totals.meetings_total,
         "meetings_held": totals.meetings_held,
         "payments_count": totals.payments_count,
+        "prepayments": totals.prepayments,
         "received": str(totals.received),
         "red": totals.red,
         "yellow": totals.yellow,
@@ -342,6 +347,7 @@ def team_report_to_dict(report: TeamReport) -> dict[str, Any]:
 def board_to_dict(board: TodayBoard) -> dict[str, Any]:
     return {
         "as_of": board.as_of.isoformat(),
+        "date": board.day.isoformat() if board.day else None,
         "managers": [manager_day_to_dict(m) for m in board.managers],
         "totals": totals_to_dict(board.totals),
     }

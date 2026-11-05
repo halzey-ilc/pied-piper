@@ -50,7 +50,7 @@ from modules.team_cabinet.domain.board import (
 )
 from modules.team_cabinet.domain.period import Discipline, PeriodMetrics, average
 from modules.team_cabinet.domain.plan_fact import PlanFact, PlanFactRow
-from shared.domain.errors import NotFoundError
+from shared.domain.errors import DomainValidationError, NotFoundError
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,6 +58,7 @@ class TodayBoard:
     as_of: datetime
     managers: list[ManagerDay]
     totals: DepartmentTotals
+    day: date | None = None  # the company-local day the board describes
 
 
 @dataclass(frozen=True, slots=True)
@@ -115,7 +116,12 @@ class TeamCabinetService:
         timezone_name: str,
         thresholds: TrafficThresholds,
         department_id: UUID | None = None,
+        on: date | None = None,
     ) -> TodayBoard:
+        """Today's board, or a past day ``on`` (e.g. yesterday's score early in the morning).
+
+        A past day is read as of its end: its calls, meetings, payments and score; tasks are
+        counted as they stand now against that day's date."""
         scope = self._policy.require(principal, Permission.TEAM_CABINET_VIEW)
         # A head of sales is pinned to their own department; a director may choose.
         if scope is not Scope.ALL:
@@ -124,6 +130,11 @@ class TeamCabinetService:
         tz = ZoneInfo(timezone_name)
         now = datetime.now(tz)
         today = now.date()
+        if on is not None and on > today:
+            raise DomainValidationError("The day must not be in the future.")
+        if on is not None and on < today:
+            today = on
+            now = datetime(on.year, on.month, on.day, tzinfo=tz) + timedelta(days=1)
         day_start = datetime(today.year, today.month, today.day, tzinfo=tz)
         day_end = day_start + timedelta(days=1)
         outcome_cutoff = now - timedelta(minutes=thresholds.meeting_outcome_minutes)
@@ -157,7 +168,12 @@ class TeamCabinetService:
                     day, days_elapsed=today.day, days_total=days_total, thresholds=ScoreThresholds()
                 )
             managers.append(self._score(day, now.hour, thresholds))
-        return TodayBoard(as_of=now, managers=managers, totals=DepartmentTotals.of(managers))
+        return TodayBoard(
+            as_of=min(now, datetime.now(tz)),
+            managers=managers,
+            totals=DepartmentTotals.of(managers),
+            day=today,
+        )
 
     def inactivity(
         self,
@@ -621,6 +637,7 @@ def member_day(member: Member, raw: RawDay | None, absent: set[UUID]) -> Manager
         morning_meetings=r.morning_meetings,
         morning_confirmed=r.morning_confirmed,
         payments_count=r.payments_count,
+        prepayments=r.prepayments,
         received=r.received,
         open_tasks=r.open_tasks,
         overdue_tasks=r.overdue_tasks,

@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo
 
 from django.conf import settings
 from django.http import HttpResponse
+from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import OpenApiExample, OpenApiParameter, extend_schema
 from rest_framework.request import Request
 from rest_framework.response import Response
@@ -57,6 +58,12 @@ _INCLUDE = OpenApiParameter(
     str,
     OpenApiParameter.QUERY,
     description="`actions`: also return «Что делать сегодня» (the `actions` object).",
+)
+_DAY = OpenApiParameter(
+    "date",
+    OpenApiTypes.DATE,
+    OpenApiParameter.QUERY,
+    description="A past company-local day (YYYY-MM-DD), e.g. yesterday; default today.",
 )
 _ACTIONS_LIMIT = OpenApiParameter(
     "actions_limit",
@@ -134,7 +141,7 @@ class TeamTodayView(_Scoped):
             "absence, with no shift started today or no activity). Not tied to the operations "
             "plan gate. Needs the team_cabinet.view permission."
         ),
-        parameters=[_TENANT_HEADER, _DEPARTMENT, _INCLUDE, _ACTIONS_LIMIT],
+        parameters=[_TENANT_HEADER, _DEPARTMENT, _DAY, _INCLUDE, _ACTIONS_LIMIT],
         responses=TodayBoardSerializer,
     )
     def get(self, request: Request) -> Response:
@@ -147,6 +154,7 @@ class TeamTodayView(_Scoped):
             timezone_name=timezone_name,
             thresholds=self._thresholds(),
             department_id=department_id,
+            on=_optional_date(request.query_params.get("date")),
         )
         data = {**board_to_dict(board), "currency": self._currency()}
         include = {part.strip() for part in request.query_params.get("include", "").split(",")}
@@ -237,6 +245,10 @@ class TeamPlanFactView(_Scoped):
 _DATE_FROM = OpenApiParameter("date_from", str, OpenApiParameter.QUERY, description="YYYY-MM-DD")
 _DATE_TO = OpenApiParameter("date_to", str, OpenApiParameter.QUERY, description="YYYY-MM-DD")
 _MAX_DAYS = 366
+
+
+def _optional_date(raw: str | None) -> date | None:
+    return _date(raw, date.min) if raw else None
 
 
 def _date(raw: str | None, default: date) -> date:

@@ -193,12 +193,17 @@ class DjangoCabinetReader:
             PaymentRecord.counted.using(self.using)
             .filter(seller_user_id__in=user_ids, paid_on=today, is_refund=False)
             .values("seller_user_id")
-            .annotate(n=Count("id"), total=Sum("amount", filter=Q(currency=self.currency)))
+            .annotate(
+                n=Count("id"),
+                prepay=Count("id", filter=Q(kind="prepayment")),
+                total=Sum("amount", filter=Q(currency=self.currency)),
+            )
         )
         for row in rows:
             raw = out.get(row["seller_user_id"])
             if raw is not None:
                 raw.payments_count = row["n"]
+                raw.prepayments = row["prepay"]
                 raw.received = row["total"] or Decimal(0)
 
     def absent_user_ids(self, user_ids: list[UUID], day: date) -> set[UUID]:

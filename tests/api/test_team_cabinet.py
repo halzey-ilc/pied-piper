@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 import pytest
@@ -281,3 +281,23 @@ def test_review_task_type_and_filter(
     )
     found = owner.get("/api/v1/activities/?kind=task&task_type=review").json()
     assert [a["title"] for a in found["results"]] == ["Re-call"]
+
+
+def test_today_board_for_yesterday_and_prepayments(
+    make_user: Callable[..., Any],
+    tenants: dict[str, TenantFixture],
+    client_for: Callable[..., APIClient],
+) -> None:
+    director = client_for(make_user("owner", tenant=tenants["acme"]), "acme")
+    make_user("rep1", tenant=tenants["acme"], role=Role.SALES_REP)
+    today = director.get("/api/v1/team/today/").json()
+    row = next(r for r in today["managers"] if r["username"] == "rep1")
+    assert row["prepayments"] == 0 and today["totals"]["prepayments"] == 0
+
+    yesterday = (date.fromisoformat(today["date"]) - timedelta(days=1)).isoformat()
+    past = director.get(f"/api/v1/team/today/?date={yesterday}")
+    assert past.status_code == 200, past.content
+    assert past.json()["date"] == yesterday
+    tomorrow = (date.fromisoformat(today["date"]) + timedelta(days=1)).isoformat()
+    assert director.get(f"/api/v1/team/today/?date={tomorrow}").status_code == 400
+    assert director.get("/api/v1/team/today/?date=soon").status_code == 400
