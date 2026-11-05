@@ -62,6 +62,8 @@ class ConvertDealSerializer(serializers.Serializer[dict[str, Any]]):
     # Where the new deal starts (an open stage of that pipeline); default the first stage.
     stage_id = serializers.UUIDField(required=False)
     next_step = NextStepSerializer(required=False)
+    # What is sold (company product catalog); optional.
+    product_id = serializers.UUIDField(required=False, allow_null=True)
 
 
 class LeadConvertSerializer(serializers.Serializer[dict[str, Any]]):

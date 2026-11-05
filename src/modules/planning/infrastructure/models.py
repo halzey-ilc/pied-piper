@@ -117,3 +117,19 @@ class WorkSessionRecord(models.Model):
 
     def __str__(self) -> str:
         return f"{self.user_id}: {self.status} {self.started_at}"
+
+
+class CompensationRecord(models.Model):
+    """A member's pay terms: monthly salary and percent of the money they take in."""
+
+    user_id = models.UUIDField(primary_key=True)
+    base_salary = models.DecimalField(max_digits=16, decimal_places=2)
+    commission_percent = models.DecimalField(max_digits=5, decimal_places=2)
+    currency = models.CharField(max_length=3)
+    updated_at = models.DateTimeField()
+
+    class Meta:
+        db_table = "planning_compensation"
+
+    def __str__(self) -> str:
+        return f"{self.user_id}: {self.base_salary} + {self.commission_percent}%"

@@ -31,6 +31,7 @@ from modules.sales_pipeline.application.ports import (
     LossReasonRepository,
     MemberDirectory,
     PipelineRepository,
+    ProductRepository,
     StageChangeRepository,
 )
 from modules.sales_pipeline.domain.custom_field import validate_custom_fields
@@ -77,6 +78,7 @@ class OpenDeal:
     next_step: str | None = None
     custom_fields: dict[str, Any] | None = None
     expected_close_date: date | None = None
+    product_id: UUID | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -96,6 +98,8 @@ class EditDeal:
     set_custom_fields: bool = False
     expected_close_date: date | None = None
     set_expected_close: bool = False
+    product_id: UUID | None = None
+    set_product: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -129,7 +133,9 @@ class DealService:
         policy: AccessPolicy | None = None,
         meetings: DealMeetings | None = None,
         next_steps: NextSteps | None = None,
+        products: ProductRepository | None = None,
     ) -> None:
+        self._products = products
         self._meetings = meetings
         self._next_steps = next_steps
         self._members = members
@@ -187,6 +193,8 @@ class DealService:
             if command.customer_id is not None:
                 self._check_customer(principal, command.customer_id)
             custom_fields = self._validated_custom_fields(command.custom_fields, require_all=True)
+            if command.product_id is not None:
+                self._check_product(command.product_id)
             deal, event = Deal.open(
                 title=command.title,
                 pipeline_id=pipeline.id,
@@ -199,6 +207,7 @@ class DealService:
                 next_step=command.next_step,
                 custom_fields=custom_fields,
                 expected_close_date=command.expected_close_date,
+                product_id=command.product_id,
             )
             self._deals.add(deal)
             self._emit(event, deal)
@@ -212,6 +221,12 @@ class DealService:
             if command.set_customer and command.customer_id is not None:
                 self._check_customer(principal, command.customer_id)
             value = self._money_update(deal, command)
+            if (
+                command.set_product
+                and command.product_id is not None
+                and command.product_id != deal.product_id
+            ):
+                self._check_product(command.product_id)
             custom_fields = (
                 self._validated_custom_fields(command.custom_fields, require_all=True)
                 if command.set_custom_fields
@@ -231,6 +246,8 @@ class DealService:
                 set_custom_fields=command.set_custom_fields,
                 expected_close_date=command.expected_close_date,
                 set_expected_close=command.set_expected_close,
+                product_id=command.product_id,
+                set_product=command.set_product,
             )
             if changed:
                 self._deals.save(deal, expected_version=version)
@@ -359,6 +376,12 @@ class DealService:
                 default_assignee=deal.owner_user_id,
             )
         return None
+
+    def _check_product(self, product_id: UUID) -> None:
+        """A deal is linked only to an existing, active product of the company catalog."""
+        product = self._products.get(product_id) if self._products is not None else None
+        if product is None or not product.is_active:
+            raise DomainValidationError("Unknown or inactive product.")
 
     def _resolve_loss_reason(self, reason: str | None, loss_reason_id: UUID | None) -> str:
         """Validate a catalog loss reason (if given) and return the free-text note

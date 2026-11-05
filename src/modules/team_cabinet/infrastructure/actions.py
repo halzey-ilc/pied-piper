@@ -41,6 +41,8 @@ from modules.team_cabinet.infrastructure.analytics import RESPONSE_ACTIONS
 
 # Meeting statuses meaning "the meeting took place" (completed is the legacy value).
 _HELD = ("held", "completed")
+# «Работа над ошибками»: tasks the head of sales hands a manager on their mistakes.
+_MISS_TASK_TYPE = "review"
 
 
 def _owned[Row: Model](qs: QuerySet[Row], field: str, owners: list[UUID] | None) -> QuerySet[Row]:
@@ -149,9 +151,21 @@ class DjangoActionsReader:
         ]
         return group
 
-    def overdue_tasks(self, owners: list[UUID] | None, *, today: date, limit: int) -> ActionGroup:
+    def overdue_tasks(
+        self, owners: list[UUID] | None, *, today: date, limit: int, skip_misses: bool = False
+    ) -> ActionGroup:
         qs = self._open_tasks(owners).filter(due_date__lt=today)
+        if skip_misses:
+            qs = qs.exclude(task_type=_MISS_TASK_TYPE)
         return self._task_group(ActionKind.OVERDUE_TASKS, qs, today, limit)
+
+    def miss_tasks(self, owners: list[UUID] | None, *, today: date, limit: int) -> ActionGroup:
+        qs = self._open_tasks(owners).filter(task_type=_MISS_TASK_TYPE)
+        group = self._task_group(ActionKind.MISS_TASKS, qs, today, limit)
+        for item in group.items:
+            if item.date is not None and item.date < today:
+                item.age_days = _days(item.date, today)
+        return group
 
     def tasks_due_soon(self, owners: list[UUID] | None, *, today: date, limit: int) -> ActionGroup:
         qs = self._open_tasks(owners).filter(
@@ -319,6 +333,64 @@ class DjangoActionsReader:
                         paid=received,
                         debt=debt,
                         stage_name=r["stage__name"],
+                    )
+                )
+        return group
+
+    def debts_to_collect(
+        self, owners: list[UUID] | None, *, now: datetime, limit: int
+    ) -> ActionGroup:
+        deals = list(
+            _owned(
+                DealRecord.objects.using(self.using).filter(status__in=("open", "won")),
+                "owner_user_id",
+                owners,
+            )
+            .filter(
+                id__in=PaymentRecord.counted.using(self.using)
+                .filter(deal_id__isnull=False)
+                .values("deal_id")
+            )
+            .order_by("created_at", "id")
+            .values(
+                "id", "title", "owner_user_id", "amount", "currency", "created_at", "stage__name"
+            )
+        )
+        paid: dict[UUID, dict[str, Decimal]] = defaultdict(lambda: defaultdict(Decimal))
+        for p in (
+            PaymentRecord.counted.using(self.using)
+            .filter(deal_id__in=[d["id"] for d in deals])
+            .values("deal_id", "currency", "is_refund", "amount")
+        ):
+            if p["deal_id"] is None:  # pragma: no cover - filtered by deal_id__in
+                continue
+            sign = -1 if p["is_refund"] else 1
+            paid[p["deal_id"]][p["currency"]] += sign * p["amount"]
+
+        group = ActionGroup(ActionKind.DEBTS_TO_COLLECT)
+        for d in deals:
+            received = paid.get(d["id"], {}).get(d["currency"], Decimal(0))
+            if not Decimal(0) < received < d["amount"]:
+                continue
+            debt = d["amount"] - received
+            owner = d["owner_user_id"]
+            group.count += 1
+            group.by_manager[owner] = group.by_manager.get(owner, 0) + 1
+            group.amounts[d["currency"]] = group.amounts.get(d["currency"], Decimal(0)) + debt
+            if len(group.items) < limit:
+                group.items.append(
+                    ActionItem(
+                        id=d["id"],
+                        title=d["title"],
+                        manager_id=owner,
+                        amount=d["amount"],
+                        currency=d["currency"],
+                        age_days=_days(d["created_at"], now),
+                        subject_type="deal",
+                        subject_id=d["id"],
+                        paid=received,
+                        debt=debt,
+                        stage_name=d["stage__name"],
                     )
                 )
         return group

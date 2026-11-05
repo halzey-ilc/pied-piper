@@ -26,11 +26,13 @@ from modules.sales_pipeline.application.deal_service import EditDeal, OpenDeal, 
 from modules.sales_pipeline.application.loss_reason_service import UpdateLossReason
 from modules.sales_pipeline.application.pipeline_service import CreatePipeline
 from modules.sales_pipeline.application.ports import DealFilter
+from modules.sales_pipeline.application.product_service import UpdateProduct
 from modules.sales_pipeline.composition import (
     custom_field_service,
     deal_service,
     loss_reason_service,
     pipeline_service,
+    product_service,
 )
 from modules.sales_pipeline.domain.custom_field import CustomFieldType
 from modules.sales_pipeline.domain.deal import DealStatus
@@ -59,6 +61,10 @@ from modules.sales_pipeline.presentation.serializers import (
     PipelineCreateSerializer,
     PipelineReadSerializer,
     PipelineUpdateSerializer,
+    ProductCreateSerializer,
+    ProductListSerializer,
+    ProductReadSerializer,
+    ProductUpdateSerializer,
     StageAddSerializer,
     StageChangeListSerializer,
     StageOrderSerializer,
@@ -68,6 +74,7 @@ from modules.sales_pipeline.presentation.serializers import (
     deal_to_dict,
     loss_reason_to_dict,
     pipeline_to_dict,
+    product_to_dict,
     stage_change_to_dict,
 )
 from platform_core.presentation.tenancy import TenantScopedAPIView
@@ -569,6 +576,7 @@ class DealListCreateView(_Scoped):
                 next_step=data.get("next_step"),
                 custom_fields=data.get("custom_fields"),
                 expected_close_date=data.get("expected_close_date"),
+                product_id=data.get("product_id"),
             ),
         )
         return Response(deal_to_dict(deal), status=status.HTTP_201_CREATED)
@@ -652,6 +660,8 @@ class DealDetailView(_Scoped):
                 set_custom_fields="custom_fields" in request.data,
                 expected_close_date=data.get("expected_close_date"),
                 set_expected_close="expected_close_date" in request.data,
+                product_id=data.get("product_id"),
+                set_product="product_id" in request.data,
             ),
         )
         return Response(deal_to_dict(deal))
@@ -888,6 +898,75 @@ class LossReasonDetailView(_Scoped):
             ),
         )
         return Response(loss_reason_to_dict(reason))
+
+
+# --- products ---------------------------------------------------------------
+
+
+class ProductListCreateView(_Scoped):
+    @extend_schema(
+        tags=_PIPELINE_TAGS,
+        operation_id="products_list",
+        summary="List products",
+        description=(
+            "The company's product catalog (what a deal sells). Pass `active=true` to list "
+            "only active products (the ones selectable on a deal)."
+        ),
+        parameters=[_TENANT_HEADER],
+        responses=ProductListSerializer,
+    )
+    def get(self, request: Request) -> Response:
+        active_only = request.query_params.get("active") in {"1", "true", "True"}
+        products = product_service().list_products(self.principal(), active_only=active_only)
+        return Response({"count": len(products), "results": [product_to_dict(p) for p in products]})
+
+    @extend_schema(
+        tags=_PIPELINE_TAGS,
+        operation_id="products_create",
+        summary="Add a product",
+        description="Adds a product to the catalog. Requires the pipelines.manage permission.",
+        parameters=[_TENANT_HEADER],
+        request=ProductCreateSerializer,
+        responses={201: ProductReadSerializer},
+    )
+    def post(self, request: Request) -> Response:
+        serializer = ProductCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        product = product_service().create(
+            self.principal(), data["name"], show_on_my_day=data["show_on_my_day"]
+        )
+        return Response(product_to_dict(product), status=status.HTTP_201_CREATED)
+
+
+class ProductDetailView(_Scoped):
+    @extend_schema(
+        tags=_PIPELINE_TAGS,
+        operation_id="products_update",
+        summary="Rename, (de)activate or show/hide a product",
+        description=(
+            "Renames a product, toggles `is_active` (products are switched off, never "
+            "deleted) or `show_on_my_day` (its block on the managers' «Мой день»). "
+            "Requires pipelines.manage."
+        ),
+        parameters=[_TENANT_HEADER],
+        request=ProductUpdateSerializer,
+        responses=ProductReadSerializer,
+    )
+    def patch(self, request: Request, product_id: UUID) -> Response:
+        serializer = ProductUpdateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        product = product_service().update(
+            self.principal(),
+            UpdateProduct(
+                product_id=product_id,
+                name=data.get("name"),
+                is_active=data.get("is_active"),
+                show_on_my_day=data.get("show_on_my_day"),
+            ),
+        )
+        return Response(product_to_dict(product))
 
 
 # --- custom fields ----------------------------------------------------------

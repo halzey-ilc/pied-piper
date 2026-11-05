@@ -135,6 +135,7 @@ class Deal:
     closed_at: datetime | None = None
     lost_reason: str | None = None
     loss_reason_id: UUID | None = None
+    product_id: UUID | None = None  # what was sold (company product catalog)
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     version: int = 1
     # Last write to the record (set by persistence); None until the deal is stored.
@@ -155,6 +156,7 @@ class Deal:
         next_step: str | None = None,
         custom_fields: dict[str, Any] | None = None,
         expected_close_date: date | None = None,
+        product_id: UUID | None = None,
     ) -> tuple[Deal, DealCreated]:
         deal = cls(
             id=uuid4(),
@@ -169,6 +171,7 @@ class Deal:
             next_step=_clean_optional(next_step, MAX_NEXT_STEP_LENGTH),
             custom_fields=dict(custom_fields) if custom_fields else {},
             expected_close_date=expected_close_date,
+            product_id=product_id,
         )
         return deal, DealCreated(
             deal_id=deal.id, pipeline_id=pipeline_id, owner_user_id=owner_user_id
@@ -193,6 +196,8 @@ class Deal:
         set_custom_fields: bool = False,
         expected_close_date: date | None = None,
         set_expected_close: bool = False,
+        product_id: UUID | None = None,
+        set_product: bool = False,
     ) -> tuple[str, ...]:
         """Edit an open deal. ``set_*`` flags allow clearing a field to None.
 
@@ -225,6 +230,9 @@ class Deal:
         if set_expected_close and expected_close_date != self.expected_close_date:
             self.expected_close_date = expected_close_date
             changed.append("expected_close_date")
+        if set_product and product_id != self.product_id:
+            self.product_id = product_id
+            changed.append("product")
         if changed:
             self.version += 1
         return tuple(changed)

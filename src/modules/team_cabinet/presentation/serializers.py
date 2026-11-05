@@ -23,6 +23,7 @@ from modules.team_cabinet.domain.analytics import (
     StageStat,
 )
 from modules.team_cabinet.domain.board import DayScore, DepartmentTotals, ManagerDay
+from modules.team_cabinet.domain.my_month import MonthMoney, MyMonth
 from modules.team_cabinet.domain.period import Discipline, PeriodMetrics
 from modules.team_cabinet.domain.plan_fact import PlanFact, PlanFactRow
 
@@ -491,5 +492,67 @@ def today_actions_to_dict(actions: TodayActions) -> dict[str, Any]:
         "groups": [
             action_group_to_dict(group, index + 1, actions)
             for index, group in enumerate(actions.groups)
+        ],
+    }
+
+
+def _money(value: Decimal | None) -> str | None:
+    return None if value is None else str(value)
+
+
+def _month_money(money: MonthMoney) -> dict[str, Any]:
+    return {
+        "prepayments": str(money.prepayments),
+        "additional": str(money.additional),
+        "full": str(money.full),
+        "refunds": str(money.refunds),
+        "received": str(money.received),
+    }
+
+
+def my_month_to_dict(month: MyMonth) -> dict[str, Any]:
+    return {
+        "month": month.month,
+        "start": month.start.isoformat(),
+        "end": month.end.isoformat(),
+        "as_of": month.as_of.isoformat(),
+        "currency": month.currency,
+        "sales": month.sales,
+        "previous_sales": month.previous_sales,
+        "new_clients": month.new_clients,
+        "turnover": str(month.turnover),
+        "debt": str(month.debt),
+        "average_check": _money(month.average_check),
+        "money": _month_money(month.money),
+        "targets": {"sales": _money(month.sales_target), "turnover": _money(month.turnover_target)},
+        "meetings": {
+            "assigned": month.meetings.assigned,
+            "passed": month.meetings.passed,
+            "ahead": month.meetings.ahead,
+            "held": month.meetings.held,
+            "attendance_percent": _money(month.meetings.attendance_percent),
+            "sales_per_meeting_percent": _money(month.sales_per_meeting_percent),
+        },
+        "earnings": (
+            None
+            if month.earnings is None
+            else {
+                "base_salary": str(month.earnings.base_salary),
+                "commission_percent": str(month.earnings.commission_percent),
+                "commission": str(month.earnings.commission),
+                "total": str(month.earnings.total),
+            }
+        ),
+        "products": [
+            {
+                "product_id": str(product.product_id),
+                "name": product.name,
+                "sales": product.sales,
+                "previous_sales": product.previous_sales,
+                "turnover": str(product.turnover),
+                "average_check": _money(product.average_check),
+                "money": _month_money(product.money),
+            }
+            for product in month.products
         ],
     }

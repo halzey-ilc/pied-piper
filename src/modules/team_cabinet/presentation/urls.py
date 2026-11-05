@@ -1,6 +1,8 @@
 from django.urls import path
 
 from modules.team_cabinet.presentation.views import (
+    MyFocusView,
+    MyMonthView,
     TeamFunnelView,
     TeamInactivityView,
     TeamLossesView,
@@ -13,6 +15,8 @@ from modules.team_cabinet.presentation.views import (
 
 urlpatterns = [
     path("today/", TeamTodayView.as_view(), name="team-today"),
+    path("my-month/", MyMonthView.as_view(), name="team-my-month"),
+    path("my-focus/", MyFocusView.as_view(), name="team-my-focus"),
     path("inactivity/", TeamInactivityView.as_view(), name="team-inactivity"),
     path("plan-fact/", TeamPlanFactView.as_view(), name="team-plan-fact"),
     path("reports/", TeamReportsView.as_view(), name="team-reports"),

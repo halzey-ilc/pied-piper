@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from modules.audit.infrastructure.audit_log import DjangoAuditLog
-from modules.organizations.composition import company_settings
+from modules.organizations.composition import active_member_departments, company_settings
+from modules.planning.application.compensation import CompensationService
 from modules.planning.application.service import PlanningService
 from modules.planning.application.work_sessions import WorkSessionService
 from modules.planning.infrastructure.actuals import DjangoPlanActuals
+from modules.planning.infrastructure.compensation import DjangoCompensationRepository
 from modules.planning.infrastructure.repository import (
     DjangoAbsenceRepository,
     DjangoPlanRepository,
@@ -39,4 +41,17 @@ def work_session_service() -> WorkSessionService:
         repository=DjangoWorkSessionRepository(tenant.db_alias),
         roster=DjangoDepartmentRoster(tenant.tenant_id),
         uow=DjangoUnitOfWork(tenant.db_alias),
+    )
+
+
+def compensation_service() -> CompensationService:
+    tenant = require_tenant()
+    return CompensationService(
+        repository=DjangoCompensationRepository(tenant.db_alias),
+        uow=DjangoUnitOfWork(tenant.db_alias),
+        audit=DjangoAuditLog(tenant.db_alias),
+        currency=str(company_settings(tenant.tenant_id)["currency"]),
+        is_member=lambda user_id: any(
+            member == user_id for member, _, _ in active_member_departments(tenant.tenant_id)
+        ),
     )

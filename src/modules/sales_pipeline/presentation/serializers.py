@@ -13,6 +13,7 @@ from modules.sales_pipeline.domain.custom_field import CustomFieldDefinition, Cu
 from modules.sales_pipeline.domain.deal import MAX_TITLE_LENGTH, Deal
 from modules.sales_pipeline.domain.loss_reason import LossReason
 from modules.sales_pipeline.domain.pipeline import MAX_STAGES, Pipeline, Stage, StageKind
+from modules.sales_pipeline.domain.product import Product
 from modules.sales_pipeline.domain.stage_change import StageChange
 
 # --- pipelines --------------------------------------------------------------
@@ -164,6 +165,7 @@ class DealCreateSerializer(serializers.Serializer[dict[str, Any]]):
     )
     custom_fields = serializers.DictField(required=False)
     expected_close_date = serializers.DateField(required=False, allow_null=True)
+    product_id = serializers.UUIDField(required=False, allow_null=True)
 
 
 class DealUpdateSerializer(serializers.Serializer[dict[str, Any]]):
@@ -181,6 +183,7 @@ class DealUpdateSerializer(serializers.Serializer[dict[str, Any]]):
     )
     custom_fields = serializers.DictField(required=False)
     expected_close_date = serializers.DateField(required=False, allow_null=True)
+    product_id = serializers.UUIDField(required=False, allow_null=True)
     version = serializers.IntegerField(required=False, min_value=1)
 
 
@@ -225,6 +228,33 @@ class LossReasonListSerializer(serializers.Serializer[dict[str, Any]]):
     results = LossReasonReadSerializer(many=True, read_only=True)
 
 
+# --- products ---------------------------------------------------------------
+
+
+class ProductCreateSerializer(serializers.Serializer[dict[str, Any]]):
+    name = serializers.CharField(max_length=100)
+    show_on_my_day = serializers.BooleanField(required=False, default=True)
+
+
+class ProductUpdateSerializer(serializers.Serializer[dict[str, Any]]):
+    name = serializers.CharField(required=False, max_length=100)
+    is_active = serializers.BooleanField(required=False)
+    show_on_my_day = serializers.BooleanField(required=False)
+
+
+class ProductReadSerializer(serializers.Serializer[dict[str, Any]]):
+    id = serializers.UUIDField(read_only=True)
+    name = serializers.CharField(read_only=True)
+    is_active = serializers.BooleanField(read_only=True)
+    show_on_my_day = serializers.BooleanField(read_only=True)
+    created_at = serializers.DateTimeField(read_only=True)
+
+
+class ProductListSerializer(serializers.Serializer[dict[str, Any]]):
+    count = serializers.IntegerField(read_only=True)
+    results = ProductReadSerializer(many=True, read_only=True)
+
+
 # --- stage history ----------------------------------------------------------
 
 
@@ -261,6 +291,7 @@ class DealReadSerializer(serializers.Serializer[dict[str, Any]]):
     closed_at = serializers.DateTimeField(read_only=True, allow_null=True)
     lost_reason = serializers.CharField(read_only=True, allow_null=True)
     loss_reason_id = serializers.UUIDField(read_only=True, allow_null=True)
+    product_id = serializers.UUIDField(read_only=True, allow_null=True)
     version = serializers.IntegerField(read_only=True)
     created_at = serializers.DateTimeField(read_only=True)
     updated_at = serializers.DateTimeField(read_only=True, allow_null=True)
@@ -345,6 +376,7 @@ def deal_to_dict(deal: Deal) -> dict[str, Any]:
         "closed_at": deal.closed_at.isoformat() if deal.closed_at else None,
         "lost_reason": deal.lost_reason,
         "loss_reason_id": str(deal.loss_reason_id) if deal.loss_reason_id else None,
+        "product_id": str(deal.product_id) if deal.product_id else None,
         "version": deal.version,
         "created_at": deal.created_at.isoformat(),
         "updated_at": deal.updated_at.isoformat() if deal.updated_at else None,
@@ -417,4 +449,14 @@ def custom_field_to_dict(definition: CustomFieldDefinition) -> dict[str, Any]:
         "required": definition.required,
         "is_active": definition.is_active,
         "created_at": definition.created_at.isoformat(),
+    }
+
+
+def product_to_dict(product: Product) -> dict[str, Any]:
+    return {
+        "id": str(product.id),
+        "name": product.name,
+        "is_active": product.is_active,
+        "show_on_my_day": product.show_on_my_day,
+        "created_at": product.created_at.isoformat(),
     }

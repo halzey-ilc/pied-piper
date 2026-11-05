@@ -9,6 +9,7 @@ from rest_framework import serializers
 
 from modules.planning.application.service import PlanProgress
 from modules.planning.domain.absence import Absence, AbsenceKind
+from modules.planning.domain.compensation import Compensation
 from modules.planning.domain.plan import Plan, PlanChange, PlanMetric, PlanScope
 
 
@@ -170,4 +171,34 @@ def progress_to_dict(progress: PlanProgress, currency: str) -> dict[str, Any]:
         "remaining": str(progress.remaining) if progress.remaining is not None else None,
         # Only with ?daily=true: cumulative actual per day, up to today.
         "daily": [{"date": d.isoformat(), "actual": str(v)} for d, v in progress.daily],
+    }
+
+
+class CompensationSetSerializer(serializers.Serializer[dict[str, Any]]):
+    base_salary = serializers.DecimalField(max_digits=16, decimal_places=2, min_value=Decimal(0))
+    commission_percent = serializers.DecimalField(
+        max_digits=5, decimal_places=2, min_value=Decimal(0), max_value=Decimal(100)
+    )
+
+
+class CompensationReadSerializer(serializers.Serializer[dict[str, Any]]):
+    user_id = serializers.UUIDField(read_only=True)
+    base_salary = serializers.DecimalField(max_digits=16, decimal_places=2, read_only=True)
+    commission_percent = serializers.DecimalField(max_digits=5, decimal_places=2, read_only=True)
+    currency = serializers.CharField(read_only=True)
+    updated_at = serializers.DateTimeField(read_only=True)
+
+
+class CompensationListSerializer(serializers.Serializer[dict[str, Any]]):
+    count = serializers.IntegerField(read_only=True)
+    results = CompensationReadSerializer(many=True, read_only=True)
+
+
+def compensation_to_dict(terms: Compensation) -> dict[str, Any]:
+    return {
+        "user_id": str(terms.user_id),
+        "base_salary": str(terms.base_salary),
+        "commission_percent": str(terms.commission_percent),
+        "currency": terms.currency,
+        "updated_at": terms.updated_at.isoformat(),
     }

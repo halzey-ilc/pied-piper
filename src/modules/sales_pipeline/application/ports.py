@@ -11,6 +11,7 @@ from modules.sales_pipeline.domain.custom_field import CustomFieldDefinition
 from modules.sales_pipeline.domain.deal import Deal, DealStatus
 from modules.sales_pipeline.domain.loss_reason import LossReason
 from modules.sales_pipeline.domain.pipeline import Pipeline
+from modules.sales_pipeline.domain.product import Product
 from modules.sales_pipeline.domain.stage_change import StageChange
 
 
@@ -155,6 +156,18 @@ class LossReasonRepository(Protocol):
     def list_all(self, *, active_only: bool = False) -> list[LossReason]: ...
 
     def save(self, reason: LossReason) -> None: ...
+
+    def exists_by_name(self, name: str) -> bool: ...
+
+
+class ProductRepository(Protocol):
+    def add(self, product: Product) -> None: ...
+
+    def get(self, product_id: UUID) -> Product | None: ...
+
+    def list_all(self, *, active_only: bool = False) -> list[Product]: ...
+
+    def save(self, product: Product) -> None: ...
 
     def exists_by_name(self, name: str) -> bool: ...
 

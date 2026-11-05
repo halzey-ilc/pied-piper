@@ -13,6 +13,7 @@ from modules.sales_pipeline.application.custom_field_service import CustomFieldS
 from modules.sales_pipeline.application.deal_service import DealService
 from modules.sales_pipeline.application.loss_reason_service import LossReasonService
 from modules.sales_pipeline.application.pipeline_service import PipelineService
+from modules.sales_pipeline.application.product_service import ProductService
 from modules.sales_pipeline.domain.pipeline import Pipeline, StageDefinition, StageKind
 from modules.sales_pipeline.infrastructure.customer_lookup import DjangoCustomerLookup
 from modules.sales_pipeline.infrastructure.deal_meetings import MeetingsDealMeetings
@@ -21,6 +22,7 @@ from modules.sales_pipeline.infrastructure.repository import (
     DjangoDealRepository,
     DjangoLossReasonRepository,
     DjangoPipelineRepository,
+    DjangoProductRepository,
     DjangoStageChangeRepository,
 )
 from platform_core.application.context import require_tenant
@@ -77,6 +79,7 @@ def deal_service() -> DealService:
         trail=DjangoAuditLog(alias),
         meetings=MeetingsDealMeetings(),
         next_steps=ActivityNextSteps(),
+        products=DjangoProductRepository(alias),
     )
 
 
@@ -84,6 +87,15 @@ def loss_reason_service() -> LossReasonService:
     alias = require_tenant().db_alias
     return LossReasonService(
         repository=DjangoLossReasonRepository(alias),
+        uow=DjangoUnitOfWork(alias),
+        audit=DjangoAuditLog(alias),
+    )
+
+
+def product_service() -> ProductService:
+    alias = require_tenant().db_alias
+    return ProductService(
+        repository=DjangoProductRepository(alias),
         uow=DjangoUnitOfWork(alias),
         audit=DjangoAuditLog(alias),
     )

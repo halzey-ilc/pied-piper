@@ -297,6 +297,7 @@ class LeadConvertView(LeadBaseView):
                         currency=currency,
                         pipeline_id=create_deal.get("pipeline_id"),
                         customer_id=result.customer_id,
+                        product_id=create_deal.get("product_id"),
                     ),
                 )
                 deals = deal_service()

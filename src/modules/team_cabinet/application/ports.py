@@ -14,6 +14,7 @@ from modules.team_cabinet.domain.analytics import (
     StageStat,
 )
 from modules.team_cabinet.domain.board import Member, RawDay
+from modules.team_cabinet.domain.my_month import MeetingsMonth, MonthMoney, SoldDeal
 from modules.team_cabinet.domain.period import Discipline, PeriodMetrics
 
 
@@ -128,8 +129,20 @@ class ActionsReader(Protocol):
     ) -> ActionGroup: ...
 
     def overdue_tasks(
-        self, owners: list[UUID] | None, *, today: date, limit: int
-    ) -> ActionGroup: ...
+        self, owners: list[UUID] | None, *, today: date, limit: int, skip_misses: bool = False
+    ) -> ActionGroup:
+        """``skip_misses`` leaves out «Работа над ошибками» tasks (their own group)."""
+        ...
+
+    def miss_tasks(self, owners: list[UUID] | None, *, today: date, limit: int) -> ActionGroup:
+        """Open «Работа над ошибками» tasks (task type review), nearest due date first."""
+        ...
+
+    def debts_to_collect(
+        self, owners: list[UUID] | None, *, now: datetime, limit: int
+    ) -> ActionGroup:
+        """Open or won deals with confirmed money (deal currency) below the deal amount."""
+        ...
 
     def tasks_due_soon(
         self, owners: list[UUID] | None, *, today: date, limit: int
@@ -156,3 +169,28 @@ class ActionsReader(Protocol):
     ) -> set[UUID]:
         """Users with a work session started today or still open."""
         ...
+
+
+class MyMonthReader(Protocol):
+    """One member's own month: sales, money, meetings, pay terms and catalog products.
+    Money is in the company currency only."""
+
+    def sold_deals(self, user_id: UUID, start: date, end: date) -> list[SoldDeal]: ...
+
+    def sales_by_product(self, user_id: UUID, start: date, end: date) -> dict[UUID | None, int]: ...
+
+    def new_clients_count(self, user_id: UUID, start: date, end: date) -> int: ...
+
+    def money(
+        self, user_id: UUID, start: date, end: date
+    ) -> tuple[MonthMoney, dict[UUID, MonthMoney]]: ...
+
+    def meetings(
+        self, user_id: UUID, start: datetime, end: datetime, now: datetime
+    ) -> MeetingsMonth: ...
+
+    def targets(self, user_id: UUID, month: str) -> tuple[Decimal | None, Decimal | None]: ...
+
+    def pay_terms(self, user_id: UUID) -> tuple[Decimal, Decimal] | None: ...
+
+    def shown_products(self) -> list[tuple[UUID, str]]: ...

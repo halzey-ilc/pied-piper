@@ -16,6 +16,13 @@ rule. Groups are always returned, also when empty, so the client can show an emp
 * ``managers_without_activity`` - managers (sales, lead callers) not on a planned absence who
   did not start a shift today or have no calls, meetings or payments today.
 
+A sales manager's own «Фокус» (owner decision of 05.11.2026) uses the same rules for their own
+records, plus two groups of its own:
+
+* ``miss_tasks``       - open tasks the head of sales gave on the manager's mistakes
+  («Работа над ошибками», task type ``review``); first in the list;
+* ``debts_to_collect`` - open or won deals with confirmed money below the deal amount.
+
 Money: only confirmed payments count as paid; sums are kept per currency, never added
 across currencies.
 """
@@ -46,10 +53,32 @@ class ActionKind(StrEnum):
     DEALS_TO_PUSH = "deals_to_push"
     LEADS_WITHOUT_CONTACT = "leads_without_contact"
     MANAGERS_WITHOUT_ACTIVITY = "managers_without_activity"
+    MISS_TASKS = "miss_tasks"
+    DEBTS_TO_COLLECT = "debts_to_collect"
 
 
-# Priority order: the list is shown in this order.
-ACTION_ORDER: tuple[ActionKind, ...] = tuple(ActionKind)
+# Priority order of the head of sales' list: shown in this order.
+ACTION_ORDER: tuple[ActionKind, ...] = (
+    ActionKind.PAYMENTS_TO_VERIFY,
+    ActionKind.OVERDUE_TASKS,
+    ActionKind.TASKS_DUE_SOON,
+    ActionKind.MEETINGS_WITHOUT_OUTCOME,
+    ActionKind.DEALS_WITHOUT_NEXT_STEP,
+    ActionKind.DEALS_TO_PUSH,
+    ActionKind.LEADS_WITHOUT_CONTACT,
+    ActionKind.MANAGERS_WITHOUT_ACTIVITY,
+)
+
+# Priority order of a manager's own «Фокус».
+FOCUS_ORDER: tuple[ActionKind, ...] = (
+    ActionKind.MISS_TASKS,
+    ActionKind.OVERDUE_TASKS,
+    ActionKind.DEALS_TO_PUSH,
+    ActionKind.DEBTS_TO_COLLECT,
+    ActionKind.LEADS_WITHOUT_CONTACT,
+    ActionKind.MEETINGS_WITHOUT_OUTCOME,
+    ActionKind.DEALS_WITHOUT_NEXT_STEP,
+)
 
 
 class PushReason(StrEnum):
@@ -145,6 +174,8 @@ TITLES: dict[ActionKind, str] = {
     ActionKind.DEALS_TO_PUSH: "Сделки на дожим",
     ActionKind.LEADS_WITHOUT_CONTACT: "Необработанные лиды",
     ActionKind.MANAGERS_WITHOUT_ACTIVITY: "Менеджеры не на смене или без активности",
+    ActionKind.MISS_TASKS: "Задачи по проколам",
+    ActionKind.DEBTS_TO_COLLECT: "Собрать долг",
 }
 
 
@@ -175,6 +206,15 @@ def rule_text(kind: ActionKind, thresholds: ActionThresholds) -> str:
         ActionKind.MANAGERS_WITHOUT_ACTIVITY: (
             "Менеджер не в плановом отсутствии и сегодня не начал смену либо не сделал "
             "ни звонка, ни встречи, ни оплаты."
+        ),
+        ActionKind.MISS_TASKS: (
+            "Открытые задачи «Работы над ошибками», которые руководитель поставил по "
+            "проколам менеджера. Их делают в первую очередь."
+        ),
+        ActionKind.DEBTS_TO_COLLECT: (
+            "Открытая или выигранная сделка, по которой подтверждённых оплат меньше суммы "
+            "сделки: клиент внёс предоплату, остаток нужно собрать. Деньги — только в валюте "
+            "сделки."
         ),
     }
     return rules[kind]

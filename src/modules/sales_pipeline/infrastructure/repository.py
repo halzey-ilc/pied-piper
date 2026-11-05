@@ -12,6 +12,7 @@ from modules.sales_pipeline.domain.custom_field import CustomFieldDefinition, Cu
 from modules.sales_pipeline.domain.deal import Deal, DealStatus
 from modules.sales_pipeline.domain.loss_reason import LossReason
 from modules.sales_pipeline.domain.pipeline import Pipeline, Stage, StageKind, SystemStage
+from modules.sales_pipeline.domain.product import Product
 from modules.sales_pipeline.domain.stage_change import StageChange
 from modules.sales_pipeline.infrastructure.models import (
     CustomFieldDefinitionRecord,
@@ -19,6 +20,7 @@ from modules.sales_pipeline.infrastructure.models import (
     DealStageChangeRecord,
     LossReasonRecord,
     PipelineRecord,
+    ProductRecord,
     StageRecord,
 )
 from shared.domain.errors import ConflictError
@@ -66,6 +68,7 @@ def _deal_to_domain(row: DealRecord) -> Deal:
         closed_at=row.closed_at,
         lost_reason=row.lost_reason,
         loss_reason_id=row.loss_reason_id,
+        product_id=row.product_id,
         created_at=row.created_at,
         version=row.version,
         updated_at=row.updated_at,
@@ -259,6 +262,7 @@ class DjangoDealRepository:
             closed_at=deal.closed_at,
             lost_reason=deal.lost_reason,
             loss_reason_id=deal.loss_reason_id,
+            product_id=deal.product_id,
             version=deal.version,
             created_at=deal.created_at,
         )
@@ -287,6 +291,7 @@ class DjangoDealRepository:
                 closed_at=deal.closed_at,
                 lost_reason=deal.lost_reason,
                 loss_reason_id=deal.loss_reason_id,
+                product_id=deal.product_id,
                 version=F("version") + 1,
             )
         )
@@ -430,6 +435,48 @@ class DjangoLossReasonRepository:
 
     def exists_by_name(self, name: str) -> bool:
         return LossReasonRecord.objects.using(self.using).filter(name=name).exists()
+
+
+def _product_to_domain(row: ProductRecord) -> Product:
+    return Product(
+        id=row.id,
+        name=row.name,
+        is_active=row.is_active,
+        show_on_my_day=row.show_on_my_day,
+        created_at=row.created_at,
+    )
+
+
+class DjangoProductRepository:
+    def __init__(self, using: str) -> None:
+        self.using = using
+
+    def add(self, product: Product) -> None:
+        ProductRecord.objects.using(self.using).create(
+            id=product.id,
+            name=product.name,
+            is_active=product.is_active,
+            show_on_my_day=product.show_on_my_day,
+            created_at=product.created_at,
+        )
+
+    def get(self, product_id: UUID) -> Product | None:
+        row = ProductRecord.objects.using(self.using).filter(id=product_id).first()
+        return None if row is None else _product_to_domain(row)
+
+    def list_all(self, *, active_only: bool = False) -> list[Product]:
+        qs = ProductRecord.objects.using(self.using)
+        if active_only:
+            qs = qs.filter(is_active=True)
+        return [_product_to_domain(row) for row in qs.order_by("name")]
+
+    def save(self, product: Product) -> None:
+        ProductRecord.objects.using(self.using).filter(id=product.id).update(
+            name=product.name, is_active=product.is_active, show_on_my_day=product.show_on_my_day
+        )
+
+    def exists_by_name(self, name: str) -> bool:
+        return ProductRecord.objects.using(self.using).filter(name=name).exists()
 
 
 def _stage_change_to_domain(row: DealStageChangeRecord) -> StageChange:

@@ -21,7 +21,11 @@ from modules.planning.application.service import (
     PlanPart,
     SetPlan,
 )
-from modules.planning.composition import planning_service, work_session_service
+from modules.planning.composition import (
+    compensation_service,
+    planning_service,
+    work_session_service,
+)
 from modules.planning.domain.absence import AbsenceKind
 from modules.planning.domain.plan import PlanMetric, PlanScope
 from modules.planning.domain.work_session import MAX_OPEN, WorkSession, WorkSessionStatus
@@ -29,12 +33,16 @@ from modules.planning.presentation.serializers import (
     AbsenceCreateSerializer,
     AbsenceListSerializer,
     AbsenceReadSerializer,
+    CompensationListSerializer,
+    CompensationReadSerializer,
+    CompensationSetSerializer,
     PlanChangeListSerializer,
     PlanDistributeSerializer,
     PlanListSerializer,
     PlanReadSerializer,
     PlanSetSerializer,
     absence_to_dict,
+    compensation_to_dict,
     plan_change_to_dict,
     plan_to_dict,
     progress_to_dict,
@@ -416,3 +424,50 @@ class WorkSessionListView(_Scoped):
             offset=offset,
         )
         return Response({"count": total, "results": [work_session_to_dict(w) for w in items]})
+
+
+_PAY_TAGS = ["Planning"]
+
+
+class CompensationListView(_Scoped):
+    @extend_schema(
+        tags=_PAY_TAGS,
+        operation_id="compensation_list",
+        summary="Employees' pay terms",
+        description=(
+            "Salary and percent of the confirmed money taken in, per employee (only those "
+            "with terms set). Director only (company.settings.manage)."
+        ),
+        parameters=[_TENANT_HEADER],
+        responses=CompensationListSerializer,
+    )
+    def get(self, request: Request) -> Response:
+        terms = compensation_service().list_terms(self.principal())
+        return Response({"count": len(terms), "results": [compensation_to_dict(t) for t in terms]})
+
+
+class CompensationDetailView(_Scoped):
+    @extend_schema(
+        tags=_PAY_TAGS,
+        operation_id="compensation_set",
+        summary="Set an employee's pay terms",
+        description=(
+            "Monthly salary (in the company currency, may be 0) and the percent of the "
+            "confirmed money the employee takes in a month (prepayments, additional and full "
+            "payments, refunds subtracted). Director only. 404 for a non-member."
+        ),
+        parameters=[_TENANT_HEADER],
+        request=CompensationSetSerializer,
+        responses=CompensationReadSerializer,
+    )
+    def put(self, request: Request, user_id: UUID) -> Response:
+        serializer = CompensationSetSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        terms = compensation_service().set_terms(
+            self.principal(),
+            user_id,
+            base_salary=data["base_salary"],
+            commission_percent=data["commission_percent"],
+        )
+        return Response(compensation_to_dict(terms))

@@ -104,6 +104,24 @@ class CustomFieldDefinitionRecord(models.Model):
         return f"{self.label} ({self.key})"
 
 
+class ProductRecord(models.Model):
+    id = models.UUIDField(primary_key=True, editable=False)
+    name = models.CharField(max_length=100)
+    is_active = models.BooleanField(default=True)
+    show_on_my_day = models.BooleanField(default=True)
+    created_at = models.DateTimeField()
+
+    class Meta:
+        db_table = "sales_product"
+        constraints = [
+            models.UniqueConstraint(fields=["name"], name="sales_product_name"),
+        ]
+        ordering = ["name"]
+
+    def __str__(self) -> str:
+        return self.name
+
+
 class DealRecord(models.Model):
     id = models.UUIDField(primary_key=True, editable=False)
     title = models.CharField(max_length=200)
@@ -132,6 +150,7 @@ class DealRecord(models.Model):
         blank=True,
         related_name="deals",
     )
+    product_id = models.UUIDField(null=True, blank=True)
     version = models.PositiveIntegerField(default=1)
     created_at = models.DateTimeField()
     updated_at = models.DateTimeField(auto_now=True)
@@ -145,6 +164,7 @@ class DealRecord(models.Model):
             models.Index(fields=["team_id"], name="deal_team_idx"),
             models.Index(fields=["customer_id"], name="deal_customer_idx"),
             models.Index(fields=["created_at"], name="deal_created_idx"),
+            models.Index(fields=["product_id"], name="deal_product_idx"),
         ]
 
     def __str__(self) -> str:

@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from modules.organizations.composition import company_settings
+from modules.team_cabinet.application.my_day import MyDayService
 from modules.team_cabinet.application.service import TeamCabinetService
 from modules.team_cabinet.infrastructure.actions import DjangoActionsReader
 from modules.team_cabinet.infrastructure.analytics import DjangoAnalyticsReader
+from modules.team_cabinet.infrastructure.my_month import DjangoMyMonthReader
 from modules.team_cabinet.infrastructure.reader import DjangoCabinetReader, DjangoTeamRoster
 from platform_core.application.context import require_tenant
 
@@ -20,4 +22,16 @@ def team_cabinet_service() -> TeamCabinetService:
         reader=DjangoCabinetReader(tenant.db_alias, currency),
         analytics=DjangoAnalyticsReader(tenant.db_alias, currency),
         actions=DjangoActionsReader(tenant.db_alias),
+    )
+
+
+def my_day_service() -> MyDayService:
+    tenant = require_tenant()
+    settings = company_settings(tenant.tenant_id)
+    currency = str(settings["currency"])
+    return MyDayService(
+        month_reader=DjangoMyMonthReader(tenant.db_alias, currency),
+        actions=DjangoActionsReader(tenant.db_alias),
+        currency=currency,
+        timezone_name=str(settings["timezone"]),
     )

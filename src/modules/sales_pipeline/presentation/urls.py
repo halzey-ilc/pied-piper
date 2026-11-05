@@ -20,6 +20,8 @@ from modules.sales_pipeline.presentation.views import (
     PipelineStageDetailView,
     PipelineStageOrderView,
     PipelineStagesView,
+    ProductDetailView,
+    ProductListCreateView,
 )
 
 urlpatterns = [
@@ -51,6 +53,8 @@ urlpatterns = [
         LossReasonDetailView.as_view(),
         name="loss-reason-detail",
     ),
+    path("products/", ProductListCreateView.as_view(), name="product-list"),
+    path("products/<uuid:product_id>/", ProductDetailView.as_view(), name="product-detail"),
     path("custom-fields/", CustomFieldListCreateView.as_view(), name="custom-field-list"),
     path(
         "custom-fields/<uuid:field_id>/",

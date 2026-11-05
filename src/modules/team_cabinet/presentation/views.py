@@ -17,7 +17,7 @@ from rest_framework.response import Response
 
 from modules.access_control.domain.rbac import Principal, Role
 from modules.organizations.composition import company_settings
-from modules.team_cabinet.composition import team_cabinet_service
+from modules.team_cabinet.composition import my_day_service, team_cabinet_service
 from modules.team_cabinet.domain.actions import DEFAULT_ACTIONS_LIMIT, MAX_ACTIONS_LIMIT
 from modules.team_cabinet.domain.board import TrafficThresholds
 from modules.team_cabinet.presentation.serializers import (
@@ -28,6 +28,7 @@ from modules.team_cabinet.presentation.serializers import (
     funnel_to_dict,
     losses_to_dict,
     member_card_to_dict,
+    my_month_to_dict,
     plan_fact_to_dict,
     score_history_to_dict,
     team_report_to_dict,
@@ -487,3 +488,55 @@ class TeamMemberScoresView(_Scoped):
             thresholds=self._thresholds(),
         )
         return Response(score_history_to_dict(history))
+
+
+class MyMonthView(_Scoped):
+    @extend_schema(
+        tags=_TAGS,
+        operation_id="team_my_month",
+        summary="My month («Мой день» of a sales manager)",
+        description=(
+            "The caller's own month (`month=YYYY-MM`, default the current one), in the company "
+            "currency: sales (deals whose first confirmed payment fell in the month, credited "
+            "to its seller) and last month's, new clients, turnover, debt and average check of "
+            "those deals; confirmed money taken in the month by kind (prepayments, additional, "
+            "full, refunds, received); own meetings dated in the month (assigned, passed, ahead, "
+            "held, attendance = held/passed, sales per held meeting); the user's monthly_sales "
+            "and monthly_turnover plan targets; `earnings` = salary + percent of the money "
+            "received, by the director's terms (null until set); and a block per catalog product "
+            "shown on «Мой день». Needs payments.view (own scope is enough)."
+        ),
+        parameters=[
+            _TENANT_HEADER,
+            OpenApiParameter("month", str, OpenApiParameter.QUERY, description="YYYY-MM"),
+        ],
+        responses=None,
+    )
+    def get(self, request: Request) -> Response:
+        month = request.query_params.get("month") or None
+        if month is not None and not _MONTH_RE.match(month):
+            raise DomainValidationError("month must be YYYY-MM.")
+        return Response(my_month_to_dict(my_day_service().my_month(self.principal(), month)))
+
+
+class MyFocusView(_Scoped):
+    @extend_schema(
+        tags=_TAGS,
+        operation_id="team_my_focus",
+        summary="My focus (a sales manager's priority list)",
+        description=(
+            "The caller's own records that need work, in this order: miss_tasks (open "
+            "«Работа над ошибками» tasks from the head of sales), overdue_tasks (other overdue "
+            "tasks), deals_to_push, debts_to_collect (open or won deals with confirmed money "
+            "below the amount), leads_without_contact, meetings_without_outcome, "
+            "deals_without_next_step. Same shape and rules as `actions` of the today board. "
+            "Needs activities.view (own scope is enough); not tied to the operations plan gate."
+        ),
+        parameters=[_TENANT_HEADER, _ACTIONS_LIMIT],
+        responses=None,
+    )
+    def get(self, request: Request) -> Response:
+        focus = my_day_service().my_focus(
+            self.principal(), limit=_actions_limit(request.query_params.get("actions_limit"))
+        )
+        return Response(today_actions_to_dict(focus))
