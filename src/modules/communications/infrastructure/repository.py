@@ -29,6 +29,7 @@ def _conv_to_domain(row: ConversationRecord) -> Conversation:
         status=ConversationStatus(row.status),
         contact_name=row.contact_name,
         customer_id=row.customer_id,
+        lead_id=row.lead_id,
         team_id=row.team_id,
         last_message_at=row.last_message_at,
         unread_count=row.unread_count,
@@ -137,6 +138,18 @@ class DjangoConversationRepository:
     def message_exists(self, channel: Channel, external_id: str) -> bool:
         return self._msg().filter(channel=channel.value, external_id=external_id).exists()
 
+    def mark_failed(self, channel: Channel, external_id: str) -> bool:
+        updated = (
+            self._msg()
+            .filter(
+                channel=channel.value,
+                external_id=external_id,
+                direction=MessageDirection.OUTBOUND.value,
+            )
+            .update(status=MessageStatus.FAILED.value)
+        )
+        return updated > 0
+
     def list_messages(self, conversation_id: UUID, *, limit: int, offset: int) -> list[Message]:
         rows = (
             self._msg()
@@ -160,6 +173,7 @@ class DjangoConversationRepository:
             "contact_name": conversation.contact_name,
             "status": conversation.status.value,
             "customer_id": conversation.customer_id,
+            "lead_id": conversation.lead_id,
             "owner_user_id": conversation.owner_user_id,
             "team_id": conversation.team_id,
             "last_message_at": conversation.last_message_at,

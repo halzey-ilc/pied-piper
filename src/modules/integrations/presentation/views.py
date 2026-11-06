@@ -7,9 +7,11 @@ unknown tenant and bad signature produce non-descriptive errors.
 
 from __future__ import annotations
 
+import hmac
 from typing import Any
 
 from django.conf import settings
+from django.http import HttpResponse
 from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import extend_schema
 from rest_framework import status
@@ -30,12 +32,48 @@ from platform_core.infrastructure.observability.metrics import WEBHOOKS
 from platform_core.infrastructure.tenancy.services import connection_registry, tenant_resolver
 from platform_core.presentation.errors import error_body
 
+MAX_CHALLENGE_LENGTH = 128
+
 
 class WebhookView(APIView):
     authentication_classes: list[Any] = []
     permission_classes = [AllowAny]
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = "webhooks"
+
+    @extend_schema(
+        tags=["Webhooks"],
+        operation_id="webhook_verify",
+        summary="Answer the WhatsApp webhook verification",
+        description=(
+            "Called once by Meta when the webhook URL is registered. Echoes `hub.challenge` "
+            "as plain text if `hub.verify_token` matches. Returns 403 for a wrong token and "
+            "404 for any other provider, an unknown tenant or an unset token."
+        ),
+        auth=[],
+        responses={(200, "text/plain"): OpenApiTypes.STR},
+    )
+    def get(self, request: Request, provider: str, tenant_slug: str) -> HttpResponse | Response:
+        expected = settings.INTEGRATIONS["WHATSAPP"]["VERIFY_TOKEN"]
+        if provider != Provider.WHATSAPP.value or expected is None:
+            return Response(error_body("not_found", "Not found."), status=status.HTTP_404_NOT_FOUND)
+
+        context = tenant_resolver().resolve_for_system(tenant_slug).context
+        connection_registry().release(context.db_alias)
+
+        supplied = request.query_params.get("hub.verify_token", "")
+        challenge = request.query_params.get("hub.challenge", "")
+        if (
+            request.query_params.get("hub.mode") != "subscribe"
+            or not challenge
+            or len(challenge) > MAX_CHALLENGE_LENGTH
+            or not hmac.compare_digest(supplied.encode(), expected.get_secret_value().encode())
+        ):
+            return Response(
+                error_body("invalid_verify_token", "Verification failed."),
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        return HttpResponse(challenge, content_type="text/plain")
 
     @extend_schema(
         tags=["Webhooks"],

@@ -30,13 +30,20 @@ def body_hash(body: bytes) -> str:
 
 
 def _meta_event_id(payload: Mapping[str, Any], body: bytes) -> str:
-    # Meta batches changes in entry[].changes[]; message ids are nested inside.
+    # Meta batches changes in entry[].changes[]. A lone message keeps its own id;
+    # a batch hashes the body, so one sharing a first message is not dropped as a
+    # duplicate. Retries repeat the body, and ingest is idempotent per message.
     try:
-        value = payload["entry"][0]["changes"][0]["value"]
-        message_id = value["messages"][0]["id"]
-        return str(message_id)
-    except (KeyError, IndexError, TypeError):
+        ids = [
+            message["id"]
+            for entry in payload["entry"]
+            for change in entry["changes"]
+            for key in ("messages", "message_echoes")
+            for message in change["value"].get(key) or []
+        ]
+    except (KeyError, TypeError, AttributeError):
         return body_hash(body)
+    return str(ids[0]) if len(ids) == 1 else body_hash(body)
 
 
 def _telegram_event_id(payload: Mapping[str, Any], body: bytes) -> str:

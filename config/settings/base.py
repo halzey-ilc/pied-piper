@@ -563,6 +563,13 @@ INTEGRATIONS: dict[str, Any] = {
         "telegram": ENV.TELEGRAM_WEBHOOK_SECRET,
         "telephony": ENV.TELEPHONY_WEBHOOK_SECRET,
     },
+    "WHATSAPP": {
+        "VERIFY_TOKEN": ENV.WHATSAPP_VERIFY_TOKEN,
+        "ACCESS_TOKEN": ENV.WHATSAPP_ACCESS_TOKEN,
+        "PHONE_NUMBER_ID": ENV.WHATSAPP_PHONE_NUMBER_ID,
+        "API_BASE_URL": ENV.WHATSAPP_API_BASE_URL,
+        "LEAD_OWNER_USER_ID": ENV.WHATSAPP_LEAD_OWNER_USER_ID,
+    },
 }
 
 # --- CRM AI Platform ----------------------------------------------------------

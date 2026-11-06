@@ -11,6 +11,7 @@ import os
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Annotated, Any, Literal
+from uuid import UUID
 
 from pydantic import Field, SecretStr, ValidationError, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
@@ -146,6 +147,15 @@ class AppEnv(BaseSettings):
     TELEGRAM_WEBHOOK_SECRET: SecretStr | None = None
     TELEPHONY_WEBHOOK_SECRET: SecretStr | None = None
 
+    # WhatsApp Cloud API. Replies stay on the stub sender until both the access
+    # token and the phone number id are set. Leads are auto-created for unknown
+    # numbers only when an owner is set (a lead always needs an owner).
+    WHATSAPP_VERIFY_TOKEN: SecretStr | None = None
+    WHATSAPP_ACCESS_TOKEN: SecretStr | None = None
+    WHATSAPP_PHONE_NUMBER_ID: str | None = None
+    WHATSAPP_API_BASE_URL: str = "https://graph.facebook.com/v23.0"
+    WHATSAPP_LEAD_OWNER_USER_ID: UUID | None = None
+
     # CRM AI Platform (separate service). Off unless explicitly enabled.
     AI_PLATFORM_ENABLED: bool = False
     AI_PLATFORM_URL: str | None = None
@@ -183,6 +193,10 @@ class AppEnv(BaseSettings):
         "INSTAGRAM_APP_SECRET",
         "TELEGRAM_WEBHOOK_SECRET",
         "TELEPHONY_WEBHOOK_SECRET",
+        "WHATSAPP_VERIFY_TOKEN",
+        "WHATSAPP_ACCESS_TOKEN",
+        "WHATSAPP_PHONE_NUMBER_ID",
+        "WHATSAPP_LEAD_OWNER_USER_ID",
         "AI_PLATFORM_TOKEN_KEY",
         mode="before",
     )

@@ -101,6 +101,7 @@ class Conversation:
     unread_count: int = 0
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     version: int = 1
+    lead_id: UUID | None = None
 
     @classmethod
     def start(
@@ -139,6 +140,22 @@ class Conversation:
         self.unread_count += 1
         self.version += 1
         return message, MessageReceived(conversation_id=self.id, channel=self.channel.value)
+
+    def record_echo(
+        self, *, text: str, external_id: str | None, occurred_at: datetime
+    ) -> tuple[Message, MessageSent]:
+        """Record a reply already sent outside the CRM (the WhatsApp app on the phone)."""
+        message = Message(
+            id=uuid4(),
+            direction=MessageDirection.OUTBOUND,
+            text=_clean_text(text),
+            status=MessageStatus.SENT,
+            created_at=occurred_at,
+            external_id=external_id,
+        )
+        self.last_message_at = occurred_at
+        self.version += 1
+        return message, MessageSent(conversation_id=self.id, channel=self.channel.value)
 
     def send(
         self, *, text: str, sender_user_id: UUID, occurred_at: datetime

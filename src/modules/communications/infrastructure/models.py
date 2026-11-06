@@ -22,6 +22,7 @@ class ConversationRecord(models.Model):
         default=ConversationStatus.OPEN.value,
     )
     customer_id = models.UUIDField(null=True, blank=True)
+    lead_id = models.UUIDField(null=True, blank=True)
     owner_user_id = models.UUIDField(null=True, blank=True)
     team_id = models.UUIDField(null=True, blank=True)
     last_message_at = models.DateTimeField(null=True, blank=True)
