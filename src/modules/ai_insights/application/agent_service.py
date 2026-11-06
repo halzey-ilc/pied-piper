@@ -22,6 +22,7 @@ from modules.access_control.domain.rbac import AccessPolicy, Permission, Princip
 from modules.ai_insights.application.agent_ports import (
     AgentRunRepository,
     AgentScheduler,
+    DataAnswers,
     SubjectReader,
     ToolExecutor,
 )
@@ -39,6 +40,13 @@ from modules.ai_insights.domain.agent import (
     build_payload,
     deal_names,
     message,
+    question_payload,
+)
+from modules.ai_insights.domain.agent_questions import (
+    DataAnswer,
+    Question,
+    answer_text,
+    question_in,
 )
 from modules.ai_insights.domain.insight import InsightStatus
 from modules.ai_insights.domain.report import validate_language
@@ -47,7 +55,12 @@ from modules.audit.domain.entry import AuditEntry
 from platform_core.application.ports import EventOutbox
 from shared.application.ports import UnitOfWork
 from shared.application.retry import PermanentError
-from shared.domain.errors import DomainError, DomainValidationError, NotFoundError
+from shared.domain.errors import (
+    AccessDeniedError,
+    DomainError,
+    DomainValidationError,
+    NotFoundError,
+)
 from shared.domain.events import DomainEvent
 
 logger = logging.getLogger(__name__)
@@ -69,6 +82,7 @@ class AgentService:
         self,
         repository: AgentRunRepository,
         subjects: SubjectReader,
+        answers: DataAnswers,
         executor: ToolExecutor,
         client: AiPlatformClient,
         scheduler: AgentScheduler,
@@ -85,6 +99,7 @@ class AgentService:
     ) -> None:
         self._repo = repository
         self._subjects = subjects
+        self._answers = answers
         self._executor = executor
         self._client = client
         self._scheduler = scheduler
@@ -122,6 +137,9 @@ class AgentService:
         if not self._enabled:
             raise AiDisabledError("AI features are not enabled for this installation.")
         self._policy.require(principal, Permission.AI_REQUEST)
+        question = question_in(request) if deal_id is None and customer_id is None else None
+        if question is not None:
+            return self._answer(principal, question, request, language)
         previous = self.get(principal, previous_run_id) if previous_run_id else None
         subjects: list[Subject] = []
         if deal_id is not None:
@@ -153,6 +171,29 @@ class AgentService:
             self._repo.add(run)
             self._record(principal.user_id, "agent_run.requested", run)
             self._scheduler.schedule_submit(tenant_slug=self._tenant_slug, run_id=run.id)
+        return run
+
+    def _answer(
+        self, principal: Principal, question: Question, request: str, language: str | None
+    ) -> AgentRun:
+        """A question about data: the CRM counts, with this user's rights, and no model
+        is involved."""
+        lang = validate_language(language or self._language)
+        today = datetime.now(self._tz).date()
+        payload = question_payload(language=lang, today=today.isoformat(), request=request)
+        try:
+            answer = self._answers.answer(principal, question, today=today, language=lang)
+        except AccessDeniedError:
+            answer = DataAnswer(answer_text(lang, "no_access"))
+        run = AgentRun.answer_locally(
+            requested_by=principal.user_id,
+            payload=payload,
+            summary=answer.summary,
+            items=[{"title": i.title, "ref": i.ref} for i in answer.items],
+        )
+        with self._uow:
+            self._repo.add(run)
+            self._record(principal.user_id, "agent_run.answered", run)
         return run
 
     def _earlier_subjects(self, principal: Principal, previous: AgentRun) -> list[Subject]:

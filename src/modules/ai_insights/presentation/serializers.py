@@ -203,6 +203,11 @@ class AgentChoiceSerializer(serializers.Serializer[dict[str, Any]]):
     title = serializers.CharField(read_only=True)
 
 
+class AgentItemSerializer(serializers.Serializer[dict[str, Any]]):
+    title = serializers.CharField(read_only=True)
+    ref = serializers.CharField(read_only=True, allow_null=True)
+
+
 class AgentActionSerializer(serializers.Serializer[dict[str, Any]]):
     index = serializers.IntegerField(read_only=True)
     tool = serializers.CharField(
@@ -235,6 +240,11 @@ class AgentRunSerializer(serializers.Serializer[dict[str, Any]]):
         many=True,
         read_only=True,
         help_text="Deals to pick from when the name was ambiguous; ask again with deal_id.",
+    )
+    items = AgentItemSerializer(
+        many=True,
+        read_only=True,
+        help_text="The lines of an answer the CRM computed (provider `crm`).",
     )
     requires_confirmation = serializers.BooleanField(
         read_only=True, help_text="Always true: nothing runs until you confirm an action."
@@ -270,6 +280,7 @@ def run_to_dict(run: AgentRun) -> dict[str, Any]:
         "summary": run.summary,
         "actions": [action_to_dict(a) for a in run.actions],
         "choices": run.payload.get("choices", []),
+        "items": run.payload.get("items", []),
         "requires_confirmation": True,
         "is_mock": run.is_mock,
         "provider": run.provider,

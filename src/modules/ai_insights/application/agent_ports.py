@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from datetime import date
 from typing import Protocol
 from uuid import UUID
 
 from modules.access_control.domain.rbac import Principal
 from modules.ai_insights.domain.agent import AgentAction, AgentRun, Subject
+from modules.ai_insights.domain.agent_questions import DataAnswer, Question
 
 
 class SubjectReader(Protocol):
@@ -19,6 +21,15 @@ class SubjectReader(Protocol):
 
     def customer(self, principal: Principal, customer_id: UUID) -> Subject:
         """Raises NotFoundError if the principal cannot see the customer."""
+        ...
+
+
+class DataAnswers(Protocol):
+    def answer(
+        self, principal: Principal, question: Question, *, today: date, language: str
+    ) -> DataAnswer:
+        """Counted by the owning modules as the principal. Raises AccessDeniedError if
+        the principal may not see this data."""
         ...
 
 

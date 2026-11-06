@@ -178,6 +178,20 @@ def proposed_text(actions: list[AgentAction]) -> str:
     return f"Proposed: {'; '.join(parts)}"[:MAX_REQUEST]
 
 
+def question_payload(*, language: str, today: str, request: str) -> dict[str, Any]:
+    """What every run stores; a question the CRM answers itself needs no more."""
+    text = request.strip()
+    if not text:
+        raise DomainValidationError("The request must not be empty.")
+    if len(text) > MAX_REQUEST:
+        raise DomainValidationError(f"The request must be at most {MAX_REQUEST} characters.")
+    return {
+        "language": validate_language(language),
+        "today": today,
+        "request": redact_contacts(text),
+    }
+
+
 def build_payload(
     *,
     language: str,
@@ -187,17 +201,10 @@ def build_payload(
     subjects: list[Subject],
     history: list[dict[str, str]] | None = None,
 ) -> dict[str, Any]:
-    text = request.strip()
-    if not text:
-        raise DomainValidationError("The request must not be empty.")
-    if len(text) > MAX_REQUEST:
-        raise DomainValidationError(f"The request must be at most {MAX_REQUEST} characters.")
     if not tools:
         raise DomainValidationError("You may not use any assistant tool.")
     payload: dict[str, Any] = {
-        "language": validate_language(language),
-        "today": today,
-        "request": redact_contacts(text),
+        **question_payload(language=language, today=today, request=request),
         "tools": [t.value for t in tools],
         "subjects": [_subject_json(s) for s in subjects],
     }
@@ -299,11 +306,14 @@ class AgentRun:
         payload: dict[str, Any],
         summary: str,
         choices: list[dict[str, str]] | None = None,
+        items: list[dict[str, str | None]] | None = None,
     ) -> AgentRun:
         """A run the CRM finishes itself, without the AI Platform. ``choices`` are records
-        the user can pick from; they stay in the CRM."""
+        the user can pick from and ``items`` the lines of a data answer; both stay in the
+        CRM."""
         run = cls.request_plan(
-            requested_by=requested_by, payload={**payload, "choices": choices or []}
+            requested_by=requested_by,
+            payload={**payload, "choices": choices or [], "items": items or []},
         )
         run.summary = summary[:300]
         run.provider, run.model = LOCAL_PROVIDER, "rules"
