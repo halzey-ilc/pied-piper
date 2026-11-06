@@ -594,11 +594,20 @@ INTEGRATIONS: dict[str, Any] = {
     "HTTP_CONNECT_TIMEOUT": 3.0,
     "HTTP_READ_TIMEOUT": 10.0,
     "WEBHOOK_MAX_BODY_BYTES": 512 * 1024,
+    # In production an unconfigured channel must fail, not pretend to have sent.
+    "ALLOW_STUB_SENDER": ENV.DJANGO_ENV != "production",
     "SECRETS": {
         "whatsapp": ENV.WHATSAPP_APP_SECRET,
         "instagram": ENV.INSTAGRAM_APP_SECRET,
         "telegram": ENV.TELEGRAM_WEBHOOK_SECRET,
         "telephony": ENV.TELEPHONY_WEBHOOK_SECRET,
+    },
+    "WHATSAPP": {
+        "VERIFY_TOKEN": ENV.WHATSAPP_VERIFY_TOKEN,
+        "ACCESS_TOKEN": ENV.WHATSAPP_ACCESS_TOKEN,
+        "PHONE_NUMBER_ID": ENV.WHATSAPP_PHONE_NUMBER_ID,
+        "API_BASE_URL": ENV.WHATSAPP_API_BASE_URL,
+        "LEAD_OWNER_USER_ID": ENV.WHATSAPP_LEAD_OWNER_USER_ID,
     },
 }
 

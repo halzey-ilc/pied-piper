@@ -24,6 +24,7 @@ class ConversationFilter:
     channel: Channel | None = None
     status: ConversationStatus | None = None
     customer_id: UUID | None = None
+    lead_id: UUID | None = None
 
 
 class ConversationRepository(Protocol):
@@ -50,6 +51,10 @@ class ConversationRepository(Protocol):
 
     def message_exists(self, channel: Channel, external_id: str) -> bool: ...
 
+    def mark_failed(self, channel: Channel, external_id: str, code: str | None) -> bool:
+        """Mark an outbound message as failed. Returns True if one was found."""
+        ...
+
     def list_messages(self, conversation_id: UUID, *, limit: int, offset: int) -> list[Message]: ...
 
     def recent_messages(self, conversation_id: UUID, *, limit: int) -> list[Message]:
@@ -58,9 +63,20 @@ class ConversationRepository(Protocol):
 
 
 class ChannelSender(Protocol):
-    """Sends an outbound message through a provider. Returns the provider message id.
-
-    Not wired to real accounts in the scaffold; a stub returns a synthetic id.
-    """
+    """Sends an outbound message through a provider. Returns the provider message id."""
 
     def send(self, *, channel: Channel, to_contact: str, text: str) -> str: ...
+
+
+@dataclass(frozen=True, slots=True)
+class ContactLink:
+    lead_id: UUID | None = None
+    customer_id: UUID | None = None
+
+
+class ContactLinker(Protocol):
+    """Finds the lead or customer behind a contact, capturing a lead if there is none."""
+
+    def link(
+        self, *, channel: Channel, external_contact_id: str, contact_name: str | None
+    ) -> ContactLink: ...

@@ -19,6 +19,7 @@ from modules.audit.application.ports import AuditLog
 from modules.audit.domain.entry import AuditEntry
 from modules.communications.application.ports import (
     ChannelSender,
+    ContactLinker,
     ConversationFilter,
     ConversationRepository,
     ConversationVisibility,
@@ -45,6 +46,15 @@ class InboundMessage:
     text: str
     occurred_at: datetime
     contact_name: str | None = None
+    # True for a reply the business sent outside the CRM (WhatsApp app echo).
+    from_business: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class DeliveryFailure:
+    channel: Channel
+    external_message_id: str
+    code: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,6 +76,7 @@ class ConversationService:
         outbox: EventOutbox,
         audit: AuditLog,
         policy: AccessPolicy | None = None,
+        linker: ContactLinker | None = None,
     ) -> None:
         self._repo = repository
         self._sender = sender
@@ -73,6 +84,7 @@ class ConversationService:
         self._outbox = outbox
         self._audit = audit
         self._policy = policy or AccessPolicy()
+        self._linker = linker
 
     # --- system: inbound ----------------------------------------------------
 
@@ -92,11 +104,14 @@ class ConversationService:
                     created_at=inbound.occurred_at,
                 )
             version = conversation.version
-            message, event = conversation.receive(
+            record = conversation.record_echo if inbound.from_business else conversation.receive
+            message, event = record(
                 text=inbound.text,
                 external_id=inbound.external_message_id,
                 occurred_at=inbound.occurred_at,
             )
+            if not inbound.from_business:
+                self._link_contact(conversation, inbound)
             if new_conversation:
                 self._repo.add(conversation)
             else:
@@ -104,6 +119,24 @@ class ConversationService:
             self._repo.add_message(conversation.id, message)
             self._outbox.add(event, aggregate_type=AGGREGATE, aggregate_id=str(conversation.id))
         return True
+
+    def _link_contact(self, conversation: Conversation, inbound: InboundMessage) -> None:
+        if self._linker is None or conversation.lead_id or conversation.customer_id:
+            return
+        link = self._linker.link(
+            channel=inbound.channel,
+            external_contact_id=inbound.external_contact_id,
+            contact_name=inbound.contact_name,
+        )
+        conversation.lead_id = link.lead_id
+        conversation.customer_id = link.customer_id
+
+    def mark_delivery_failed(self, failure: DeliveryFailure) -> bool:
+        """Record that the provider could not deliver a sent message."""
+        with self._uow:
+            return self._repo.mark_failed(
+                failure.channel, failure.external_message_id, failure.code
+            )
 
     # --- reads --------------------------------------------------------------
 

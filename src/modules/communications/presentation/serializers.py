@@ -18,6 +18,7 @@ class MessageReadSerializer(serializers.Serializer[dict[str, Any]]):
     status = serializers.CharField(read_only=True)
     external_id = serializers.CharField(read_only=True, allow_null=True)
     sender_user_id = serializers.UUIDField(read_only=True, allow_null=True)
+    failure_code = serializers.CharField(read_only=True, allow_null=True)
     created_at = serializers.DateTimeField(read_only=True)
 
 
@@ -28,6 +29,7 @@ class ConversationReadSerializer(serializers.Serializer[dict[str, Any]]):
     contact_name = serializers.CharField(read_only=True, allow_null=True)
     status = serializers.CharField(read_only=True)
     customer_id = serializers.UUIDField(read_only=True, allow_null=True)
+    lead_id = serializers.UUIDField(read_only=True, allow_null=True)
     owner_user_id = serializers.UUIDField(read_only=True, allow_null=True)
     unread_count = serializers.IntegerField(read_only=True)
     last_message_at = serializers.DateTimeField(read_only=True, allow_null=True)
@@ -52,6 +54,7 @@ def conversation_to_dict(c: Conversation) -> dict[str, Any]:
         "contact_name": c.contact_name,
         "status": c.status.value,
         "customer_id": str(c.customer_id) if c.customer_id else None,
+        "lead_id": str(c.lead_id) if c.lead_id else None,
         "owner_user_id": str(c.owner_user_id) if c.owner_user_id else None,
         "unread_count": c.unread_count,
         "last_message_at": c.last_message_at.isoformat() if c.last_message_at else None,
@@ -68,6 +71,7 @@ def message_to_dict(m: Message) -> dict[str, Any]:
         "status": m.status.value,
         "external_id": m.external_id,
         "sender_user_id": str(m.sender_user_id) if m.sender_user_id else None,
+        "failure_code": m.failure_code,
         "created_at": m.created_at.isoformat(),
     }
 

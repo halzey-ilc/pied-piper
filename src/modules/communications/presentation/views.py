@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
+from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import OpenApiParameter, extend_schema
 from rest_framework import status
 from rest_framework.request import Request
@@ -47,6 +48,9 @@ _STATUS = OpenApiParameter(
     description="Filter by status.",
     enum=[s.value for s in ConversationStatus],
 )
+_LEAD = OpenApiParameter(
+    "lead_id", OpenApiTypes.UUID, OpenApiParameter.QUERY, description="Filter by linked lead."
+)
 _LIMIT = OpenApiParameter(
     "limit", int, OpenApiParameter.QUERY, description="Page size 1-200 (default 50)."
 )
@@ -56,6 +60,14 @@ _OFFSET = OpenApiParameter(
 
 MAX_PAGE_SIZE = 200
 _TAGS = ["Communications"]
+
+
+def _lead_id(value: str | None) -> UUID | None:
+    # Unlike a bad enum, ignoring this would show a lead card someone else's chats.
+    try:
+        return UUID(value) if value else None
+    except ValueError:
+        raise DomainValidationError("lead_id must be a UUID.") from None
 
 
 class _Scoped(TenantScopedAPIView):
@@ -86,7 +98,7 @@ class ConversationListView(_Scoped):
             "Conversations visible to you (own/team/all by role; unassigned ones are visible "
             "so they can be picked up), most recent activity first."
         ),
-        parameters=[_TENANT_HEADER, _CHANNEL, _STATUS, _CUSTOMER, _LIMIT, _OFFSET],
+        parameters=[_TENANT_HEADER, _CHANNEL, _STATUS, _CUSTOMER, _LEAD, _LIMIT, _OFFSET],
         responses=ConversationListSerializer,
     )
     def get(self, request: Request) -> Response:
@@ -104,6 +116,7 @@ class ConversationListView(_Scoped):
             channel=Channel(ch) if ch in channels else None,
             status=ConversationStatus(st) if st in statuses else None,
             customer_id=customer_id,
+            lead_id=_lead_id(request.query_params.get("lead_id")),
         )
         page = conversation_service().list_conversations(
             self.principal(), filters, limit=limit, offset=offset
@@ -149,8 +162,9 @@ class MessagesView(_Scoped):
         operation_id="conversations_send",
         summary="Send a message",
         description=(
-            "Sends an outbound message in the conversation through its channel. In the "
-            "scaffold the channel sender is a stub (no real message is delivered). Requires "
+            "Sends an outbound message in the conversation through its channel. Returns 409 "
+            "if the provider rejects it or the channel is not connected. Delivery can still "
+            "fail later: the message then gets status `failed` and a `failure_code`. Requires "
             "the communications.send permission."
         ),
         parameters=[_TENANT_HEADER],

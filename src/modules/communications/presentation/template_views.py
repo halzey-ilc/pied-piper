@@ -9,7 +9,7 @@ from rest_framework import serializers, status
 from rest_framework.request import Request
 from rest_framework.response import Response
 
-from modules.communications.composition import outbound_connected, template_service
+from modules.communications.composition import template_service, whatsapp_connected
 from modules.communications.domain.conversation import Channel
 from modules.communications.domain.template import (
     MAX_BODY_LENGTH,
@@ -110,20 +110,20 @@ class ChannelsView(_Scoped):
         summary="Can the CRM send through each channel",
         description=(
             "Per channel: `can_send` is true only when a real provider adapter is connected. "
-            "In this installation none is, so clients must not offer sending."
+            "Only WhatsApp has one, and only once its account is configured."
         ),
         parameters=[_TENANT_HEADER],
         responses=OpenApiTypes.OBJECT,
     )
     def get(self, request: Request) -> Response:
-        connected = outbound_connected()
+        connected = {Channel.WHATSAPP} if whatsapp_connected() else set()
         return Response(
             {
                 "results": [
                     {
                         "channel": channel.value,
-                        "can_send": connected,
-                        "reason": None if connected else "provider_not_connected",
+                        "can_send": channel in connected,
+                        "reason": None if channel in connected else "provider_not_connected",
                     }
                     for channel in Channel
                 ]
