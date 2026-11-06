@@ -14,6 +14,7 @@ from modules.ai_insights.application.reply_service import ReplySuggestionService
 from modules.ai_insights.application.report_service import AiReportService
 from modules.ai_insights.application.service import CallInsightService
 from modules.ai_insights.infrastructure.agent_answers import CrmDataAnswers
+from modules.ai_insights.infrastructure.agent_commands import CrmCommands
 from modules.ai_insights.infrastructure.agent_repository import DjangoAgentRunRepository
 from modules.ai_insights.infrastructure.agent_tools import CrmSubjectReader, CrmToolExecutor
 from modules.ai_insights.infrastructure.calls import TelephonyCallReader
@@ -95,6 +96,7 @@ def agent_service() -> AgentService:
         repository=DjangoAgentRunRepository(alias),
         subjects=CrmSubjectReader(),
         answers=CrmDataAnswers(),
+        commands=CrmCommands(),
         executor=CrmToolExecutor(request_brief=_start_deal_brief, timezone_name=timezone_name),
         client=ai_platform_client(),
         scheduler=CeleryAgentScheduler(alias),

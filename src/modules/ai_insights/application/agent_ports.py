@@ -6,6 +6,7 @@ from uuid import UUID
 
 from modules.access_control.domain.rbac import Principal
 from modules.ai_insights.domain.agent import AgentAction, AgentRun, Subject
+from modules.ai_insights.domain.agent_commands import Command, Prepared
 from modules.ai_insights.domain.agent_questions import DataAnswer, Question
 
 
@@ -30,6 +31,15 @@ class DataAnswers(Protocol):
     ) -> DataAnswer:
         """Counted by the owning modules as the principal. Raises AccessDeniedError if
         the principal may not see this data."""
+        ...
+
+
+class CommandPreparer(Protocol):
+    def prepare(
+        self, principal: Principal, command: Command, subject: Subject | None, *, today: date
+    ) -> Prepared:
+        """Check the command against the data, as the principal, changing nothing. Raises
+        CommandRefusedError with what to tell the user."""
         ...
 
 

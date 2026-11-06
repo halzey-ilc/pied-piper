@@ -11,6 +11,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import replace
 from datetime import date, datetime, timedelta
+from decimal import Decimal
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
@@ -18,12 +19,16 @@ from modules.access_control.domain.rbac import Principal
 from modules.activities.application.service import LogNote, LogTask
 from modules.activities.composition import activity_service
 from modules.activities.domain.activity import SubjectRef, SubjectType
-from modules.ai_insights.domain.agent import AgentAction, Subject, Tool
+from modules.ai_insights.domain.agent import CRM_TOOLS, AgentAction, Subject, Tool
 from modules.customers.composition import customer_service
 from modules.meetings.application.service import ScheduleMeeting
 from modules.meetings.composition import meeting_service
 from modules.meetings.domain.meeting import MeetingLink
 from modules.meetings.domain.meeting import SubjectType as MeetingSubject
+from modules.planning.application.service import SetPlan
+from modules.planning.composition import planning_service
+from modules.planning.domain.plan import PlanMetric, PlanScope
+from modules.sales_pipeline.application.deal_service import EditDeal
 from modules.sales_pipeline.application.ports import DealFilter
 from modules.sales_pipeline.composition import deal_service, pipeline_service
 from modules.sales_pipeline.domain.deal import Deal, DealStatus
@@ -124,6 +129,40 @@ def _move_stage(principal: Principal, action: AgentAction, subject: Subject) -> 
     return f"deal:{deal.id}"
 
 
+def _set_plan(action: AgentAction) -> SetPlan:
+    scope_id = action.args.get("scope_id")
+    return SetPlan(
+        scope=PlanScope(str(action.args["scope"])),
+        scope_id=UUID(str(scope_id)) if scope_id else None,
+        metric=PlanMetric(str(action.args["metric"])),
+        period=str(action.args["period"]),
+        target=Decimal(str(action.args["target"])),
+    )
+
+
+def _run_command(principal: Principal, action: AgentAction, subject: Subject) -> str:
+    if action.tool is Tool.UPDATE_DEAL_AMOUNT:
+        amount = Decimal(str(action.args["amount"]))
+        deal_service().edit(principal, EditDeal(deal_id=subject.id, amount=amount))
+        return subject.ref
+    if action.tool is Tool.CHANGE_DEAL_OWNER:
+        owner = UUID(str(action.args["owner_user_id"]))
+        deal_service().assign(principal, subject.id, owner)
+        return subject.ref
+    if action.tool is Tool.UPDATE_PLAN:
+        plan = planning_service().set_plan(principal, _set_plan(action))
+        return f"plan:{plan.id}"
+    if action.tool is Tool.RECORD_MEETING_OUTCOME:
+        meeting_service().record_outcome(
+            principal,
+            subject.id,
+            str(action.args["outcome"]),
+            comment=action.args.get("comment"),
+        )
+        return subject.ref
+    raise DomainValidationError("Unknown tool.")
+
+
 class CrmToolExecutor:
     def __init__(
         self, request_brief: Callable[[Principal, UUID], UUID], *, timezone_name: str = "UTC"
@@ -158,4 +197,6 @@ class CrmToolExecutor:
             return f"meeting:{meeting.id}"
         if action.tool is Tool.MOVE_DEAL_STAGE:
             return _move_stage(principal, action, subject)
+        if action.tool in CRM_TOOLS:
+            return _run_command(principal, action, subject)
         raise DomainValidationError("Unknown tool.")

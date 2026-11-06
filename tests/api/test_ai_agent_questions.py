@@ -1,3 +1,4 @@
+# ruff: noqa: RUF001
 """Questions about data: the CRM counts with the user's rights and no model is called."""
 
 from __future__ import annotations
@@ -19,7 +20,7 @@ from tests.conftest import ALL_DATABASES, TenantFixture
 @pytest.mark.parametrize(
     ("request_text", "expected"),
     [
-        ("Сколько у меня лидов?", Question.LEADS_COUNT),  # noqa: RUF001
+        ("Сколько у меня лидов?", Question.LEADS_COUNT),
         ("сколько открытых сделок", Question.DEALS_COUNT),
         ("Какие сделки просрочены?", Question.OVERDUE_DEALS),
         ("покажи просроченные задачи", Question.OVERDUE_TASKS),
@@ -65,7 +66,7 @@ def test_counts_follow_the_users_rights_and_skip_the_model(
     assert (run["status"], run["provider"]) == ("succeeded", "crm")
     assert run["summary"].endswith(": 1.")
     assert _ask(rep, "Сколько сделок?")["summary"].endswith(": 0.")
-    assert _ask(owner, "Сколько у меня лидов?")["summary"].endswith(": 1.")  # noqa: RUF001
+    assert _ask(owner, "Сколько у меня лидов?")["summary"].endswith(": 1.")
     assert ai.submits == []
 
 

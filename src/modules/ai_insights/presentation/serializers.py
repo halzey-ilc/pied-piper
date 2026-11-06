@@ -214,6 +214,7 @@ class AgentActionSerializer(serializers.Serializer[dict[str, Any]]):
         read_only=True,
         help_text=(
             "create_task | log_note | request_deal_brief | schedule_meeting | move_deal_stage"
+            " | update_deal_amount | change_deal_owner | update_plan | record_meeting_outcome"
         ),
     )
     subject_ref = serializers.CharField(read_only=True)

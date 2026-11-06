@@ -1,3 +1,4 @@
+# ruff: noqa: RUF001
 """Questions about CRM data, recognised by rule and answered by the CRM itself.
 
 A small model miscounts and cannot see the user's rights, so numbers never come from
@@ -51,6 +52,10 @@ _ASKING = (
 _CHANGING = (
     "обнови",
     "измени",
+    "поменяй",
+    "установи",
+    "передай",
+    "смени",
     "поставь",
     "запиши",
     "назначь",
@@ -98,7 +103,7 @@ _ANSWERS: dict[str, dict[str, str]] = {
         Question.OVERDUE_TASKS: "Просроченных задач: {count}.",
         Question.PLAN_PROGRESS: "Планов на текущий период: {count}.",
         "no_plans": "Планов на текущий период, которые вам видны, нет.",
-        "no_access": "У вашей роли нет доступа к этим данным.",  # noqa: RUF001
+        "no_access": "У вашей роли нет доступа к этим данным.",
     },
     "ky": {
         Question.LEADS_COUNT: "Сизге көрүнгөн лиддер: {count}.",

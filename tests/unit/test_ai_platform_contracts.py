@@ -119,10 +119,22 @@ def test_agent_input() -> None:
         language="ru",
         today="2026-11-05",
         request="Поставь задачу",
-        tools=list(Tool),
-        subjects=[Subject(ref=f"deal:{uuid4()}", kind="deal", title="Польша")],
+        tools=[t for t in Tool if t not in agent.CRM_TOOLS],
+        subjects=[
+            Subject(
+                ref=f"deal:{uuid4()}",
+                kind="deal",
+                title="Польша",
+                stage="Новая",
+                stages=("Думает", "Встреча"),
+            )
+        ],
+        history=[
+            {"role": "user", "text": "Назначь встречу завтра"},
+            {"role": "assistant", "text": "Proposed: schedule_meeting 2026-11-06T15:00 60"},
+        ],
     )
-    _assert_valid("agent_plan.input.v1", payload)
+    _assert_valid("agent_plan.input.v3", payload)
 
 
 @pytest.mark.parametrize("period", kpi_payload.PERIODS)
@@ -153,7 +165,7 @@ def test_expected_output_schemas_are_published() -> None:
         *insight.OUTPUT_SCHEMAS[insight.InsightKind.CALL_SUMMARY],
         deal_brief.OUTPUT_SCHEMA,
         reply.OUTPUT_SCHEMA,
-        agent.OUTPUT_SCHEMA,
+        *agent.OUTPUT_SCHEMAS,
         *report.OUTPUT_SCHEMAS.values(),
     ]
     for name in expected:

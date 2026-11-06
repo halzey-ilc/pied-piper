@@ -13,7 +13,7 @@ Safety rules, enforced here and not by the AI:
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from typing import Any
 from uuid import UUID
 from zoneinfo import ZoneInfo
@@ -22,6 +22,7 @@ from modules.access_control.domain.rbac import AccessPolicy, Permission, Princip
 from modules.ai_insights.application.agent_ports import (
     AgentRunRepository,
     AgentScheduler,
+    CommandPreparer,
     DataAnswers,
     SubjectReader,
     ToolExecutor,
@@ -29,6 +30,7 @@ from modules.ai_insights.application.agent_ports import (
 from modules.ai_insights.application.ports import AiPlatformClient
 from modules.ai_insights.application.service import AiDisabledError, poll_delay
 from modules.ai_insights.domain.agent import (
+    CRM_TOOLS,
     JOB_TYPE,
     MAX_CHOICES,
     ActionStateError,
@@ -41,6 +43,13 @@ from modules.ai_insights.domain.agent import (
     deal_names,
     message,
     question_payload,
+    subject_json,
+)
+from modules.ai_insights.domain.agent_commands import (
+    Command,
+    CommandKind,
+    CommandRefusedError,
+    command_in,
 )
 from modules.ai_insights.domain.agent_questions import (
     DataAnswer,
@@ -74,6 +83,10 @@ TOOL_PERMISSIONS: dict[Tool, tuple[Permission, ...]] = {
     Tool.REQUEST_DEAL_BRIEF: (Permission.AI_REQUEST, Permission.DEALS_VIEW),
     Tool.SCHEDULE_MEETING: (Permission.MEETINGS_CREATE,),
     Tool.MOVE_DEAL_STAGE: (Permission.DEALS_UPDATE,),
+    Tool.UPDATE_DEAL_AMOUNT: (Permission.DEALS_UPDATE,),
+    Tool.CHANGE_DEAL_OWNER: (Permission.DEALS_UPDATE,),
+    Tool.UPDATE_PLAN: (Permission.PLANS_MANAGE,),
+    Tool.RECORD_MEETING_OUTCOME: (Permission.MEETINGS_UPDATE,),
 }
 
 
@@ -83,6 +96,7 @@ class AgentService:
         repository: AgentRunRepository,
         subjects: SubjectReader,
         answers: DataAnswers,
+        commands: CommandPreparer,
         executor: ToolExecutor,
         client: AiPlatformClient,
         scheduler: AgentScheduler,
@@ -100,6 +114,7 @@ class AgentService:
         self._repo = repository
         self._subjects = subjects
         self._answers = answers
+        self._commands = commands
         self._executor = executor
         self._client = client
         self._scheduler = scheduler
@@ -156,10 +171,17 @@ class AgentService:
             language=validate_language(language or self._language),
             today=datetime.now(self._tz).date().isoformat(),
             request=request,
-            tools=self.tools_for(principal),
+            tools=[t for t in self.tools_for(principal) if t not in CRM_TOOLS],
             subjects=subjects,
             history=previous.conversation() if previous else None,
         )
+        command = command_in(request)
+        if command is not None and (subjects or command.kind is CommandKind.PLAN_TARGET):
+            run = self._propose(principal, command, subjects, payload)
+            with self._uow:
+                self._repo.add(run)
+                self._record(principal.user_id, "agent_run.proposed", run)
+            return run
         if not subjects:
             run = self._clarify(principal, payload, names, matches)
             with self._uow:
@@ -195,6 +217,46 @@ class AgentService:
             self._repo.add(run)
             self._record(principal.user_id, "agent_run.answered", run)
         return run
+
+    def _propose(
+        self,
+        principal: Principal,
+        command: Command,
+        subjects: list[Subject],
+        payload: dict[str, Any],
+    ) -> AgentRun:
+        """A value-changing request: the CRM reads the value and proposes the action
+        itself; it still runs only on the user's confirmation."""
+        language = payload["language"]
+        try:
+            prepared = self._commands.prepare(
+                principal,
+                command,
+                subjects[0] if subjects else None,
+                today=date.fromisoformat(payload["today"]),
+            )
+            if prepared.tool not in self.tools_for(principal):
+                raise CommandRefusedError("no_access")
+        except (CommandRefusedError, AccessDeniedError) as exc:
+            key = exc.key if isinstance(exc, CommandRefusedError) else "no_access"
+            return AgentRun.answer_locally(
+                requested_by=principal.user_id,
+                payload=payload,
+                summary=message(language, key),
+            )
+        action = AgentAction(
+            index=0,
+            tool=prepared.tool,
+            subject_ref=prepared.subject.ref,
+            args=prepared.args,
+            reason=message(language, "requested"),
+        )
+        return AgentRun.answer_locally(
+            requested_by=principal.user_id,
+            payload={**payload, "subjects": [subject_json(prepared.subject)]},
+            summary=message(language, "confirm"),
+            actions=[action],
+        )
 
     def _earlier_subjects(self, principal: Principal, previous: AgentRun) -> list[Subject]:
         """The previous run's records, read again: the user may have lost access since."""

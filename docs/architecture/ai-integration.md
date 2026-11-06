@@ -143,7 +143,7 @@ accuse anyone, and the CRM takes no automatic action on a signal.
 ## CRM assistant (AI Agent Runtime)
 
 ```
-POST /api/v1/ai/agent/runs/ {"request", "deal_id"?, "customer_id"?, "language"?}  -> 202
+POST /api/v1/ai/agent/runs/ {"request", "deal_id"?, "customer_id"?, "language"?, "previous_run_id"?}  -> 202
 GET  /api/v1/ai/agent/runs/<id>/                                   -> plan (requester only)
 POST /api/v1/ai/agent/runs/<id>/actions/<n>/confirm/  |  .../reject/
 ```
@@ -161,6 +161,22 @@ It returns proposed actions and executes nothing. The CRM:
 - audits every decision (`agent_action.executed|failed|rejected`).
 
 The assistant has no SQL, shell or direct database access.
+
+Only part of a request reaches the model (`agent.plan.v3`). The CRM handles the rest itself,
+at once, with `provider: crm` on the run:
+
+| Request | Who decides | Result |
+|---|---|---|
+| Which deal? Unknown or ambiguous name | CRM (`deal_names`, deals service) | a question, or `choices` to ask again with `deal_id` |
+| Data questions: leads, open and overdue deals, overdue tasks, plan progress | CRM (`agent_questions`), counted by the owning modules with the user's rights | `summary` and `items`; no model, so no wrong numbers |
+| Deal amount, deal owner, plan target, meeting outcome | CRM (`agent_commands`) reads the value from the request | one proposed action with `args.change` (before and after) |
+| Tasks, notes, briefs, meetings, stage moves | the model proposes | proposed actions |
+
+Every action, whoever proposed it, runs only on confirmation through the owning module.
+Amounts, targets and names never pass through the model: a small model may change a digit
+or pick the wrong person. Won, lost and rescheduled stages are not offered: a sale needs a
+payment, the others a reason or a new time, which stay on the deal card. `previous_run_id`
+sends the earlier turns and reuses the earlier records, read again with today's rights.
 
 ## Notifications
 
@@ -258,8 +274,8 @@ collide. Without the overlay the CRM runs as before with AI disabled.
   draft may cite; measuring how often drafts are used; a real-model evaluation.
 - E-mail/push delivery of AI notifications (in-app only for now).
 - Stalled deals use `updated_at` because there is no stage history.
-- Frontend: call summaries and deal briefs are shown in the call and deal cards, the assistant
-  has its own page. Reply suggestions, digests, KPI explanations and risk reviews have backend
-  endpoints but no screen yet.
-- `agent.plan.v2/v3` (meetings, stage moves, conversation history), `call.transcribe.v1` and
-  `knowledge.answer.v1` exist in the AI Platform and are not used by the CRM.
+- Frontend: call summaries and deal briefs are shown in the call and deal cards; the assistant
+  page also holds the digest, KPI explanation and risk review; reply drafts are in the message
+  composer, insert only.
+- `call.transcribe.v1` and `knowledge.answer.v1` exist in the AI Platform and are not used by
+  the CRM.

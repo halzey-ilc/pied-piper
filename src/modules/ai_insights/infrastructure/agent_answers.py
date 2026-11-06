@@ -58,7 +58,7 @@ _DEPARTMENT = {"ru": "Отдел", "ky": "Бөлүм", "en": "Department"}
 _OF = {"ru": "из", "ky": "/", "en": "of"}
 
 
-def _period(metric: PlanMetric, today: date) -> str:
+def plan_period(metric: PlanMetric, today: date) -> str:
     granularity = period_granularity(metric)
     if granularity == "month":
         return f"{today:%Y-%m}"
@@ -127,7 +127,7 @@ class CrmDataAnswers:
         for metric in PlanMetric:
             page = planning_service().progress(
                 principal,
-                PlanFilter(metric=metric, period=_period(metric, today)),
+                PlanFilter(metric=metric, period=plan_period(metric, today)),
                 limit=_PLANS,
                 offset=0,
             )

@@ -1,3 +1,4 @@
+# ruff: noqa: RUF001
 """The AgentRun aggregate: a user's request to the CRM assistant, the actions the
 AI proposed, and what the user decided for each (AI Agent Runtime).
 
@@ -40,7 +41,21 @@ class Tool(StrEnum):
     REQUEST_DEAL_BRIEF = "request_deal_brief"
     SCHEDULE_MEETING = "schedule_meeting"
     MOVE_DEAL_STAGE = "move_deal_stage"
+    # Proposed by the CRM from the request itself, never by the model (agent_commands).
+    UPDATE_DEAL_AMOUNT = "update_deal_amount"
+    CHANGE_DEAL_OWNER = "change_deal_owner"
+    UPDATE_PLAN = "update_plan"
+    RECORD_MEETING_OUTCOME = "record_meeting_outcome"
 
+
+CRM_TOOLS = frozenset(
+    {
+        Tool.UPDATE_DEAL_AMOUNT,
+        Tool.CHANGE_DEAL_OWNER,
+        Tool.UPDATE_PLAN,
+        Tool.RECORD_MEETING_OUTCOME,
+    }
+)
 
 _TOOL_NAMES: dict[str, dict[Tool, str]] = {
     "ru": {
@@ -68,18 +83,45 @@ _TOOL_NAMES: dict[str, dict[Tool, str]] = {
 
 _MESSAGES: dict[str, dict[str, str]] = {
     "ru": {
+        "confirm": "Проверьте изменение: ничего не изменится, пока вы не подтвердите.",
+        "requested": "Вы попросили об этом в запросе.",
+        "no_access": "У вашей роли нет права на это действие.",
+        "no_plan": "Такого плана на этот период нет. Создайте его в разделе планов.",
+        "several_plans": "На этот период несколько планов. Измените нужный в разделе планов.",
+        "no_member": "Не нашёл такого сотрудника. Напишите имя и фамилию.",
+        "several_members": "Подходит несколько сотрудников. Напишите имя и фамилию.",
+        "no_meeting": "У этой сделки нет назначенной встречи.",
+        "several_meetings": "У сделки несколько назначенных встреч. Отметьте итог на встрече.",
         "cannot": "Этого я сделать не могу. Я умею: {tools}.",
         "need_deal": "По какой сделке? Напишите её название, например: по сделке Поставка.",
-        "no_deal": "Не нашёл сделку «{name}». Проверьте название.",  # noqa: RUF001
+        "no_deal": "Не нашёл сделку «{name}». Проверьте название.",
         "several": "Нашёл несколько сделок по запросу «{name}». Какую вы имели в виду?",
     },
     "ky": {
+        "confirm": "Өзгөрүүнү текшериңиз: сиз ырастамайынча эч нерсе өзгөрбөйт.",
+        "requested": "Муну суроодо сурадыңыз.",
+        "no_access": "Ролуңузда бул аракетке укук жок.",
+        "no_plan": "Бул мезгилге мындай план жок.",
+        "several_plans": "Бул мезгилге бир нече план бар. Аны пландар бөлүмүндө өзгөртүңүз.",
+        "no_member": "Мындай кызматкер табылган жок. Атын жана фамилиясын жазыңыз.",
+        "several_members": "Бир нече кызматкер туура келет. Атын жана фамилиясын жазыңыз.",
+        "no_meeting": "Бул бүтүмдө белгиленген жолугушуу жок.",
+        "several_meetings": "Бүтүмдө бир нече жолугушуу бар. Жыйынтыкты жолугушуудан белгилеңиз.",
         "cannot": "Муну аткара албайм. Мен кыла алам: {tools}.",
         "need_deal": "Кайсы бүтүм боюнча? Анын аталышын жазыңыз.",
         "no_deal": "«{name}» бүтүмү табылган жок. Аталышын текшериңиз.",
         "several": "«{name}» боюнча бир нече бүтүм табылды. Кайсынысы?",
     },
     "en": {
+        "confirm": "Check the change: nothing changes until you confirm.",
+        "requested": "You asked for this in your request.",
+        "no_access": "Your role may not do this.",
+        "no_plan": "There is no such plan for this period. Create it in the plans section.",
+        "several_plans": "This period has several plans. Change one in the plans section.",
+        "no_member": "No such employee was found. Write the first and last name.",
+        "several_members": "Several employees match. Write the first and last name.",
+        "no_meeting": "This deal has no scheduled meeting.",
+        "several_meetings": "This deal has several scheduled meetings. Use the meeting itself.",
         "cannot": "I cannot do that. I can: {tools}.",
         "need_deal": "Which deal? Name it, for example: on the deal Supply.",
         "no_deal": "No deal named “{name}” was found. Check the name.",
@@ -111,8 +153,8 @@ class ActionStateError(ConflictError):
 
 @dataclass(frozen=True, slots=True)
 class Subject:
-    ref: str  # "deal:<uuid>" | "customer:<uuid>"
-    kind: str  # deal | customer
+    ref: str  # "deal:<uuid>" | "customer:<uuid>"; plan: and meeting: in CRM commands
+    kind: str  # deal | customer | plan | meeting
     title: str
     stage: str | None = None  # deals: the current stage
     stages: tuple[str, ...] = ()  # deals: the stages it may be moved to
@@ -140,7 +182,7 @@ ACTION_ARGS = ("title", "due_date", "body", "start", "duration_minutes", "stage"
 _QUOTED = re.compile(r"[«\"“]([^»\"”]{2,200})[»\"”]")
 _DEAL_WORD = re.compile(r"(?:сделк|бүтүм|келишим|\bdeal\b)\w*\s+([^:;,.!?\n]+)", re.IGNORECASE)
 # A word after «сделку» that starts the rest of the sentence, not a name: «сделку на этап…».
-_NOT_A_NAME = frozenset({"на", "в", "во", "по", "с", "со", "к", "ко", "до", "для", "и", "to", "on"})  # noqa: RUF001
+_NOT_A_NAME = frozenset({"на", "в", "во", "по", "с", "со", "к", "ко", "до", "для", "и", "to", "on"})
 _MAX_NAME_WORDS = 6
 
 
@@ -206,14 +248,14 @@ def build_payload(
     payload: dict[str, Any] = {
         **question_payload(language=language, today=today, request=request),
         "tools": [t.value for t in tools],
-        "subjects": [_subject_json(s) for s in subjects],
+        "subjects": [subject_json(s) for s in subjects],
     }
     if history:
         payload["history"] = history[-MAX_HISTORY:]
     return payload
 
 
-def _subject_json(s: Subject) -> dict[str, Any]:
+def subject_json(s: Subject) -> dict[str, Any]:
     out: dict[str, Any] = {
         "ref": s.ref,
         "kind": s.kind,
@@ -307,6 +349,7 @@ class AgentRun:
         summary: str,
         choices: list[dict[str, str]] | None = None,
         items: list[dict[str, str | None]] | None = None,
+        actions: list[AgentAction] | None = None,
     ) -> AgentRun:
         """A run the CRM finishes itself, without the AI Platform. ``choices`` are records
         the user can pick from and ``items`` the lines of a data answer; both stay in the
@@ -316,6 +359,7 @@ class AgentRun:
             payload={**payload, "choices": choices or [], "items": items or []},
         )
         run.summary = summary[:300]
+        run.actions = actions or []
         run.provider, run.model = LOCAL_PROVIDER, "rules"
         run.status = InsightStatus.SUCCEEDED
         run.finished_at = run.created_at
