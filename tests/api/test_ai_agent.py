@@ -239,3 +239,32 @@ def test_customer_names_are_not_sent(
     run = AgentRunRecord.objects.using(ALIAS).get()
     assert "Айгерим" not in str(run.payload)
     assert run.payload["subjects"][0]["kind"] == "customer"
+
+
+def test_deal_named_in_quotes_is_found_among_visible_deals_only(
+    ai: FakeAiPlatform,
+    make_user: Callable[..., Any],
+    tenants: dict[str, TenantFixture],
+    client_for: Callable[..., APIClient],
+) -> None:
+    owner = make_user("owner", tenant=tenants["acme"])
+    client = client_for(owner, "acme")
+    deal_id = _deal(client)
+    title = client.get(f"/api/v1/sales/deals/{deal_id}/").json()["title"]
+
+    def subjects(request: str, who: APIClient) -> list[dict[str, Any]]:
+        ai.submits.clear()
+        created = who.post("/api/v1/ai/agent/runs/", {"request": request}, format="json")
+        assert created.status_code == 202, created.content
+        with system_tenant_scope("acme"):
+            composition.agent_service().submit(UUID(created.json()["id"]))
+        result: list[dict[str, Any]] = ai.submits[0]["payload"]["subjects"]
+        return result
+
+    found = subjects(f"Поставь задачу по сделке «{title}» на завтра", client)
+    assert [s["ref"] for s in found] == [f"deal:{deal_id}"]
+    assert subjects("Поставь задачу по сделке «Такой нет»", client) == []
+    assert subjects("Поставь задачу на завтра", client) == []
+    # A manager who does not own the deal cannot reach it by name.
+    rep = client_for(make_user("rep", tenant=tenants["acme"], role=Role.SALES_REP), "acme")
+    assert subjects(f"Поставь задачу по сделке «{title}»", rep) == []

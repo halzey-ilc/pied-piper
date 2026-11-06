@@ -34,7 +34,7 @@ ALIAS = "tenant_acme"
 PHONE = "+996555777888"
 OUTPUT: dict[str, Any] = {
     "schema": "deal_coach.output.v1",
-    "situation": [{"text": "Сделка на этапе «New».", "refs": ["deal:x"]}],
+    "situation": [{"text": "Сделка на этапе «New».", "refs": ["deal:1"]}],
     "risks": [],
     "questions": [],
     "next_step": None,
@@ -193,7 +193,8 @@ def test_brief_sends_deal_and_history_without_phone_numbers(
     payload = ai.submits[0]["payload"]
     assert ai.submits[0]["job_type"] == "deal.coach.v1"
     deal = payload["deal"]
-    assert deal["ref"] == f"deal:{deal_id}" and deal["stage"] == "New"
+    # Short refs: a UUID in every citation does not fit the local model's output budget.
+    assert deal["ref"] == "deal:1" and deal["stage"] == "New"
     # Three open stages plus the system «Встреча перенесена» and «Продажа».
     assert (deal["stage_position"], deal["stage_count"], deal["probability"]) == (1, 5, 10)
     assert deal["amount"] == 450000.0 and deal["expected_close_date"] == "2026-01-10"
@@ -206,6 +207,9 @@ def test_brief_sends_deal_and_history_without_phone_numbers(
 
     latest = client.get(_url(deal_id)).json()
     assert latest["status"] == "succeeded" and latest["is_mock"] is True
+    # The stored brief cites the CRM's own records again.
+    assert latest["result"]["situation"][0]["refs"] == [f"deal:{deal_id}"]
+    assert DealBriefRecord.objects.using(ALIAS).get(id=brief_id).ref_map is None
 
 
 def test_unchanged_deal_reuses_brief_and_new_history_does_not(

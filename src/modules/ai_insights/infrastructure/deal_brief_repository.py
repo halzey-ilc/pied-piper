@@ -28,6 +28,7 @@ def _to_domain(row: DealBriefRecord) -> DealBrief:
         error_code=row.error_code,
         finished_at=row.finished_at,
         version=row.version,
+        ref_map=row.ref_map,
     )
 
 
@@ -81,6 +82,7 @@ class DjangoDealBriefRepository:
     def _fields(self, brief: DealBrief) -> dict[str, Any]:
         return {
             "payload": brief.payload,
+            "ref_map": brief.ref_map,
             "status": brief.status.value,
             "ai_job_id": brief.ai_job_id,
             "result": brief.result,

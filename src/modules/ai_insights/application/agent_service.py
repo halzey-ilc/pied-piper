@@ -34,6 +34,7 @@ from modules.ai_insights.domain.agent import (
     Subject,
     Tool,
     build_payload,
+    quoted_name,
 )
 from modules.ai_insights.domain.insight import InsightStatus
 from modules.ai_insights.domain.report import validate_language
@@ -115,6 +116,10 @@ class AgentService:
             subjects.append(self._subjects.deal(principal, deal_id))
         if customer_id is not None:
             subjects.append(self._subjects.customer(principal, customer_id))
+        name = quoted_name(request) if not subjects else None
+        named = self._subjects.deal_named(principal, name) if name else None
+        if named is not None:
+            subjects.append(named)
         payload = build_payload(
             language=validate_language(language or self._language),
             today=datetime.now(UTC).date().isoformat(),

@@ -23,7 +23,12 @@ from modules.ai_insights.application.deal_brief_ports import (
 )
 from modules.ai_insights.application.ports import AiPlatformClient
 from modules.ai_insights.application.service import AiDisabledError, poll_delay
-from modules.ai_insights.domain.deal_brief import JOB_TYPE, DealBrief, build_payload
+from modules.ai_insights.domain.deal_brief import (
+    JOB_TYPE,
+    DealBrief,
+    build_payload,
+    compact_refs,
+)
 from modules.ai_insights.domain.insight import InsightStatus
 from modules.ai_insights.domain.report import payload_fingerprint, validate_language
 from modules.audit.application.ports import AuditLog
@@ -118,12 +123,13 @@ class DealBriefService:
         brief = self._repo.get(brief_id)
         if brief is None or brief.status is not InsightStatus.PENDING or brief.payload is None:
             return
+        payload, ref_map = compact_refs(brief.payload)
         try:
             state = self._client.submit(
                 tenant_slug=self._tenant_slug,
                 subject=f"user:{brief.requested_by}",
                 job_type=JOB_TYPE,
-                payload=brief.payload,
+                payload=payload,
                 idempotency_key=f"crm-brief-{brief.id}",
             )
         except PermanentError:
@@ -133,7 +139,7 @@ class DealBriefService:
             return
         with self._uow:
             version = brief.version
-            brief.mark_submitted(state.job_id)
+            brief.mark_submitted(state.job_id, ref_map)
             self._repo.save(brief, expected_version=version)
             self._scheduler.schedule_poll(
                 tenant_slug=self._tenant_slug, brief_id=brief.id, delay_seconds=2.0

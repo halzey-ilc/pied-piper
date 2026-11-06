@@ -11,6 +11,7 @@ action: proposed -> executed | failed | rejected
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -68,6 +69,15 @@ class AgentAction:
     result_ref: str | None = None  # what was created, e.g. "activity:<uuid>"
     error_code: str | None = None
     decided_at: datetime | None = None
+
+
+_QUOTED = re.compile(r"[«\"“]([^»\"”]{2,200})[»\"”]")
+
+
+def quoted_name(request: str) -> str | None:
+    """The record a request names in quotes: «поставь задачу по сделке «Поставка»»."""
+    match = _QUOTED.search(request)
+    return match.group(1).strip() if match else None
 
 
 def build_payload(

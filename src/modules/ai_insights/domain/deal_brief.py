@@ -122,6 +122,45 @@ def build_payload(
     }
 
 
+def compact_refs(payload: dict[str, Any]) -> tuple[dict[str, Any], dict[str, str]]:
+    """Short refs for the model, and the map back to the CRM's refs.
+
+    Every point of a brief repeats the refs it cites, and a UUID costs the model about 25
+    tokens. With real ids the local model ran out of its output budget and the JSON was cut
+    off (measured on Qwen3.5-4B: 0 of 4 briefs with UUIDs, 2 of 2 with short refs).
+    """
+    numbers: dict[str, int] = {}
+    refs: dict[str, str] = {}
+
+    def short(ref: str) -> str:
+        prefix = ref.split(":", 1)[0]
+        numbers[prefix] = numbers.get(prefix, 0) + 1
+        alias = f"{prefix}:{numbers[prefix]}"
+        refs[alias] = ref
+        return alias
+
+    compact = {
+        **payload,
+        "deal": {**payload["deal"], "ref": short(payload["deal"]["ref"])},
+        "history": [{**entry, "ref": short(entry["ref"])} for entry in payload["history"]],
+    }
+    return compact, refs
+
+
+def restore_refs(result: dict[str, Any], refs: dict[str, str]) -> dict[str, Any]:
+    """The brief with the CRM's own refs, so that clients can link to the records."""
+
+    def point(item: dict[str, Any]) -> dict[str, Any]:
+        return {**item, "refs": [refs.get(ref, ref) for ref in item.get("refs", [])]}
+
+    restored = dict(result)
+    for section in ("situation", "risks", "questions"):
+        restored[section] = [point(item) for item in result.get(section) or []]
+    if result.get("next_step"):
+        restored["next_step"] = point(result["next_step"])
+    return restored
+
+
 @dataclass(frozen=True, kw_only=True)
 class DealBriefCompleted(DomainEvent):
     event_type: ClassVar[str] = "ai_insights.deal_brief_completed"
@@ -157,6 +196,8 @@ class DealBrief:
     error_code: str | None = None
     finished_at: datetime | None = None
     version: int = 1
+    # Short refs sent to the model -> the CRM's refs; ids only, kept until the result is in.
+    ref_map: dict[str, str] | None = None
 
     @classmethod
     def request(cls, *, deal_id: UUID, requested_by: UUID, payload: dict[str, Any]) -> DealBrief:
@@ -175,10 +216,11 @@ class DealBrief:
     def is_finished(self) -> bool:
         return self.status in (InsightStatus.SUCCEEDED, InsightStatus.FAILED)
 
-    def mark_submitted(self, ai_job_id: str) -> None:
+    def mark_submitted(self, ai_job_id: str, ref_map: dict[str, str] | None = None) -> None:
         if self.status is not InsightStatus.PENDING or not ai_job_id:
             raise DomainValidationError("Only a pending brief can be submitted.")
         self.ai_job_id = ai_job_id
+        self.ref_map = ref_map
         self.status = InsightStatus.SUBMITTED
         self.payload = None  # the AI Platform has it now; keep only the fingerprint
 
@@ -189,7 +231,8 @@ class DealBrief:
             raise DomainValidationError("Only a submitted brief can succeed.")
         if schema_id != OUTPUT_SCHEMA:
             raise DomainValidationError("The AI result uses an unsupported output contract.")
-        self.result = result
+        self.result = restore_refs(result, self.ref_map or {})
+        self.ref_map = None
         self.provider = provider
         self.model = model
         self.is_mock = is_mock

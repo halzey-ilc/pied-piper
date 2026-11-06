@@ -12,6 +12,11 @@ class SubjectReader(Protocol):
         """Raises NotFoundError if the principal cannot see the deal."""
         ...
 
+    def deal_named(self, principal: Principal, title: str) -> Subject | None:
+        """The one deal with this title among those the principal can see; None if there is
+        none or the name is ambiguous (the assistant must not guess a record)."""
+        ...
+
     def customer(self, principal: Principal, customer_id: UUID) -> Subject:
         """Raises NotFoundError if the principal cannot see the customer."""
         ...

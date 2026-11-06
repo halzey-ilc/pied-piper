@@ -114,6 +114,10 @@ Phone numbers are not sent. The result lists the situation, risks, questions to
 clarify and a next step. Every point cites `deal:`, `activity:`, `meeting:` or
 `call:` refs and contains no numbers outside the input.
 
+The model receives short refs (`deal:1`, `activity:2`), not UUIDs: repeated in every point, UUIDs
+overflow the local model's output budget and the JSON is cut off. `ref_map` keeps the mapping
+(ids only) until the result arrives; the stored result cites the CRM's own refs.
+
 Because the input depends on the user's rights, briefs are personal. The input is
 stored only until it is submitted, then cleared.
 

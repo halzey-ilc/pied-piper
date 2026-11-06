@@ -18,14 +18,29 @@ from modules.activities.composition import activity_service
 from modules.activities.domain.activity import SubjectRef, SubjectType
 from modules.ai_insights.domain.agent import AgentAction, Subject, Tool
 from modules.customers.composition import customer_service
+from modules.sales_pipeline.application.ports import DealFilter
 from modules.sales_pipeline.composition import deal_service
 from shared.domain.errors import DomainValidationError
+
+# Enough to tell one match from several.
+_NAME_MATCHES = 10
 
 
 class CrmSubjectReader:
     def deal(self, principal: Principal, deal_id: UUID) -> Subject:
         deal = deal_service().get(principal, deal_id)  # NotFoundError if not visible
         return Subject(ref=f"deal:{deal.id}", kind="deal", title=deal.title)
+
+    def deal_named(self, principal: Principal, title: str) -> Subject | None:
+        # The deals service applies the principal's own visibility.
+        found = deal_service().list_deals(
+            principal, DealFilter(search=title), limit=_NAME_MATCHES, offset=0
+        )
+        exact = [d for d in found.items if d.title.casefold() == title.casefold()]
+        matches = exact or found.items
+        if len(matches) != 1:
+            return None
+        return Subject(ref=f"deal:{matches[0].id}", kind="deal", title=matches[0].title)
 
     def customer(self, principal: Principal, customer_id: UUID) -> Subject:
         customer = customer_service().get(principal, customer_id)

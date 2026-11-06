@@ -131,6 +131,8 @@ class DealBriefRecord(models.Model):
     requested_by = models.UUIDField()
     # The job input until it is submitted; cleared afterwards (only the hash stays).
     payload = models.JSONField(null=True, blank=True)
+    # Short refs sent to the model -> CRM refs (ids only); cleared when the result arrives.
+    ref_map = models.JSONField(null=True, blank=True)
     source_hash = models.CharField(max_length=64)
     status = models.CharField(
         max_length=12, choices=[(s.value, s.name.title()) for s in InsightStatus]
