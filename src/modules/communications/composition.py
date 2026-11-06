@@ -8,6 +8,7 @@ from modules.audit.infrastructure.audit_log import DjangoAuditLog
 from modules.communications.application.ports import ChannelSender
 from modules.communications.application.service import ConversationService
 from modules.communications.application.templates import TemplateService
+from modules.communications.infrastructure.audio import FfmpegVoiceEncoder
 from modules.communications.infrastructure.connection import (
     CloudApiConnection,
     GreenApiConnection,
@@ -24,6 +25,7 @@ from modules.communications.infrastructure.sender import (
 )
 from modules.communications.infrastructure.templates import DjangoTemplateRepository
 from modules.leads.composition import lead_service
+from modules.organizations.infrastructure.memberships import DjangoMemberDirectory
 from platform_core.application.context import require_tenant
 from platform_core.infrastructure.messaging.stores import DjangoEventOutbox
 from shared.infrastructure.unit_of_work import DjangoUnitOfWork
@@ -110,4 +112,6 @@ def conversation_service() -> ConversationService:
             lead_service(), settings.INTEGRATIONS["WHATSAPP"]["LEAD_OWNER_USER_ID"]
         ),
         media=HttpMediaFetcher(),
+        members=DjangoMemberDirectory(require_tenant().tenant_id),
+        voice=FfmpegVoiceEncoder(),
     )

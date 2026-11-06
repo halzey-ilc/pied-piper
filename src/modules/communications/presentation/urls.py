@@ -14,6 +14,7 @@ from modules.communications.presentation.views import (
     MessagesView,
     ReadView,
     ReopenView,
+    TransferView,
     WhatsAppQrView,
     WhatsAppStatusView,
 )
@@ -43,6 +44,11 @@ urlpatterns = [
         "conversations/<uuid:conversation_id>/messages/<uuid:message_id>/attachment/",
         MessageAttachmentView.as_view(),
         name="conversation-message-attachment",
+    ),
+    path(
+        "conversations/<uuid:conversation_id>/transfer/",
+        TransferView.as_view(),
+        name="conversation-transfer",
     ),
     path(
         "conversations/<uuid:conversation_id>/assign/",

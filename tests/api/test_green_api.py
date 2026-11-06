@@ -10,6 +10,7 @@ from uuid import uuid4
 
 import httpx
 import pytest
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import CommandError, call_command
 from django.test import Client
 from pydantic import SecretStr
@@ -493,3 +494,165 @@ def test_a_failed_download_is_retried_without_a_second_message(
     stored = _stored()
     assert stored is not None
     assert bytes(stored.content) == b"JPEGDATA"
+
+
+TRANSFER_URL = "/api/v1/communications/conversations/{}/transfer/"
+
+
+def _sent_files(
+    monkeypatch: pytest.MonkeyPatch, answer: httpx.Response, seen: list[httpx.Request]
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return answer
+
+    monkeypatch.setattr(
+        SENDER,
+        lambda base_url, read_timeout=10.0, transport=None: httpx.Client(
+            base_url=base_url, transport=httpx.MockTransport(handler)
+        ),
+    )
+
+
+def _upload(name: str, content: bytes, mime: str) -> SimpleUploadedFile:
+    return SimpleUploadedFile(name, content, content_type=mime)
+
+
+def test_a_file_goes_out_and_stays_in_the_chat(
+    monkeypatch: pytest.MonkeyPatch,
+    make_user: Callable[..., Any],
+    tenants: dict[str, TenantFixture],
+    client_for: Callable[..., APIClient],
+) -> None:
+    seen: list[httpx.Request] = []
+    _sent_files(monkeypatch, httpx.Response(200, json={"idMessage": "FILE1"}), seen)
+    _deliver(_incoming("F1"))
+    conversation = ConversationRecord.objects.using(ALIAS).get()
+    client = client_for(make_user("owner", tenant=tenants["acme"]), "acme")
+
+    response = client.post(
+        MESSAGES_URL.format(conversation.id),
+        {"file": _upload("price.pdf", b"%PDF", "application/pdf"), "caption": "Прайс"},
+        format="multipart",
+    )
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["text"] == "[Документ] Прайс"
+    assert body["status"] == "sent"
+    assert body["attachment"]["file_name"] == "price.pdf"
+    assert "sendFileByUpload" in str(seen[0].url)
+    assert b"price.pdf" in seen[0].content
+    stored = _stored()
+    assert stored is not None
+    assert bytes(stored.content) == b"%PDF"
+
+
+def test_a_recording_goes_out_as_a_voice_message(
+    monkeypatch: pytest.MonkeyPatch,
+    make_user: Callable[..., Any],
+    tenants: dict[str, TenantFixture],
+    client_for: Callable[..., APIClient],
+) -> None:
+    seen: list[httpx.Request] = []
+    _sent_files(monkeypatch, httpx.Response(200, json={"idMessage": "VOICE1"}), seen)
+    monkeypatch.setattr(
+        "modules.communications.infrastructure.audio.FfmpegVoiceEncoder.encode",
+        lambda _self, _content: b"OggS",
+    )
+    _deliver(_incoming("F2"))
+    conversation = ConversationRecord.objects.using(ALIAS).get()
+    client = client_for(make_user("owner", tenant=tenants["acme"]), "acme")
+
+    response = client.post(
+        MESSAGES_URL.format(conversation.id),
+        {"file": _upload("rec.webm", b"webm", "audio/webm"), "voice": "true"},
+        format="multipart",
+    )
+
+    assert response.status_code == 201
+    assert response.json()["attachment"] == {
+        "kind": "audio",
+        "content_type": "audio/ogg; codecs=opus",
+        "file_name": "voice.ogg",
+        "size": 4,
+    }
+    assert b"voice.ogg" in seen[0].content
+
+
+def test_a_rejected_file_leaves_no_message(
+    monkeypatch: pytest.MonkeyPatch,
+    make_user: Callable[..., Any],
+    tenants: dict[str, TenantFixture],
+    client_for: Callable[..., APIClient],
+) -> None:
+    _sent_files(monkeypatch, httpx.Response(400, json={}), [])
+    _deliver(_incoming("F3"))
+    conversation = ConversationRecord.objects.using(ALIAS).get()
+    client = client_for(make_user("owner", tenant=tenants["acme"]), "acme")
+
+    response = client.post(
+        MESSAGES_URL.format(conversation.id),
+        {"file": _upload("a.jpg", b"jpg", "image/jpeg")},
+        format="multipart",
+    )
+
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "channel_delivery_failed"
+    assert MessageRecord.objects.using(ALIAS).count() == 1
+    assert _stored() is None
+
+
+def test_a_director_hands_the_chat_and_its_lead_to_a_manager(
+    make_user: Callable[..., Any],
+    tenants: dict[str, TenantFixture],
+    client_for: Callable[..., APIClient],
+) -> None:
+    _deliver(_incoming("T1"))
+    conversation = ConversationRecord.objects.using(ALIAS).get()
+    director = client_for(make_user("dir", tenant=tenants["acme"], role=Role.DIRECTOR), "acme")
+    rep_user = make_user("rep", tenant=tenants["acme"], role=Role.SALES_REP)
+
+    response = director.post(
+        TRANSFER_URL.format(conversation.id), {"owner_user_id": str(rep_user.id)}, format="json"
+    )
+
+    assert response.status_code == 200
+    assert response.json()["owner_user_id"] == str(rep_user.id)
+    assert LeadRecord.objects.using(ALIAS).get().owner_user_id == rep_user.id
+
+
+def test_a_manager_cannot_hand_a_chat_over(
+    make_user: Callable[..., Any],
+    tenants: dict[str, TenantFixture],
+    client_for: Callable[..., APIClient],
+) -> None:
+    _deliver(_incoming("T2"))
+    conversation = ConversationRecord.objects.using(ALIAS).get()
+    rep_user = make_user("rep", tenant=tenants["acme"], role=Role.SALES_REP)
+    other = make_user("other", tenant=tenants["acme"], role=Role.SALES_REP)
+    rep = client_for(rep_user, "acme")
+
+    response = rep.post(
+        TRANSFER_URL.format(conversation.id), {"owner_user_id": str(other.id)}, format="json"
+    )
+
+    assert response.status_code == 403
+
+
+def test_a_chat_cannot_go_to_someone_outside_the_company(
+    make_user: Callable[..., Any],
+    tenants: dict[str, TenantFixture],
+    client_for: Callable[..., APIClient],
+) -> None:
+    _deliver(_incoming("T3"))
+    conversation = ConversationRecord.objects.using(ALIAS).get()
+    director = client_for(make_user("dir", tenant=tenants["acme"], role=Role.DIRECTOR), "acme")
+    outsider = make_user("rival", tenant=tenants["globex"], role=Role.SALES_REP)
+
+    response = director.post(
+        TRANSFER_URL.format(conversation.id), {"owner_user_id": str(outsider.id)}, format="json"
+    )
+
+    assert response.status_code == 400
+    assert ConversationRecord.objects.using(ALIAS).get().owner_user_id is None

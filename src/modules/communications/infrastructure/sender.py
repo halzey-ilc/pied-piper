@@ -13,7 +13,7 @@ from uuid import uuid4
 
 import httpx
 
-from modules.communications.application.ports import ChannelSender
+from modules.communications.application.ports import ChannelSender, OutboundFile
 from modules.communications.domain.conversation import Channel
 from modules.integrations.application.contracts import OutboundMessage
 from modules.integrations.application.ports import ChannelAdapter
@@ -25,6 +25,10 @@ from shared.domain.errors import ConflictError
 
 # One quick retry: this runs inside the user's request and an open transaction.
 _SEND_POLICY = RetryPolicy(max_attempts=2, base_delay_seconds=0.2, max_delay_seconds=0.5)
+
+
+# A file takes longer than a text: up to 20 MB goes out inside the user's request.
+_FILE_TIMEOUT_SECONDS = 60.0
 
 
 class ChannelDeliveryError(ConflictError):
@@ -39,9 +43,19 @@ class StubSender:
     def send(self, *, channel: Channel, to_contact: str, text: str) -> str:
         return f"stub-{channel.value}-{uuid4().hex[:12]}"
 
+    def send_file(
+        self, *, channel: Channel, to_contact: str, file: OutboundFile, caption: str
+    ) -> str:
+        return f"stub-{channel.value}-{uuid4().hex[:12]}"
+
 
 class UnconfiguredSender:
     def send(self, *, channel: Channel, to_contact: str, text: str) -> str:
+        raise ChannelNotConfiguredError(f"The {channel.value} channel is not connected.")
+
+    def send_file(
+        self, *, channel: Channel, to_contact: str, file: OutboundFile, caption: str
+    ) -> str:
         raise ChannelNotConfiguredError(f"The {channel.value} channel is not connected.")
 
 
@@ -84,6 +98,15 @@ class _WhatsAppSender(ABC):
         # Same namespace as parsed webhooks, so status callbacks find this message.
         return f"{Channel.WHATSAPP.value}:{result.external_message_id}"
 
+    def send_file(
+        self, *, channel: Channel, to_contact: str, file: OutboundFile, caption: str
+    ) -> str:
+        if channel is not Channel.WHATSAPP:
+            return self._fallback.send_file(
+                channel=channel, to_contact=to_contact, file=file, caption=caption
+            )
+        raise ChannelDeliveryError("This WhatsApp provider cannot send files from the CRM yet.")
+
 
 class WhatsAppCloudSender(_WhatsAppSender):
     provider = Provider.WHATSAPP
@@ -121,5 +144,29 @@ class GreenApiSender(_WhatsAppSender):
         self._instance_id = instance_id
         self._token = token
 
-    def _adapter(self, client: httpx.Client) -> ChannelAdapter:
+    def _adapter(self, client: httpx.Client) -> GreenApiAdapter:
         return GreenApiAdapter(client, self._instance_id, self._token, _SEND_POLICY)
+
+    def send_file(
+        self, *, channel: Channel, to_contact: str, file: OutboundFile, caption: str
+    ) -> str:
+        if channel is not Channel.WHATSAPP:
+            return super().send_file(
+                channel=channel, to_contact=to_contact, file=file, caption=caption
+            )
+        with build_http_client(
+            self._base_url, read_timeout=_FILE_TIMEOUT_SECONDS, transport=self._transport
+        ) as client:
+            try:
+                external_id = self._adapter(client).send_file(
+                    recipient=to_contact,
+                    file_name=file.file_name,
+                    content=file.content,
+                    content_type=file.content_type,
+                    caption=caption,
+                )
+            except (TransientError, PermanentError) as exc:
+                raise ChannelDeliveryError("WhatsApp did not accept the file.") from exc
+        if not external_id:
+            raise ChannelDeliveryError("WhatsApp did not return a message id.")
+        return f"{Channel.WHATSAPP.value}:{external_id}"

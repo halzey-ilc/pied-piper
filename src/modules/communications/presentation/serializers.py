@@ -12,6 +12,16 @@ class SendMessageSerializer(serializers.Serializer[dict[str, Any]]):
     text = serializers.CharField(max_length=4096)
 
 
+class SendFileSerializer(serializers.Serializer[dict[str, Any]]):
+    file = serializers.FileField(max_length=255)
+    caption = serializers.CharField(max_length=1024, required=False, allow_blank=True)
+    voice = serializers.BooleanField(required=False, default=False)
+
+
+class TransferSerializer(serializers.Serializer[dict[str, Any]]):
+    owner_user_id = serializers.UUIDField()
+
+
 class MessageAttachmentSerializer(serializers.Serializer[dict[str, Any]]):
     kind = serializers.CharField(read_only=True)
     content_type = serializers.CharField(read_only=True)

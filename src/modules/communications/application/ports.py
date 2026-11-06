@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from typing import Protocol
 from uuid import UUID
 
+from modules.access_control.domain.rbac import MemberRef, Principal
 from modules.communications.domain.conversation import (
     AttachmentInfo,
     Channel,
@@ -75,10 +76,21 @@ class ConversationRepository(Protocol):
         ...
 
 
+@dataclass(frozen=True, slots=True)
+class OutboundFile:
+    content: bytes
+    file_name: str
+    content_type: str
+
+
 class ChannelSender(Protocol):
     """Sends an outbound message through a provider. Returns the provider message id."""
 
     def send(self, *, channel: Channel, to_contact: str, text: str) -> str: ...
+
+    def send_file(
+        self, *, channel: Channel, to_contact: str, file: OutboundFile, caption: str
+    ) -> str: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -93,6 +105,24 @@ class ContactLinker(Protocol):
     def link(
         self, *, channel: Channel, external_contact_id: str, contact_name: str | None
     ) -> ContactLink: ...
+
+    def hand_over(
+        self, principal: Principal, lead_id: UUID, owner_user_id: UUID, team_id: UUID | None
+    ) -> None:
+        """The chat's lead follows the chat to its new owner."""
+        ...
+
+
+class MemberDirectory(Protocol):
+    """Active members of the company (a chat can be handed only to one of them)."""
+
+    def active_member(self, user_id: UUID) -> MemberRef | None: ...
+
+
+class VoiceEncoder(Protocol):
+    def encode(self, content: bytes) -> bytes:
+        """A recording as Ogg Opus, the format WhatsApp plays as a voice message."""
+        ...
 
 
 class MediaFetcher(Protocol):

@@ -9,19 +9,28 @@ from django.http import HttpResponse
 from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import OpenApiParameter, extend_schema
 from rest_framework import status
+from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.request import Request
 from rest_framework.response import Response
 
 from modules.access_control.domain.rbac import AccessPolicy, Permission, Principal, Role
 from modules.communications.application.ports import ConversationFilter
+from modules.communications.application.service import UploadedFile
 from modules.communications.composition import conversation_service, whatsapp_connection
-from modules.communications.domain.conversation import Channel, ConversationStatus
+from modules.communications.domain.conversation import (
+    MAX_ATTACHMENT_BYTES,
+    UNKNOWN_CONTENT_TYPE,
+    Channel,
+    ConversationStatus,
+)
 from modules.communications.presentation.serializers import (
     ConversationListSerializer,
     ConversationReadSerializer,
     MessageListSerializer,
     MessageReadSerializer,
+    SendFileSerializer,
     SendMessageSerializer,
+    TransferSerializer,
     WhatsAppQrSerializer,
     WhatsAppStatusSerializer,
     conversation_to_dict,
@@ -184,6 +193,8 @@ class ConversationDetailView(_Scoped):
 
 
 class MessagesView(_Scoped):
+    parser_classes = [JSONParser, MultiPartParser, FormParser]
+
     @extend_schema(
         tags=_TAGS,
         operation_id="conversations_messages",
@@ -214,10 +225,32 @@ class MessagesView(_Scoped):
         responses={201: MessageReadSerializer},
     )
     def post(self, request: Request, conversation_id: UUID) -> Response:
+        if "file" in request.FILES:
+            return self._send_file(request, conversation_id)
         serializer = SendMessageSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         message = conversation_service().send_message(
             self.principal(), conversation_id, serializer.validated_data["text"]
+        )
+        return Response(message_to_dict(message), status=status.HTTP_201_CREATED)
+
+    def _send_file(self, request: Request, conversation_id: UUID) -> Response:
+        serializer = SendFileSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        upload = data["file"]
+        if upload.size > MAX_ATTACHMENT_BYTES:
+            raise DomainValidationError("The file is too large.")
+        message = conversation_service().send_file(
+            self.principal(),
+            conversation_id,
+            UploadedFile(
+                content=upload.read(),
+                file_name=upload.name,
+                content_type=upload.content_type or UNKNOWN_CONTENT_TYPE,
+                voice=data["voice"],
+            ),
+            data.get("caption", ""),
         )
         return Response(message_to_dict(message), status=status.HTTP_201_CREATED)
 
@@ -265,6 +298,31 @@ class AssignView(_Scoped):
         return Response(
             conversation_to_dict(
                 conversation_service().assign_to_me(self.principal(), conversation_id)
+            )
+        )
+
+
+class TransferView(_Scoped):
+    @extend_schema(
+        tags=_TAGS,
+        operation_id="conversations_transfer",
+        summary="Hand a conversation to a member",
+        description=(
+            "Gives the conversation, and the lead linked to it, to another member. A head of "
+            "sales hands over within their department, a director to any active member."
+        ),
+        parameters=[_TENANT_HEADER],
+        request=TransferSerializer,
+        responses=ConversationReadSerializer,
+    )
+    def post(self, request: Request, conversation_id: UUID) -> Response:
+        serializer = TransferSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        return Response(
+            conversation_to_dict(
+                conversation_service().transfer(
+                    self.principal(), conversation_id, serializer.validated_data["owner_user_id"]
+                )
             )
         )
 

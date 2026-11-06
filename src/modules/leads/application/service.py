@@ -166,6 +166,28 @@ class LeadService:
                 )
         return lead
 
+    def hand_over(
+        self, principal: Principal, lead_id: UUID, owner_user_id: UUID, team_id: UUID | None
+    ) -> None:
+        """A lead follows its WhatsApp chat. The chat's handover already checked who may
+        receive it; a head of sales may not see the lead yet, so nothing is checked here.
+        A converted lead stays as it is: it is handled through its customer."""
+        with self._uow:
+            lead = self._repo.get(lead_id)
+            if lead is None or lead.status is LeadStatus.CONVERTED:
+                return
+            version = lead.version
+            previous_owner = lead.owner_user_id
+            if lead.assign(owner_user_id, team_id):
+                self._repo.save(lead, expected_version=version)
+                self._record(
+                    principal,
+                    "lead.reassigned",
+                    lead,
+                    ("owner",),
+                    details=_owner_change(previous_owner, owner_user_id),
+                )
+
     def find_duplicates(self, principal: Principal, lead_id: UUID) -> list[DuplicateCandidate]:
         """Candidate duplicates (other leads and existing customers) that share this
         lead's e-mail or phone. No automatic merge; the caller decides."""

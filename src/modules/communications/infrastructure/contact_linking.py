@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 from uuid import UUID
 
+from modules.access_control.domain.rbac import Principal
 from modules.communications.application.ports import ContactLink
 from modules.communications.domain.conversation import Channel
 from modules.leads.application.service import LeadService
@@ -22,6 +23,11 @@ class LeadContactLinker:
     def __init__(self, leads: LeadService, owner_user_id: UUID | None) -> None:
         self._leads = leads
         self._owner_user_id = owner_user_id
+
+    def hand_over(
+        self, principal: Principal, lead_id: UUID, owner_user_id: UUID, team_id: UUID | None
+    ) -> None:
+        self._leads.hand_over(principal, lead_id, owner_user_id, team_id)
 
     def link(
         self, *, channel: Channel, external_contact_id: str, contact_name: str | None

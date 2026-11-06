@@ -80,6 +80,27 @@ class GreenApiAdapter:
             accepted=True,
         )
 
+    def send_file(
+        self, *, recipient: str, file_name: str, content: bytes, content_type: str, caption: str
+    ) -> str | None:
+        """WhatsApp picks how to show the file from its extension."""
+        data = {
+            "chatId": recipient if "@" in recipient else f"{recipient}@c.us",
+            "fileName": file_name,
+        }
+        if caption:
+            data["caption"] = caption
+        response = send_with_retry(
+            lambda: self._client.post(
+                f"/waInstance{self._instance_id}/sendFileByUpload/{self._token}",
+                data=data,
+                files={"file": (file_name, content, content_type)},
+            ),
+            self._policy,
+        )
+        message_id: str | None = response.json().get("idMessage")
+        return message_id
+
 
 class TelegramBotAdapter:
     provider = Provider.TELEGRAM

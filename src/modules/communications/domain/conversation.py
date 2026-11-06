@@ -97,6 +97,20 @@ SAFE_CONTENT_TYPES = frozenset(
 )
 
 
+# Shown in the CRM, hence Russian.
+ATTACHMENT_LABELS = {
+    "image": "[Фото]",
+    "video": "[Видео]",
+    "audio": "[Голосовое сообщение]",
+    "document": "[Документ]",
+}
+
+
+def attachment_kind(content_type: str) -> str:
+    family = content_type.split("/", maxsplit=1)[0].strip().lower()
+    return family if family in ("image", "video", "audio") else "document"
+
+
 def safe_content_type(declared: str) -> str:
     base = declared.split(";", maxsplit=1)[0].strip().lower()
     return declared if base in SAFE_CONTENT_TYPES else UNKNOWN_CONTENT_TYPE
@@ -212,6 +226,12 @@ class Conversation:
 
     def assign(self, user_id: UUID) -> None:
         self.owner_user_id = user_id
+        self.version += 1
+
+    def hand_over(self, user_id: UUID, team_id: UUID | None) -> None:
+        """Give the chat to another member; their department becomes its team."""
+        self.owner_user_id = user_id
+        self.team_id = team_id
         self.version += 1
 
     def mark_read(self) -> bool:
