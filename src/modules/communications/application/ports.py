@@ -23,6 +23,7 @@ class ConversationVisibility:
 class ConversationFilter:
     channel: Channel | None = None
     status: ConversationStatus | None = None
+    lead_id: UUID | None = None
 
 
 class ConversationRepository(Protocol):
@@ -49,7 +50,7 @@ class ConversationRepository(Protocol):
 
     def message_exists(self, channel: Channel, external_id: str) -> bool: ...
 
-    def mark_failed(self, channel: Channel, external_id: str) -> bool:
+    def mark_failed(self, channel: Channel, external_id: str, code: str | None) -> bool:
         """Mark an outbound message as failed. Returns True if one was found."""
         ...
 

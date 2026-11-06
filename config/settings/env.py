@@ -267,6 +267,40 @@ def hardening_errors(env: AppEnv) -> list[str]:  # noqa: PLR0912 - one guard per
         errors.append("DIAGNOSTIC_TASKS_ENABLED must be false in production")
     if env.API_DOCS_ENABLED:
         errors.append("API_DOCS_ENABLED must be false in production")
+    errors.extend(_whatsapp_errors(env))
+    return errors
+
+
+def _whatsapp_errors(env: AppEnv) -> list[str]:
+    """Production only: all of WhatsApp is configured, or none of it. A partial setup
+    would receive messages it cannot answer, or answer with no lead to attach to."""
+    secrets: dict[str, SecretStr | None] = {
+        "WHATSAPP_APP_SECRET": env.WHATSAPP_APP_SECRET,
+        "WHATSAPP_VERIFY_TOKEN": env.WHATSAPP_VERIFY_TOKEN,
+        "WHATSAPP_ACCESS_TOKEN": env.WHATSAPP_ACCESS_TOKEN,
+    }
+    required: dict[str, object] = {
+        **secrets,
+        "WHATSAPP_PHONE_NUMBER_ID": env.WHATSAPP_PHONE_NUMBER_ID,
+        "WHATSAPP_LEAD_OWNER_USER_ID": env.WHATSAPP_LEAD_OWNER_USER_ID,
+    }
+    if not any(required.values()):
+        return []
+    errors = [
+        f"{name} is required when WhatsApp is configured"
+        for name, value in required.items()
+        if not value
+    ]
+    errors.extend(
+        f"{name} contains a placeholder value"
+        for name, secret in secrets.items()
+        if secret is not None and _looks_like_placeholder(secret.get_secret_value())
+    )
+    verify_token = env.WHATSAPP_VERIFY_TOKEN
+    if verify_token is not None and len(verify_token.get_secret_value()) < _MIN_SECRET_LENGTH:
+        errors.append(f"WHATSAPP_VERIFY_TOKEN must be at least {_MIN_SECRET_LENGTH} characters")
+    if not env.WHATSAPP_API_BASE_URL.startswith("https://"):
+        errors.append("WHATSAPP_API_BASE_URL must use https in production")
     return errors
 
 

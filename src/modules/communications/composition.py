@@ -9,7 +9,11 @@ from modules.communications.application.ports import ChannelSender
 from modules.communications.application.service import ConversationService
 from modules.communications.infrastructure.contact_linking import LeadContactLinker
 from modules.communications.infrastructure.repository import DjangoConversationRepository
-from modules.communications.infrastructure.sender import StubSender, WhatsAppCloudSender
+from modules.communications.infrastructure.sender import (
+    StubSender,
+    UnconfiguredSender,
+    WhatsAppCloudSender,
+)
 from modules.leads.composition import lead_service
 from platform_core.application.context import require_tenant
 from platform_core.infrastructure.messaging.stores import DjangoEventOutbox
@@ -23,15 +27,16 @@ def conversation_repository() -> DjangoConversationRepository:
 
 
 def _sender() -> ChannelSender:
+    fallback = StubSender() if settings.INTEGRATIONS["ALLOW_STUB_SENDER"] else UnconfiguredSender()
     whatsapp = settings.INTEGRATIONS["WHATSAPP"]
     token, phone_number_id = whatsapp["ACCESS_TOKEN"], whatsapp["PHONE_NUMBER_ID"]
     if token is None or phone_number_id is None:
-        return StubSender()
+        return fallback
     return WhatsAppCloudSender(
         base_url=whatsapp["API_BASE_URL"],
         phone_number_id=phone_number_id,
         access_token=token.get_secret_value(),
-        fallback=StubSender(),
+        fallback=fallback,
     )
 
 

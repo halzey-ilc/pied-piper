@@ -41,13 +41,16 @@ in the WhatsApp Business app). Not yet verified against a live account.
 
 `send_message` appends an outbound message, sends it through a `ChannelSender` and
 emits `communications.message_sent`. WhatsApp uses the Cloud API once
-`WHATSAPP_ACCESS_TOKEN` and `WHATSAPP_PHONE_NUMBER_ID` are set. Until then, and for
-every other channel, the stub reports success **without delivering anything**.
+`WHATSAPP_ACCESS_TOKEN` and `WHATSAPP_PHONE_NUMBER_ID` are set. A channel with no
+real account returns 409 `channel_not_configured` in production. Outside production
+a stub reports success **without delivering anything**.
 
 A rejected send returns 409 and stores nothing. WhatsApp can also accept a message
 and fail it later (for example outside the 24-hour window, which needs an approved
 template; templates are not implemented): a `failed` status webhook then marks the
-message `failed`.
+message `failed` and stores the provider's code in `failure_code`.
+
+Setup: `docs/operations/whatsapp-setup.md`. Frontend contract: `docs/WHATSAPP_API.md`.
 
 ## API
 

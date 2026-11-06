@@ -85,6 +85,7 @@ class Message:
     created_at: datetime
     external_id: str | None = None
     sender_user_id: UUID | None = None
+    failure_code: str | None = None
 
 
 @dataclass(slots=True)

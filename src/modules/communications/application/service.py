@@ -134,7 +134,9 @@ class ConversationService:
     def mark_delivery_failed(self, failure: DeliveryFailure) -> bool:
         """Record that the provider could not deliver a sent message."""
         with self._uow:
-            return self._repo.mark_failed(failure.channel, failure.external_message_id)
+            return self._repo.mark_failed(
+                failure.channel, failure.external_message_id, failure.code
+            )
 
     # --- reads --------------------------------------------------------------
 

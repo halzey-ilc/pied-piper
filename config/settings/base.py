@@ -557,6 +557,8 @@ INTEGRATIONS: dict[str, Any] = {
     "HTTP_CONNECT_TIMEOUT": 3.0,
     "HTTP_READ_TIMEOUT": 10.0,
     "WEBHOOK_MAX_BODY_BYTES": 512 * 1024,
+    # In production an unconfigured channel must fail, not pretend to have sent.
+    "ALLOW_STUB_SENDER": ENV.DJANGO_ENV != "production",
     "SECRETS": {
         "whatsapp": ENV.WHATSAPP_APP_SECRET,
         "instagram": ENV.INSTAGRAM_APP_SECRET,

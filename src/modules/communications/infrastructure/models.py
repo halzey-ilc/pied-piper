@@ -42,6 +42,7 @@ class ConversationRecord(models.Model):
             models.Index(fields=["status", "last_message_at"], name="conv_status_idx"),
             models.Index(fields=["owner_user_id"], name="conv_owner_idx"),
             models.Index(fields=["team_id"], name="conv_team_idx"),
+            models.Index(fields=["lead_id"], name="conv_lead_idx"),
         ]
 
     def __str__(self) -> str:
@@ -63,6 +64,7 @@ class MessageRecord(models.Model):
     )
     external_id = models.CharField(max_length=255, null=True, blank=True)  # noqa: DJ001
     sender_user_id = models.UUIDField(null=True, blank=True)
+    failure_code = models.CharField(max_length=32, null=True, blank=True)  # noqa: DJ001
     created_at = models.DateTimeField()
 
     class Meta:

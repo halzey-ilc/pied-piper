@@ -47,6 +47,7 @@ def _msg_to_domain(row: MessageRecord) -> Message:
         created_at=row.created_at,
         external_id=row.external_id,
         sender_user_id=row.sender_user_id,
+        failure_code=row.failure_code,
     )
 
 
@@ -101,6 +102,8 @@ class DjangoConversationRepository:
             qs = qs.filter(channel=filters.channel.value)
         if filters.status is not None:
             qs = qs.filter(status=filters.status.value)
+        if filters.lead_id is not None:
+            qs = qs.filter(lead_id=filters.lead_id)
         return qs
 
     def list_visible(
@@ -138,7 +141,7 @@ class DjangoConversationRepository:
     def message_exists(self, channel: Channel, external_id: str) -> bool:
         return self._msg().filter(channel=channel.value, external_id=external_id).exists()
 
-    def mark_failed(self, channel: Channel, external_id: str) -> bool:
+    def mark_failed(self, channel: Channel, external_id: str, code: str | None) -> bool:
         updated = (
             self._msg()
             .filter(
@@ -146,7 +149,7 @@ class DjangoConversationRepository:
                 external_id=external_id,
                 direction=MessageDirection.OUTBOUND.value,
             )
-            .update(status=MessageStatus.FAILED.value)
+            .update(status=MessageStatus.FAILED.value, failure_code=code[:32] if code else None)
         )
         return updated > 0
 

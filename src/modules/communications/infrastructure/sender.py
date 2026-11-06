@@ -1,8 +1,8 @@
 """Outbound channel senders.
 
-WhatsAppCloudSender delivers through the Cloud API. StubSender returns a synthetic
-id without contacting a provider: it serves every channel with no real account
-configured, so a message it "sends" never reaches anyone.
+WhatsAppCloudSender delivers through the Cloud API. A channel with no real account
+gets UnconfiguredSender, which refuses to send, or outside production StubSender,
+which returns a synthetic id so a message it "sends" never reaches anyone.
 """
 
 from __future__ import annotations
@@ -11,6 +11,7 @@ from uuid import uuid4
 
 import httpx
 
+from modules.communications.application.ports import ChannelSender
 from modules.communications.domain.conversation import Channel
 from modules.integrations.application.contracts import OutboundMessage
 from modules.integrations.domain.providers import Provider
@@ -27,9 +28,18 @@ class ChannelDeliveryError(ConflictError):
     code = "channel_delivery_failed"
 
 
+class ChannelNotConfiguredError(ConflictError):
+    code = "channel_not_configured"
+
+
 class StubSender:
     def send(self, *, channel: Channel, to_contact: str, text: str) -> str:
         return f"stub-{channel.value}-{uuid4().hex[:12]}"
+
+
+class UnconfiguredSender:
+    def send(self, *, channel: Channel, to_contact: str, text: str) -> str:
+        raise ChannelNotConfiguredError(f"The {channel.value} channel is not connected.")
 
 
 class WhatsAppCloudSender:
@@ -41,7 +51,7 @@ class WhatsAppCloudSender:
         base_url: str,
         phone_number_id: str,
         access_token: str,
-        fallback: StubSender,
+        fallback: ChannelSender,
         transport: httpx.BaseTransport | None = None,
     ) -> None:
         self._base_url = base_url

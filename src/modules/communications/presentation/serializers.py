@@ -18,6 +18,7 @@ class MessageReadSerializer(serializers.Serializer[dict[str, Any]]):
     status = serializers.CharField(read_only=True)
     external_id = serializers.CharField(read_only=True, allow_null=True)
     sender_user_id = serializers.UUIDField(read_only=True, allow_null=True)
+    failure_code = serializers.CharField(read_only=True, allow_null=True)
     created_at = serializers.DateTimeField(read_only=True)
 
 
@@ -70,6 +71,7 @@ def message_to_dict(m: Message) -> dict[str, Any]:
         "status": m.status.value,
         "external_id": m.external_id,
         "sender_user_id": str(m.sender_user_id) if m.sender_user_id else None,
+        "failure_code": m.failure_code,
         "created_at": m.created_at.isoformat(),
     }
 
