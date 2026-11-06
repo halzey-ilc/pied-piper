@@ -5,6 +5,7 @@ from modules.ai_insights.presentation.views import (
     AgentActionRejectView,
     AgentRunDetailView,
     AgentRunsView,
+    AiStatusView,
     CallSummaryView,
     ConversationReplyView,
     DealBriefView,
@@ -14,6 +15,7 @@ from modules.ai_insights.presentation.views import (
 )
 
 urlpatterns = [
+    path("status/", AiStatusView.as_view(), name="ai-status"),
     path("calls/<uuid:call_id>/summary/", CallSummaryView.as_view(), name="ai-call-summary"),
     path(
         "conversations/<uuid:conversation_id>/reply/",

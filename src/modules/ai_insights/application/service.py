@@ -24,6 +24,7 @@ from modules.ai_insights.domain.insight import (
     InsightStatus,
     source_fingerprint,
 )
+from modules.ai_insights.domain.redaction import redact_contacts
 from modules.audit.application.ports import AuditLog
 from modules.audit.domain.entry import AuditEntry
 from platform_core.application.ports import EventOutbox
@@ -35,6 +36,8 @@ from shared.domain.events import DomainEvent
 logger = logging.getLogger(__name__)
 
 AGGREGATE = "call_insight"
+# call_summary.input.v1 accepts at most this much text.
+MAX_TRANSCRIPT = 100_000
 SCOPES = ("ai.jobs.create", "ai.jobs.read")
 
 
@@ -130,7 +133,7 @@ class CallInsightService:
                 subject=f"user:{insight.requested_by}",
                 job_type=insight.job_type,
                 payload={
-                    "transcript": text,
+                    "transcript": redact_contacts(text)[:MAX_TRANSCRIPT],
                     # The company's working language (AI_PLATFORM_LANGUAGE): the summary is
                     # written in it, and "not enough data" notices are not bilingual.
                     "language": self._language,

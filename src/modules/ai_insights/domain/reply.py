@@ -19,6 +19,7 @@ from typing import Any, ClassVar
 from uuid import UUID, uuid4
 
 from modules.ai_insights.domain.insight import InsightStatus
+from modules.ai_insights.domain.redaction import redact_contacts
 from modules.ai_insights.domain.report import payload_fingerprint, validate_language
 from shared.domain.errors import DomainValidationError
 from shared.domain.events import DomainEvent
@@ -52,7 +53,7 @@ def build_payload(
         "language": validate_language(language),
         "channel": channel,
         "messages": [
-            {"ref": str(m.id), "direction": m.direction, "text": m.text[:MAX_TEXT]}
+            {"ref": str(m.id), "direction": m.direction, "text": redact_contacts(m.text)[:MAX_TEXT]}
             for m in recent
             if m.text.strip()
         ],

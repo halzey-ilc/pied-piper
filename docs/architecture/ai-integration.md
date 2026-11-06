@@ -4,6 +4,9 @@ The CRM uses a **separate** service, the CRM AI Platform (`../crm-ai-platform`),
 for AI analysis. The CRM remains the source of truth and the only place where
 user rights are checked. AI features are **off** unless `AI_PLATFORM_ENABLED=true`.
 
+Clients ask `GET /api/v1/ai/status/` → `{"enabled", "can_request"}` (403
+`feature_not_in_plan` when the plan has no AI) and show AI blocks only when both are true.
+
 ## Flow: the CRM pulls, the AI Platform never writes
 
 ```
@@ -190,11 +193,16 @@ contained factual errors (see `crm-ai-platform/docs/MODEL_EVALUATION.md`).
 | Tenant | Token claim from `require_tenant()`, never from the request; results stored in that tenant's database |
 | Rights | Telephony's own visibility check + `ai.request` (owner/admin ALL, manager TEAM, sales_rep OWN, viewer none) |
 | What is sent | Call `notes` only (no transcripts exist yet), with the call id as an opaque reference |
+| Contact details | Phone numbers and e-mails in free text (call notes, deal titles and history, messages, assistant requests) are masked before sending (`domain/redaction.py`); names are not recognised |
 | What is stored | Structured output (`call_summary.output.v1`), provider, model, `is_mock`; the text's sha256, not the text |
 | Mock results | `is_mock=true` is shown to clients; unknown provenance is treated as mock |
 | Key | `AI_PLATFORM_TOKEN_KEY` ≥ 32 chars, must differ from `JWT_SIGNING_KEY`/`DJANGO_SECRET_KEY`; `_FILE` supported |
 | Failures | Network/5xx/429 → `TransientError` (Celery retry, then DLQ); 4xx/contract mismatch → insight `failed` |
 | Queue | Existing `integrations` queue (outbound calls), no topology change |
+
+The platform's input schemas are closed. `tests/unit/test_ai_platform_contracts.py` validates
+what the CRM builds against copies of them in `tests/contracts/ai_platform/`; CRM statuses are
+mapped to the schema's values (e.g. a meeting `held` → `completed`, `no_show` → `cancelled`).
 
 Tests: `tests/unit/test_ai_insights.py`, `tests/api/test_ai_insights.py`,
 `tests/security/test_ai_insights_isolation.py`, `tests/unit/test_operations_rules.py`,
@@ -221,4 +229,8 @@ collide. Without the overlay the CRM runs as before with AI disabled.
   draft may cite; measuring how often drafts are used; a real-model evaluation.
 - E-mail/push delivery of AI notifications (in-app only for now).
 - Stalled deals use `updated_at` because there is no stage history.
-- Showing insights in the call card of a frontend (there is no frontend).
+- Frontend: call summaries and deal briefs are shown in the call and deal cards, the assistant
+  has its own page. Reply suggestions, digests, KPI explanations and risk reviews have backend
+  endpoints but no screen yet.
+- `agent.plan.v2/v3` (meetings, stage moves, conversation history), `call.transcribe.v1` and
+  `knowledge.answer.v1` exist in the AI Platform and are not used by the CRM.

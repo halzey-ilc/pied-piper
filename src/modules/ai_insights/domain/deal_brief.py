@@ -17,6 +17,7 @@ from typing import Any, ClassVar
 from uuid import UUID, uuid4
 
 from modules.ai_insights.domain.insight import InsightStatus
+from modules.ai_insights.domain.redaction import redact_contacts
 from modules.ai_insights.domain.report import payload_fingerprint, validate_language
 from shared.domain.errors import DomainValidationError
 from shared.domain.events import DomainEvent
@@ -49,20 +50,38 @@ class HistoryEntry:
     on: date
     title: str | None
     text: str | None
-    status: str | None  # task: open | done | overdue; meeting: scheduled | completed | cancelled
+    # task: open | done | cancelled | overdue; meeting: scheduled | completed | cancelled
+    status: str | None
 
 
-def task_status(*, completed: bool, due: date | None, today: date) -> str:
+def task_status(*, completed: bool, due: date | None, today: date, cancelled: bool = False) -> str:
     """Overdue is decided here, by the CRM, not by the model."""
+    if cancelled:
+        return "cancelled"
     if completed:
         return "done"
     return "overdue" if due is not None and due < today else "open"
 
 
+# deal_coach.input.v1 knows three meeting states; the CRM's statuses map onto them.
+_MEETING_STATUS = {
+    "scheduled": "scheduled",
+    "rescheduled": "scheduled",
+    "held": "completed",
+    "completed": "completed",
+    "cancelled": "cancelled",
+    "no_show": "cancelled",  # it did not take place
+}
+
+
+def meeting_status(status: str) -> str:
+    return _MEETING_STATUS[status]
+
+
 def _clip(text: str | None, limit: int) -> str | None:
     if text is None:
         return None
-    cleaned = text.strip()
+    cleaned = redact_contacts(text).strip()
     return cleaned[:limit] or None
 
 
@@ -76,7 +95,7 @@ def build_payload(
         "today": today.isoformat(),
         "deal": {
             "ref": f"deal:{deal.id}",
-            "title": deal.title[:200],
+            "title": redact_contacts(deal.title)[:200],
             "status": deal.status,
             "stage": deal.stage[:100],
             "stage_position": deal.stage_position,

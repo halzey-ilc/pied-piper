@@ -2,12 +2,13 @@ from __future__ import annotations
 
 from uuid import UUID
 
+from django.conf import settings
 from drf_spectacular.utils import OpenApiExample, OpenApiParameter, extend_schema
 from rest_framework import status
 from rest_framework.request import Request
 from rest_framework.response import Response
 
-from modules.access_control.domain.rbac import Principal, Role
+from modules.access_control.domain.rbac import AccessPolicy, Permission, Principal, Role
 from modules.ai_insights.composition import (
     agent_service,
     ai_report_service,
@@ -21,6 +22,7 @@ from modules.ai_insights.presentation.serializers import (
     AgentRequestSerializer,
     AgentRunSerializer,
     AiReportSerializer,
+    AiStatusSerializer,
     CallInsightSerializer,
     DealBriefSerializer,
     DigestRequestSerializer,
@@ -55,6 +57,28 @@ class _Scoped(TenantScopedAPIView):
             role=Role(self.membership.role),
             team_ids=self.membership.team_ids,
             department_id=self.membership.department_id,
+        )
+
+
+class AiStatusView(_Scoped):
+    @extend_schema(
+        tags=_TAGS,
+        operation_id="ai_status",
+        summary="Whether AI features can be used here",
+        description=(
+            "`enabled`: the installation is connected to the AI Platform (AI_PLATFORM_ENABLED); "
+            "`can_request`: the caller's role has ai.request. Clients use it to show AI blocks "
+            "only when they work. 403 `feature_not_in_plan` when the company's plan has no AI."
+        ),
+        parameters=[_TENANT_HEADER],
+        responses=AiStatusSerializer,
+    )
+    def get(self, request: Request) -> Response:
+        return Response(
+            {
+                "enabled": bool(settings.AI_PLATFORM["ENABLED"]),
+                "can_request": AccessPolicy().allows(self.principal(), Permission.AI_REQUEST),
+            }
         )
 
 

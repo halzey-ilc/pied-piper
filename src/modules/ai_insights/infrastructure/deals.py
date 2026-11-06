@@ -22,6 +22,7 @@ from modules.ai_insights.domain.deal_brief import (
     MAX_HISTORY,
     DealFacts,
     HistoryEntry,
+    meeting_status,
     task_status,
 )
 from modules.meetings.application.ports import MeetingFilter
@@ -78,7 +79,10 @@ class CrmDealContextReader:
             if a.kind is ActivityKind.TASK:
                 on = a.due_date or on
                 status = task_status(
-                    completed=a.task_status is TaskStatus.COMPLETED, due=a.due_date, today=today
+                    completed=a.task_status is TaskStatus.COMPLETED,
+                    cancelled=a.task_status is TaskStatus.CANCELLED,
+                    due=a.due_date,
+                    today=today,
                 )
             text = a.body
             if a.kind is ActivityKind.CALL and a.outcome:
@@ -112,7 +116,7 @@ class CrmDealContextReader:
                 on=m.scheduled_start.date(),
                 title=m.title,
                 text=m.outcome or m.description,
-                status=m.status.value,
+                status=meeting_status(m.status.value),
             )
             for m in page.items
         ]

@@ -6,13 +6,16 @@ The AI Platform is replaced by a recording fake; no network is used.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
+from pathlib import Path
 from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
+from jsonschema import Draft202012Validator
 from rest_framework.test import APIClient
 
 from modules.access_control.domain.rbac import Role
@@ -256,3 +259,51 @@ def test_disabled(
     settings.AI_PLATFORM = {**settings.AI_PLATFORM, "ENABLED": False}
     response = client.post(_url(deal_id))
     assert response.status_code == 409 and response.json()["error"]["code"] == "ai_disabled"
+
+
+def test_held_meeting_and_contacts_in_notes_reach_the_platform_as_its_schema_expects(
+    ai: FakeAiPlatform,
+    make_user: Callable[..., Any],
+    tenants: dict[str, TenantFixture],
+    client_for: Callable[..., APIClient],
+) -> None:
+    owner = make_user("owner", tenant=tenants["acme"])
+    client = client_for(owner, "acme")
+    deal_id = _deal(client)
+    _history(client, deal_id, owner.pk)
+    MeetingRecord.objects.using(ALIAS).filter(subject_id=deal_id).update(status="held")
+    note = {
+        "kind": "note",
+        "subject_type": "deal",
+        "subject_id": deal_id,
+        "body": "Написать на aidana@mail.kg или +996 555 100 200",
+    }
+    _ok(client.post("/api/v1/activities/", note, format="json"))
+
+    created = client.post(_url(deal_id), {"language": "ru"}, format="json")
+    _run_worker(created.json()["id"])
+
+    payload = ai.submits[0]["payload"]
+    schema = json.loads(
+        (Path(__file__).parents[1] / "contracts/ai_platform/deal_coach.input.v1.json").read_text()
+    )
+    Draft202012Validator(schema).validate(payload)
+    meeting = next(h for h in payload["history"] if h["kind"] == "meeting")
+    assert meeting["status"] == "completed"
+    assert "aidana@mail.kg" not in str(payload) and "555 100 200" not in str(payload)
+    assert "Написать на [email] или [телефон]" in str(payload)
+
+
+def test_status_tells_clients_when_ai_blocks_work(
+    settings: Any,
+    ai: FakeAiPlatform,
+    make_user: Callable[..., Any],
+    tenants: dict[str, TenantFixture],
+    client_for: Callable[..., APIClient],
+) -> None:
+    owner = client_for(make_user("owner", tenant=tenants["acme"]), "acme")
+    viewer = client_for(make_user("viewer", tenant=tenants["acme"], role=Role.VIEWER), "acme")
+    assert owner.get("/api/v1/ai/status/").json() == {"enabled": True, "can_request": True}
+    assert viewer.get("/api/v1/ai/status/").json() == {"enabled": True, "can_request": False}
+    settings.AI_PLATFORM = {**settings.AI_PLATFORM, "ENABLED": False}
+    assert owner.get("/api/v1/ai/status/").json()["enabled"] is False

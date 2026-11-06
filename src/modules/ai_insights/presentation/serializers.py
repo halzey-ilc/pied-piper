@@ -12,6 +12,11 @@ from modules.ai_insights.domain.reply import ReplySuggestion
 from modules.ai_insights.domain.report import LANGUAGES, AiReport, ReportKind
 
 
+class AiStatusSerializer(serializers.Serializer[dict[str, Any]]):
+    enabled = serializers.BooleanField(read_only=True)
+    can_request = serializers.BooleanField(read_only=True)
+
+
 class CallInsightSerializer(serializers.Serializer[dict[str, Any]]):
     id = serializers.UUIDField(read_only=True)
     call_id = serializers.UUIDField(read_only=True)
