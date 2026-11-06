@@ -86,7 +86,6 @@ def _verify(token: str, slug: str = "acme", provider: str = "whatsapp") -> Any:
     )
 
 
-@pytest.mark.usefixtures("lead_owner")
 def test_channels_report_whatsapp_only_once_its_account_is_configured(
     settings: Any,
     tenants: dict[str, TenantFixture],
@@ -104,6 +103,7 @@ def test_channels_report_whatsapp_only_once_its_account_is_configured(
     assert can_send() == {"whatsapp": True, "telegram": False, "instagram": False, "email": False}
 
 
+@pytest.mark.usefixtures("lead_owner")
 def test_verification_echoes_the_challenge_as_plain_text(
     tenants: dict[str, TenantFixture],
 ) -> None:
