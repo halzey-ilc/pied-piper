@@ -217,7 +217,10 @@ class ReplySuggestionService:
     def _payload(self, conversation_id: UUID, channel: str, language: str) -> dict[str, Any]:
         messages = self._conversations.recent_messages(conversation_id, MAX_MESSAGES)
         return build_payload(
-            language=validate_language(language), channel=channel, messages=messages
+            language=validate_language(language),
+            channel=channel,
+            messages=messages,
+            names=self._conversations.names_for(conversation_id),
         )
 
     def _finish(self, suggestion: ReplySuggestion, event: DomainEvent) -> None:

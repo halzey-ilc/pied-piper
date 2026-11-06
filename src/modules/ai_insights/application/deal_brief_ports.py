@@ -17,6 +17,8 @@ class DealContext:
     owner_user_id: UUID
     team_id: UUID | None
     history: list[HistoryEntry]
+    reschedules: int = 0  # moves to «Встреча перенесена» and rescheduled meetings
+    names: tuple[str, ...] = ()  # the customer's name: masked in what goes to the AI
 
 
 class DealContextReader(Protocol):

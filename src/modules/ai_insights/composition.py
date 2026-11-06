@@ -37,6 +37,7 @@ from modules.ai_insights.infrastructure.scheduler import (
     CeleryReportScheduler,
 )
 from modules.audit.infrastructure.audit_log import DjangoAuditLog
+from modules.organizations.composition import company_settings
 from platform_core.application.context import require_tenant
 from platform_core.infrastructure.messaging.stores import DjangoEventOutbox
 from shared.infrastructure.unit_of_work import DjangoUnitOfWork
@@ -101,6 +102,7 @@ def agent_service() -> AgentService:
         enabled=cfg["ENABLED"],
         default_language=cfg["DEFAULT_LANGUAGE"],
         deadline_seconds=cfg["DEADLINE_SECONDS"],
+        timezone_name=str(company_settings(tenant.tenant_id)["timezone"]),
     )
 
 
@@ -120,6 +122,7 @@ def deal_brief_service() -> DealBriefService:
         enabled=cfg["ENABLED"],
         default_language=cfg["DEFAULT_LANGUAGE"],
         deadline_seconds=cfg["DEADLINE_SECONDS"],
+        timezone_name=str(company_settings(tenant.tenant_id)["timezone"]),
     )
 
 

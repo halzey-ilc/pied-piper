@@ -10,7 +10,9 @@ from uuid import UUID
 
 from modules.access_control.domain.rbac import Principal
 from modules.ai_insights.application.ports import CallSnapshot
+from modules.ai_insights.infrastructure.names import customer_names, deal_customer_names
 from modules.telephony.composition import call_repository, call_service
+from modules.telephony.domain.call import SubjectType
 
 
 class TelephonyCallReader:
@@ -26,3 +28,11 @@ class TelephonyCallReader:
     def text_for(self, call_id: UUID) -> str | None:
         call = call_repository().get(call_id)
         return None if call is None else call.notes
+
+    def names_for(self, call_id: UUID) -> tuple[str, ...]:
+        call = call_repository().get(call_id)
+        if call is None or call.link is None:
+            return ()
+        if call.link.type is SubjectType.CUSTOMER:
+            return customer_names(call.link.id)
+        return deal_customer_names(call.link.id)

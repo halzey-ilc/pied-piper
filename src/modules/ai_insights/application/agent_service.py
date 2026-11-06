@@ -15,6 +15,7 @@ from __future__ import annotations
 import logging
 from datetime import UTC, datetime
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
 from modules.access_control.domain.rbac import AccessPolicy, Permission, Principal
 from modules.ai_insights.application.agent_ports import (
@@ -74,6 +75,7 @@ class AgentService:
         enabled: bool,
         default_language: str = "ru",
         deadline_seconds: float = 900.0,
+        timezone_name: str = "UTC",
         policy: AccessPolicy | None = None,
     ) -> None:
         self._repo = repository
@@ -87,6 +89,7 @@ class AgentService:
         self._tenant_slug = tenant_slug
         self._enabled = enabled
         self._language = default_language
+        self._tz = ZoneInfo(timezone_name)
         self._deadline = deadline_seconds
         self._policy = policy or AccessPolicy()
 
@@ -122,7 +125,7 @@ class AgentService:
             subjects.append(named)
         payload = build_payload(
             language=validate_language(language or self._language),
-            today=datetime.now(UTC).date().isoformat(),
+            today=datetime.now(self._tz).date().isoformat(),
             request=request,
             tools=self.tools_for(principal),
             subjects=subjects,

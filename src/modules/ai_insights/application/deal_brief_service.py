@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 from datetime import UTC, datetime
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
 from modules.access_control.domain.rbac import (
     AccessPolicy,
@@ -28,6 +29,7 @@ from modules.ai_insights.domain.deal_brief import (
     DealBrief,
     build_payload,
     compact_refs,
+    deal_checks,
 )
 from modules.ai_insights.domain.insight import InsightStatus
 from modules.ai_insights.domain.report import payload_fingerprint, validate_language
@@ -60,7 +62,9 @@ class DealBriefService:
         default_language: str = "ru",
         deadline_seconds: float = 900.0,
         policy: AccessPolicy | None = None,
+        timezone_name: str = "UTC",
     ) -> None:
+        self._tz = ZoneInfo(timezone_name)
         self._repo = repository
         self._deals = deals
         self._client = client
@@ -80,14 +84,18 @@ class DealBriefService:
         """Queue a brief for a deal the principal can see. Returns (brief, created)."""
         if not self._enabled:
             raise AiDisabledError("AI features are not enabled for this installation.")
-        today = datetime.now(UTC).date()
+        # The company's day, not UTC's: overdue and "tomorrow" mean what the manager sees.
+        today = datetime.now(self._tz).date()
         context = self._deals.read(principal, deal_id, today)
         self._policy.require(
             principal,
             Permission.AI_REQUEST,
             ResourceOwnership(owner_user_id=context.owner_user_id, team_id=context.team_id),
         )
+        checks = deal_checks(context.facts, context.history, today, reschedules=context.reschedules)
         payload = build_payload(
+            checks=checks,
+            names=context.names,
             language=validate_language(language or self._language),
             today=today,
             deal=context.facts,
@@ -102,7 +110,10 @@ class DealBriefService:
             if existing is not None:
                 self._finish(existing, existing.mark_failed("submit_timeout"))
             brief = DealBrief.request(
-                deal_id=context.facts.id, requested_by=principal.user_id, payload=payload
+                deal_id=context.facts.id,
+                requested_by=principal.user_id,
+                payload=payload,
+                checks=checks,
             )
             self._repo.add(brief)
             self._record(principal.user_id, "deal_brief.requested", brief)

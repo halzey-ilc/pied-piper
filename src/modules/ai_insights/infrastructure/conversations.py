@@ -11,6 +11,7 @@ from uuid import UUID
 from modules.access_control.domain.rbac import Principal
 from modules.ai_insights.application.reply_ports import ConversationSnapshot
 from modules.ai_insights.domain.reply import MessageSnapshot
+from modules.ai_insights.infrastructure.names import customer_names
 from modules.communications.composition import conversation_repository, conversation_service
 
 
@@ -27,6 +28,13 @@ class CommunicationsConversationReader:
     def channel_of(self, conversation_id: UUID) -> str | None:
         conversation = conversation_repository().get(conversation_id)
         return None if conversation is None else conversation.channel.value
+
+    def names_for(self, conversation_id: UUID) -> tuple[str, ...]:
+        conversation = conversation_repository().get(conversation_id)
+        if conversation is None:
+            return ()
+        contact = (conversation.contact_name,) if conversation.contact_name else ()
+        return contact + customer_names(conversation.customer_id)
 
     def recent_messages(self, conversation_id: UUID, limit: int) -> list[MessageSnapshot]:
         return [

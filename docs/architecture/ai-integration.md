@@ -190,6 +190,20 @@ and are checked. `result.summary` is free text and is **not** checked, so the AP
 marks it `summary_grounded: false`. On a local 4B model, Kyrgyz summaries
 contained factual errors (see `crm-ai-platform/docs/MODEL_EVALUATION.md`).
 
+## Facts and verification (deal briefs, call summaries)
+
+Measured on Qwen3.5-4B: the model misread dates ("срок 2026-11-20 уже истёк"), invented counts
+("клиент дважды запросил") and quoted sentences that did not back the point. So:
+
+- The CRM counts: `deal_checks` gives open and overdue tasks, meetings (held, ahead),
+  reschedules, calls, notes and the nearest task or meeting, in the company's timezone. The
+  first history entry is "Факты CRM"; every task and meeting says in words what its date means.
+- `domain/verification.py` checks the answer: a point contradicting those facts is removed, a
+  point whose quote does not back it too (and the unchecked `summary` is then replaced by the
+  confirmed points). The next step is the CRM's nearest task or meeting, or an agreement from the
+  call notes word for word. `result.verification` counts what was removed.
+- These are patterns, not understanding: a false sentence they do not recognise passes.
+
 ## Data and security
 
 | Concern | How |
@@ -197,7 +211,7 @@ contained factual errors (see `crm-ai-platform/docs/MODEL_EVALUATION.md`).
 | Tenant | Token claim from `require_tenant()`, never from the request; results stored in that tenant's database |
 | Rights | Telephony's own visibility check + `ai.request` (owner/admin ALL, manager TEAM, sales_rep OWN, viewer none) |
 | What is sent | Call `notes` only (no transcripts exist yet), with the call id as an opaque reference |
-| Contact details | Phone numbers and e-mails in free text (call notes, deal titles and history, messages, assistant requests) are masked before sending (`domain/redaction.py`); names are not recognised |
+| Personal data | `domain/redaction.py`, before sending: phones and e-mails everywhere; companies with a legal form; the record's customer and contact in any grammatical case. A person only mentioned in free text and a company without a legal form stay |
 | What is stored | Structured output (`call_summary.output.v1`), provider, model, `is_mock`; the text's sha256, not the text |
 | Mock results | `is_mock=true` is shown to clients; unknown provenance is treated as mock |
 | Key | `AI_PLATFORM_TOKEN_KEY` ≥ 32 chars, must differ from `JWT_SIGNING_KEY`/`DJANGO_SECRET_KEY`; `_FILE` supported |
@@ -213,6 +227,17 @@ Tests: `tests/unit/test_ai_insights.py`, `tests/api/test_ai_insights.py`,
 `tests/api/test_operations.py`, `tests/api/test_ai_operations_digest.py`,
 `tests/unit/test_kpi_payload.py`, `tests/api/test_ai_kpi_explanation.py`,
 `tests/api/test_ai_reply_suggestions.py`.
+
+## Running the model
+
+llama-server's prompt cache defaults to 8 GiB, above the container's 5 GiB limit: the cache
+grows with every new prompt until the kernel kills the process (Docker event `oom`, exit 137,
+no log line). Run it with `--cache-ram 256`. `crm-ai-platform/deployments/local/compose.llm.yaml`
+does not set it yet. Set `AI_RETENTION_DAYS` there as well: job inputs stay 30 days by default.
+
+Jobs run one at a time, and other CPU load slows the model many times over (373 s instead of
+about 20 s for one answer under a parallel test run). The CRM gives up after
+`AI_PLATFORM_DEADLINE_SECONDS`, so a long queue ends in `timeout`.
 
 ## Running locally with the AI Platform
 

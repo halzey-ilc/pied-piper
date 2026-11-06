@@ -192,4 +192,4 @@ def test_payloads_carry_no_contact_details() -> None:
     brief = deal_brief.build_payload(
         language="ru", today=date(2026, 11, 5), deal=_deal(), history=[entry]
     )
-    assert brief["history"][0]["text"] == "Написать на [email]"
+    assert brief["history"][1]["text"] == "Написать на [email]"

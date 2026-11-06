@@ -25,14 +25,24 @@ from modules.ai_insights.domain.deal_brief import (
     meeting_status,
     task_status,
 )
+from modules.ai_insights.infrastructure.names import customer_names
 from modules.meetings.application.ports import MeetingFilter
 from modules.meetings.composition import meeting_service
 from modules.meetings.domain.meeting import SubjectType as MeetingSubject
 from modules.sales_pipeline.composition import deal_service, pipeline_service
+from modules.sales_pipeline.domain.pipeline import SystemStage
 from modules.telephony.application.ports import CallFilter
 from modules.telephony.composition import call_service
 from modules.telephony.domain.call import SubjectType as CallSubject
 from shared.domain.errors import AccessDeniedError
+
+_MEETING_DETAIL = {
+    "held": "встреча состоялась",
+    "completed": "встреча состоялась",
+    "no_show": "клиент не пришёл, встреча не состоялась",
+    "cancelled": "встреча отменена",
+    "rescheduled": "встреча перенесена",
+}
 
 
 class CrmDealContextReader:
@@ -58,8 +68,15 @@ class CrmDealContextReader:
         history = self._activities(principal, deal_id, today)
         history += self._meetings(principal, deal_id)
         history += self._calls(principal, deal_id)
+        moved = next((s for s in stages if s.system_code is SystemStage.MEETING_RESCHEDULED), None)
+        moves = deal_service().stage_history(principal, deal_id) if moved else []
         return DealContext(
-            facts=facts, owner_user_id=deal.owner_user_id, team_id=deal.team_id, history=history
+            facts=facts,
+            owner_user_id=deal.owner_user_id,
+            team_id=deal.team_id,
+            history=history,
+            reschedules=sum(1 for c in moves if moved and c.to_stage_id == moved.id),
+            names=customer_names(deal.customer_id),
         )
 
     def _activities(self, principal: Principal, deal_id: UUID, today: date) -> list[HistoryEntry]:
@@ -117,6 +134,7 @@ class CrmDealContextReader:
                 title=m.title,
                 text=m.outcome or m.description,
                 status=meeting_status(m.status.value),
+                detail=_MEETING_DETAIL.get(m.status.value),
             )
             for m in page.items
         ]

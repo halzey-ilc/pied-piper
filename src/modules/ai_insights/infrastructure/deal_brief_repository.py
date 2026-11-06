@@ -29,6 +29,7 @@ def _to_domain(row: DealBriefRecord) -> DealBrief:
         finished_at=row.finished_at,
         version=row.version,
         ref_map=row.ref_map,
+        checks=row.checks,
     )
 
 
@@ -83,6 +84,7 @@ class DjangoDealBriefRepository:
         return {
             "payload": brief.payload,
             "ref_map": brief.ref_map,
+            "checks": brief.checks,
             "status": brief.status.value,
             "ai_job_id": brief.ai_job_id,
             "result": brief.result,

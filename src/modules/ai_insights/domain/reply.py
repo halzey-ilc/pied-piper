@@ -13,13 +13,14 @@ pending -> submitted -> succeeded | failed
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, ClassVar
 from uuid import UUID, uuid4
 
 from modules.ai_insights.domain.insight import InsightStatus
-from modules.ai_insights.domain.redaction import redact_contacts
+from modules.ai_insights.domain.redaction import mask_personal_data
 from modules.ai_insights.domain.report import payload_fingerprint, validate_language
 from shared.domain.errors import DomainValidationError
 from shared.domain.events import DomainEvent
@@ -38,7 +39,11 @@ class MessageSnapshot:
 
 
 def build_payload(
-    *, language: str, channel: str, messages: list[MessageSnapshot]
+    *,
+    language: str,
+    channel: str,
+    messages: list[MessageSnapshot],
+    names: Iterable[str] = (),
 ) -> dict[str, Any]:
     """The job input: the latest messages, oldest first, ending with the customer.
 
@@ -53,7 +58,11 @@ def build_payload(
         "language": validate_language(language),
         "channel": channel,
         "messages": [
-            {"ref": str(m.id), "direction": m.direction, "text": redact_contacts(m.text)[:MAX_TEXT]}
+            {
+                "ref": str(m.id),
+                "direction": m.direction,
+                "text": mask_personal_data(m.text, names)[:MAX_TEXT],
+            }
             for m in recent
             if m.text.strip()
         ],

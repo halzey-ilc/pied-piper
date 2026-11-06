@@ -31,6 +31,10 @@ class ConversationReader(Protocol):
         """System read for workers: the newest messages, oldest first."""
         ...
 
+    def names_for(self, conversation_id: UUID) -> tuple[str, ...]:
+        """The contact's and the linked customer's names, to mask in what goes to the AI."""
+        ...
+
 
 class ReplyRepository(Protocol):
     def add(self, suggestion: ReplySuggestion) -> None: ...

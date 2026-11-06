@@ -19,7 +19,7 @@ from typing import Any, ClassVar
 from uuid import UUID, uuid4
 
 from modules.ai_insights.domain.insight import InsightStatus
-from modules.ai_insights.domain.redaction import redact_contacts
+from modules.ai_insights.domain.redaction import mask_personal_data, redact_contacts
 from modules.ai_insights.domain.report import payload_fingerprint, validate_language
 from shared.domain.errors import ConflictError, DomainValidationError
 from shared.domain.events import DomainEvent
@@ -96,7 +96,7 @@ def build_payload(
         "request": redact_contacts(text),
         "tools": [t.value for t in tools],
         "subjects": [
-            {"ref": s.ref, "kind": s.kind, "title": redact_contacts(s.title)[:200]}
+            {"ref": s.ref, "kind": s.kind, "title": mask_personal_data(s.title)[:200]}
             for s in subjects
         ],
     }

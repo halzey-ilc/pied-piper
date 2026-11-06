@@ -27,6 +27,10 @@ class CallReader(Protocol):
         """System read for workers (no principal): the call's current text."""
         ...
 
+    def names_for(self, call_id: UUID) -> tuple[str, ...]:
+        """System read for workers: the names to mask, of the call's customer."""
+        ...
+
 
 class InsightRepository(Protocol):
     def add(self, insight: CallInsight) -> None: ...

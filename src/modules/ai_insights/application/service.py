@@ -24,7 +24,8 @@ from modules.ai_insights.domain.insight import (
     InsightStatus,
     source_fingerprint,
 )
-from modules.ai_insights.domain.redaction import redact_contacts
+from modules.ai_insights.domain.redaction import mask_personal_data
+from modules.ai_insights.domain.verification import verify_call_summary
 from modules.audit.application.ports import AuditLog
 from modules.audit.domain.entry import AuditEntry
 from platform_core.application.ports import EventOutbox
@@ -133,7 +134,7 @@ class CallInsightService:
                 subject=f"user:{insight.requested_by}",
                 job_type=insight.job_type,
                 payload={
-                    "transcript": redact_contacts(text)[:MAX_TRANSCRIPT],
+                    "transcript": self._outgoing_text(insight.call_id, text),
                     # The company's working language (AI_PLATFORM_LANGUAGE): the summary is
                     # written in it, and "not enough data" notices are not bilingual.
                     "language": self._language,
@@ -154,6 +155,9 @@ class CallInsightService:
             self._scheduler.schedule_poll(
                 tenant_slug=self._tenant_slug, insight_id=insight.id, delay_seconds=2.0
             )
+
+    def _outgoing_text(self, call_id: UUID, text: str) -> str:
+        return mask_personal_data(text, self._calls.names_for(call_id))[:MAX_TRANSCRIPT]
 
     def poll(self, insight_id: UUID) -> None:
         insight = self._repo.get(insight_id)
@@ -187,8 +191,11 @@ class CallInsightService:
             if state.status == "succeeded" and state.output is not None:
                 generator = state.output.get("generator")
                 try:
+                    sent = self._calls.text_for(insight.call_id) or ""
                     event = insight.mark_succeeded(
-                        result=state.output,
+                        result=verify_call_summary(
+                            state.output, self._outgoing_text(insight.call_id, sent)
+                        ),
                         schema_id=state.schema_id or "",
                         provider=state.provider or "unknown",
                         model=state.model or "unknown",
