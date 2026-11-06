@@ -118,13 +118,13 @@ class WhatsAppQrView(_Scoped):
         description=(
             "The QR code that connects the number. `status` is `qr` (show `image`, it changes "
             "about every 20 seconds), `connected` or `unavailable`. Whoever scans it takes "
-            "over the number, so this needs integrations.manage."
+            "over the number, so this needs communications.connect (director and head of sales)."
         ),
         parameters=[_TENANT_HEADER],
         responses=WhatsAppQrSerializer,
     )
     def get(self, request: Request) -> Response:
-        AccessPolicy().require(self.principal(), Permission.INTEGRATIONS_MANAGE)
+        AccessPolicy().require(self.principal(), Permission.COMMUNICATIONS_CONNECT)
         return Response(asdict(whatsapp_connection().qr()))
 
 

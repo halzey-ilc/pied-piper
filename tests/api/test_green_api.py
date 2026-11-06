@@ -298,6 +298,21 @@ def test_owner_gets_the_qr_code(
     }
 
 
+def test_head_of_sales_gets_the_qr_code_but_not_the_integrations_screen(
+    monkeypatch: pytest.MonkeyPatch,
+    make_user: Callable[..., Any],
+    tenants: dict[str, TenantFixture],
+    client_for: Callable[..., APIClient],
+) -> None:
+    _green_answers(
+        monkeypatch, lambda _r: httpx.Response(200, json={"type": "qrCode", "message": "UE5H"})
+    )
+    rop = client_for(make_user("rop", tenant=tenants["acme"], role=Role.HEAD_OF_SALES), "acme")
+
+    assert rop.get(QR_URL).json()["status"] == "qr"
+    assert rop.get("/api/v1/integrations/").status_code == 403
+
+
 def test_qr_is_closed_to_other_roles_and_other_companies(
     monkeypatch: pytest.MonkeyPatch,
     make_user: Callable[..., Any],
@@ -309,9 +324,11 @@ def test_qr_is_closed_to_other_roles_and_other_companies(
 
     _green_answers(monkeypatch, must_not_be_called)
     viewer = client_for(make_user("viewer", tenant=tenants["acme"], role=Role.VIEWER), "acme")
+    rep = client_for(make_user("rep", tenant=tenants["acme"], role=Role.SALES_REP), "acme")
     other = client_for(make_user("rival", tenant=tenants["globex"]), "globex")
 
     assert viewer.get(QR_URL).status_code == 403
+    assert rep.get(QR_URL).status_code == 403
     assert other.get(QR_URL).json() == {"status": "unavailable", "image": None}
     assert other.get(STATUS_URL).json()["configured"] is False
 
