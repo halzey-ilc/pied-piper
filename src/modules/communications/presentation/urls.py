@@ -13,6 +13,8 @@ from modules.communications.presentation.views import (
     MessagesView,
     ReadView,
     ReopenView,
+    WhatsAppQrView,
+    WhatsAppStatusView,
 )
 
 urlpatterns = [
@@ -23,6 +25,8 @@ urlpatterns = [
         name="message-template-detail",
     ),
     path("channels/", ChannelsView.as_view(), name="communication-channels"),
+    path("whatsapp/status/", WhatsAppStatusView.as_view(), name="whatsapp-status"),
+    path("whatsapp/qr/", WhatsAppQrView.as_view(), name="whatsapp-qr"),
     path("conversations/", ConversationListView.as_view(), name="conversation-list"),
     path(
         "conversations/<uuid:conversation_id>/",

@@ -1,7 +1,119 @@
 # Запуск WhatsApp
 
-Как подключить номер к CRM: Cloud API в режиме Coexistence, приложение WhatsApp
-Business остаётся на телефоне. Описание API для фронтенда: [WHATSAPP_API.md](../WHATSAPP_API.md).
+Сейчас номер подключается через Green API по QR-коду. Это временное решение до кнопки
+Meta. Описание API для фронтенда: [WHATSAPP_API.md](../WHATSAPP_API.md).
+
+## Green API: запуск по QR-коду
+
+**Риск.** Green API неофициальный шлюз. Сам сервис предупреждает, что всегда есть риск
+потерять WhatsApp на этом номере. Поэтому через него нельзя делать рассылки и массово
+писать незнакомым людям. Если `whatsapp_check` покажет `blocked` или `suspended`,
+остановите отправку и проверьте номер в приложении.
+
+### 1. Аккаунт
+
+Зарегистрируйтесь на [console.green-api.com](https://console.green-api.com) и создайте
+инстанс. Бесплатный тариф Developer ограничен тремя чатами, для лидов нужен платный.
+Скопируйте из консоли `apiUrl`, `idInstance` и `apiTokenInstance`.
+
+### 2. Настройки на сервере
+
+Создайте токен вебхука:
+
+```bash
+python3 -c "import secrets; print(secrets.token_urlsafe(48))"
+```
+
+Заполните `.env`:
+
+| Переменная | Значение |
+|---|---|
+| `WHATSAPP_PROVIDER` | `green_api` |
+| `GREEN_API_URL` | `apiUrl` |
+| `GREEN_API_INSTANCE_ID` | `idInstance` |
+| `GREEN_API_TOKEN` | `apiTokenInstance` |
+| `GREEN_API_WEBHOOK_TOKEN` | токен из команды выше |
+| `WHATSAPP_TENANT_SLUG` | slug компании, которой принадлежит номер |
+| `WHATSAPP_LEAD_OWNER_USER_ID` | id сотрудника для новых лидов (команда ниже) |
+
+```bash
+docker compose -f compose.yaml -f compose.prod.yaml exec api python manage.py shell -c "from django.contrib.auth import get_user_model as U; print(U().objects.get(username='ЛОГИН').id)"
+```
+
+Токены нельзя хранить в git и пересылать в чатах.
+
+### 3. Выкладка
+
+Сделайте резервную копию баз ([backup-restore.md](backup-restore.md)), затем:
+
+```bash
+docker compose -f compose.yaml -f compose.prod.yaml up -d --build
+```
+
+```bash
+docker compose -f compose.yaml -f compose.prod.yaml exec api python manage.py migrate --noinput
+```
+
+```bash
+docker compose -f compose.yaml -f compose.prod.yaml exec api python manage.py migrate_tenants
+```
+
+### 4. Вебхук
+
+Команда сама настроит Green API на вашу CRM. Инстанс перезагрузится, настройки
+применяются до 5 минут:
+
+```bash
+docker compose -f compose.yaml -f compose.prod.yaml exec api python manage.py whatsapp_check --public-url https://ваш-домен
+```
+
+### 5. QR-код
+
+На телефоне откройте WhatsApp Business: **Настройки → Связанные устройства → Привязать
+устройство**. Отсканируйте QR-код из консоли Green API или с экрана CRM, когда фронтенд
+подключит `GET whatsapp/qr/`. Приложение на телефоне продолжит работать.
+
+### 6. Проверка
+
+```bash
+docker compose -f compose.yaml -f compose.prod.yaml exec api python manage.py whatsapp_check
+```
+
+Команда должна ответить `The number is connected.` Затем:
+
+1. Напишите с другого телефона на рабочий номер: появился чат и лид.
+2. Ответьте из CRM: сообщение пришло на телефон.
+3. Ответьте из приложения на телефоне: ответ появился в чате CRM.
+
+Формат вебхуков взят из документации Green API, на живом аккаунте он не проверялся.
+
+### Если что-то не работает
+
+| Что видно | Причина |
+|---|---|
+| Сервис не стартует, в ошибке названа переменная | не заполнена настройка |
+| `whatsapp_check`: `Green API did not answer` | неверные URL, id инстанса или токен |
+| `whatsapp_check`: `scan the QR code` | номер не привязан или сессия слетела |
+| Вебхуки получают 401 | изменился `GREEN_API_WEBHOOK_TOKEN`: запустите шаг 4 заново |
+| Вебхуки получают 200, чатов нет | не запущен воркер (очередь `integrations`) |
+| Чат есть, лида нет | у клиента скрыт номер (`@lid`) или не задан владелец лидов |
+| Сообщение `failed` с кодом `noAccount` | у номера нет WhatsApp |
+| Сообщение `failed` с кодом `suspended` | Green API временно ограничил инстанс |
+
+## Переход на кнопку Meta
+
+Когда будет готов официальный канал:
+
+1. Заполните настройки Cloud API из раздела ниже и задайте `WHATSAPP_PROVIDER=cloud_api`.
+2. Перезапустите `api` и `worker`.
+3. Отвяжите устройство Green API в приложении и остановите инстанс.
+
+Чаты, лиды и история сохранятся: канал остаётся `whatsapp`, номера те же. Чаты с
+контактами `@lid` останутся в истории, но ответить на них через Meta не получится.
+
+# Запуск через Meta (Cloud API)
+
+Cloud API в режиме Coexistence, приложение WhatsApp Business остаётся на телефоне.
 
 ## 1. Что получить у партнёра Meta
 
@@ -41,8 +153,9 @@ docker compose -f compose.yaml -f compose.prod.yaml exec api python manage.py sh
 
 ## 3. Настройки на сервере
 
-Заполните в `.env` все пять переменных: `WHATSAPP_APP_SECRET`, `WHATSAPP_VERIFY_TOKEN`,
-`WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_LEAD_OWNER_USER_ID`.
+Заполните в `.env` все шесть переменных: `WHATSAPP_APP_SECRET`, `WHATSAPP_VERIFY_TOKEN`,
+`WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_LEAD_OWNER_USER_ID`,
+`WHATSAPP_TENANT_SLUG`.
 
 В продакшене сервис не запустится, если заполнена только часть из них: ошибка назовёт,
 чего не хватает. Если не заполнена ни одна, WhatsApp выключен, а отправка из CRM

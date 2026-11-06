@@ -598,6 +598,7 @@ INTEGRATIONS: dict[str, Any] = {
     "ALLOW_STUB_SENDER": ENV.DJANGO_ENV != "production",
     "SECRETS": {
         "whatsapp": ENV.WHATSAPP_APP_SECRET,
+        "green_api": ENV.GREEN_API_WEBHOOK_TOKEN,
         "instagram": ENV.INSTAGRAM_APP_SECRET,
         "telegram": ENV.TELEGRAM_WEBHOOK_SECRET,
         "telephony": ENV.TELEPHONY_WEBHOOK_SECRET,
@@ -608,6 +609,13 @@ INTEGRATIONS: dict[str, Any] = {
         "PHONE_NUMBER_ID": ENV.WHATSAPP_PHONE_NUMBER_ID,
         "API_BASE_URL": ENV.WHATSAPP_API_BASE_URL,
         "LEAD_OWNER_USER_ID": ENV.WHATSAPP_LEAD_OWNER_USER_ID,
+        "TENANT_SLUG": ENV.WHATSAPP_TENANT_SLUG,
+        "PROVIDER": ENV.WHATSAPP_PROVIDER,
+        "GREEN_API": {
+            "URL": ENV.GREEN_API_URL,
+            "INSTANCE_ID": ENV.GREEN_API_INSTANCE_ID,
+            "TOKEN": ENV.GREEN_API_TOKEN,
+        },
     },
 }
 
@@ -667,6 +675,9 @@ LOGGING: dict[str, Any] = {
         "django.db.backends": {"level": "WARNING"},
         "django.security": {"level": "INFO"},
         "celery": {"level": "INFO"},
+        # At INFO these log full URLs, and some providers put the token in the URL.
+        "httpx": {"level": "WARNING"},
+        "httpcore": {"level": "WARNING"},
     },
 }
 

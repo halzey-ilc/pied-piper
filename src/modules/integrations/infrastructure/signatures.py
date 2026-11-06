@@ -55,6 +55,20 @@ class SharedSecretHeaderVerifier:
         )
 
 
+class BearerTokenVerifier:
+    """Static token in ``Authorization`` (Green API ``webhookUrlToken``). The body is
+    unsigned, so this proves only that the caller knows the token."""
+
+    def __init__(self, secret: str) -> None:
+        if not secret:
+            raise ValueError("secret must not be empty")
+        self._expected = f"Bearer {secret}".encode()
+
+    def verify(self, headers: Mapping[str, str], body: bytes) -> bool:
+        supplied = _header(headers, "Authorization")
+        return supplied is not None and hmac.compare_digest(supplied.encode(), self._expected)
+
+
 class TimestampedHmacVerifier:
     """HMAC over ``<timestamp>.<body>`` with a freshness window (replay protection).
 

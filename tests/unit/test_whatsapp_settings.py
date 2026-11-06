@@ -12,6 +12,16 @@ COMPLETE = {
     "WHATSAPP_ACCESS_TOKEN": "access-token-value-0001",
     "WHATSAPP_PHONE_NUMBER_ID": "123456",
     "WHATSAPP_LEAD_OWNER_USER_ID": "11111111-1111-4111-8111-111111111111",
+    "WHATSAPP_TENANT_SLUG": "demo",
+}
+GREEN = {
+    "WHATSAPP_PROVIDER": "green_api",
+    "GREEN_API_URL": "https://7103.api.green-api.example",
+    "GREEN_API_INSTANCE_ID": "7103",
+    "GREEN_API_TOKEN": "green-api-token-value-0001",
+    "GREEN_API_WEBHOOK_TOKEN": "w" * 64,
+    "WHATSAPP_LEAD_OWNER_USER_ID": COMPLETE["WHATSAPP_LEAD_OWNER_USER_ID"],
+    "WHATSAPP_TENANT_SLUG": "demo",
 }
 
 
@@ -19,7 +29,7 @@ COMPLETE = {
 def production(monkeypatch: pytest.MonkeyPatch) -> pytest.MonkeyPatch:
     for key in ("DJANGO_DEBUG", "CORS_ALLOWED_ORIGINS", "DIAGNOSTIC_TASKS_ENABLED"):
         monkeypatch.delenv(key, raising=False)
-    for key in COMPLETE:
+    for key in (*COMPLETE, *GREEN):
         monkeypatch.delenv(key, raising=False)
     monkeypatch.delenv("WHATSAPP_API_BASE_URL", raising=False)
     for key, value in {
@@ -58,6 +68,29 @@ def test_partial_configuration_names_what_is_missing(
 ) -> None:
     _set(production, {k: v for k, v in COMPLETE.items() if k != missing})
     with pytest.raises(ConfigurationError, match=missing):
+        load_env(None)
+
+
+def test_green_api_configuration_is_accepted(production: pytest.MonkeyPatch) -> None:
+    _set(production, GREEN)
+    assert load_env(None).WHATSAPP_PROVIDER == "green_api"
+
+
+@pytest.mark.parametrize(
+    "missing",
+    sorted(set(GREEN) - {"WHATSAPP_PROVIDER"}),
+)
+def test_partial_green_api_configuration_names_what_is_missing(
+    production: pytest.MonkeyPatch, missing: str
+) -> None:
+    _set(production, {k: v for k, v in GREEN.items() if k != missing})
+    with pytest.raises(ConfigurationError, match=missing):
+        load_env(None)
+
+
+def test_green_api_over_plain_http_is_refused(production: pytest.MonkeyPatch) -> None:
+    _set(production, {**GREEN, "GREEN_API_URL": "http://7103.api.green-api.example"})
+    with pytest.raises(ConfigurationError, match="GREEN_API_URL must use https"):
         load_env(None)
 
 

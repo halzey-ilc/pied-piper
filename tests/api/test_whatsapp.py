@@ -100,6 +100,8 @@ def test_channels_report_whatsapp_only_once_its_account_is_configured(
 
     assert not any(can_send().values())
     _configure(settings, ACCESS_TOKEN=SecretStr("token"), PHONE_NUMBER_ID="123")
+    assert not any(can_send().values())  # the number belongs to no company yet
+    _configure(settings, TENANT_SLUG="acme")
     assert can_send() == {"whatsapp": True, "telegram": False, "instagram": False, "email": False}
 
 

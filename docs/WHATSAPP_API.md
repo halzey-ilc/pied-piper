@@ -5,6 +5,35 @@
 Все запросы идут на `/api/v1/communications/` с заголовками `Authorization: Bearer <access>`
 и `X-Tenant: <slug-компании>`. Схема всех полей есть в OpenAPI.
 
+## Подключение номера
+
+Вместо окна с инструкцией про токены нужен такой сценарий:
+
+1. `GET whatsapp/status/`: если `connected: true`, кнопку подключения не показываем.
+2. Если `configured: true` и `connected: false`, показываем QR-код из `GET whatsapp/qr/`.
+3. Опрашиваем `whatsapp/qr/` раз в несколько секунд: QR-код меняется примерно каждые 20
+   секунд, а после сканирования приходит `status: connected`.
+4. Если `configured: false`, показываем «WhatsApp ещё не настроен на сервере».
+
+`GET whatsapp/status/`:
+
+| Поле | Значение |
+|---|---|
+| `provider` | `green_api` или `cloud_api` |
+| `configured` | настроен ли канал на сервере для этой компании |
+| `connected` | работает ли номер |
+| `state` | `authorized`, `notAuthorized`, `starting`, `blocked`, `suspended`, `unavailable`, `not_configured` |
+
+`state: blocked` или `suspended`: покажите заметное предупреждение, номер ограничен.
+
+`GET whatsapp/qr/` нужен доступ `integrations.manage`, иначе вернётся 403. Показывать QR
+можно только владельцу или администратору: кто отсканирует код, тот подключит номер.
+
+| Поле | Значение |
+|---|---|
+| `status` | `qr`, `connected`, `unavailable` |
+| `image` | готовая строка для `<img src>` при `status: qr`, иначе `null` |
+
 ## Как получать новые сообщения
 
 Push-событий нет: фронтенд опрашивает API. Список чатов отсортирован по последней
@@ -39,7 +68,7 @@ Push-событий нет: фронтенд опрашивает API. Спис�
 |---|---|
 | `id` | id чата |
 | `channel` | `whatsapp`, `telegram`, `instagram`, `email` |
-| `external_contact_id` | для WhatsApp номер цифрами, без `+` |
+| `external_contact_id` | для WhatsApp номер цифрами, без `+`; если клиент скрыл номер, `...@lid` |
 | `contact_name` | имя из профиля WhatsApp, может быть `null` |
 | `status` | `open` или `closed` |
 | `lead_id` | связанный лид или `null` |
@@ -72,7 +101,9 @@ Push-событий нет: фронтенд опрашивает API. Спис�
 | Ситуация | Как определить | Что показать |
 |---|---|---|
 | Сообщение не доставлено | `status: failed` | пометка на сообщении |
-| Прошло 24 часа | `failure_code: "131047"` | «Прошло больше 24 часов с сообщения клиента. Обычным сообщением ответить нельзя» |
+| Прошло 24 часа (только Meta) | `failure_code: "131047"` | «Прошло больше 24 часов с сообщения клиента. Обычным сообщением ответить нельзя» |
+| Нет WhatsApp у номера | `failure_code: "noAccount"` | «У этого номера нет WhatsApp» |
+| Номер ограничен | `failure_code: "suspended"` | «Отправка временно ограничена» |
 | WhatsApp отклонил отправку | 409, `channel_delivery_failed` | ошибка у поля ввода, текст не очищать |
 | Канал не подключён | 409, `channel_not_configured` | «WhatsApp не подключён» |
 | Чат закрыт | 409, `conversation_invalid_state` | предложить открыть чат |

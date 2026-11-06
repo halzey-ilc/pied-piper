@@ -19,6 +19,7 @@ from modules.integrations.domain.providers import Provider
 
 TITLES: Mapping[Provider, str] = {
     Provider.WHATSAPP: "WhatsApp",
+    Provider.GREEN_API: "WhatsApp (Green API)",
     Provider.TELEGRAM: "Telegram",
     Provider.INSTAGRAM: "Instagram",
     Provider.TELEPHONY: "Телефония",
