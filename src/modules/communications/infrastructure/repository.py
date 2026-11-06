@@ -9,6 +9,7 @@ from modules.communications.application.ports import (
     ConversationVisibility,
 )
 from modules.communications.domain.conversation import (
+    AttachmentInfo,
     Channel,
     Conversation,
     ConversationStatus,
@@ -16,7 +17,11 @@ from modules.communications.domain.conversation import (
     MessageDirection,
     MessageStatus,
 )
-from modules.communications.infrastructure.models import ConversationRecord, MessageRecord
+from modules.communications.infrastructure.models import (
+    ConversationRecord,
+    MessageAttachmentRecord,
+    MessageRecord,
+)
 from shared.domain.errors import ConflictError
 
 
@@ -48,6 +53,12 @@ def _msg_to_domain(row: MessageRecord) -> Message:
         external_id=row.external_id,
         sender_user_id=row.sender_user_id,
         failure_code=row.failure_code,
+    )
+
+
+def _attachment_info(row: MessageAttachmentRecord) -> AttachmentInfo:
+    return AttachmentInfo(
+        kind=row.kind, content_type=row.content_type, file_name=row.file_name, size=row.size
     )
 
 
@@ -155,13 +166,59 @@ class DjangoConversationRepository:
         )
         return updated > 0
 
+    def _attachments(self) -> QuerySet[MessageAttachmentRecord]:
+        return MessageAttachmentRecord.objects.using(self.using)
+
+    def message_id(self, channel: Channel, external_id: str) -> UUID | None:
+        return (
+            self._msg()
+            .filter(channel=channel.value, external_id=external_id)
+            .values_list("id", flat=True)
+            .first()
+        )
+
+    def has_attachment(self, message_id: UUID) -> bool:
+        return self._attachments().filter(message_id=message_id).exists()
+
+    def add_attachment(self, message_id: UUID, info: AttachmentInfo, content: bytes) -> None:
+        self._attachments().get_or_create(
+            message_id=message_id,
+            defaults={
+                "kind": info.kind,
+                "content_type": info.content_type,
+                "file_name": info.file_name,
+                "size": info.size,
+                "content": content,
+            },
+        )
+
+    def get_attachment(
+        self, conversation_id: UUID, message_id: UUID
+    ) -> tuple[AttachmentInfo, bytes] | None:
+        row = (
+            self._attachments()
+            .filter(message_id=message_id, message__conversation_id=conversation_id)
+            .first()
+        )
+        return None if row is None else (_attachment_info(row), bytes(row.content))
+
     def list_messages(self, conversation_id: UUID, *, limit: int, offset: int) -> list[Message]:
-        rows = (
+        rows = list(
             self._msg()
             .filter(conversation_id=conversation_id)
             .order_by("created_at", "id")[offset : offset + limit]
         )
-        return [_msg_to_domain(row) for row in rows]
+        # The chat is polled, so the files themselves stay out of this query.
+        attachments = {
+            row.message_id: _attachment_info(row)
+            for row in self._attachments()
+            .filter(message_id__in=[row.id for row in rows])
+            .defer("content")
+        }
+        messages = [_msg_to_domain(row) for row in rows]
+        for message in messages:
+            message.attachment = attachments.get(message.id)
+        return messages
 
     def recent_messages(self, conversation_id: UUID, *, limit: int) -> list[Message]:
         rows = (

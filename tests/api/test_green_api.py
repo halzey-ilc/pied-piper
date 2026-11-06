@@ -17,9 +17,14 @@ from rest_framework.test import APIClient
 
 from entrypoints.workers.tasks.integrations import process_webhook
 from modules.access_control.domain.rbac import Role
-from modules.communications.infrastructure.models import ConversationRecord, MessageRecord
+from modules.communications.infrastructure.models import (
+    ConversationRecord,
+    MessageAttachmentRecord,
+    MessageRecord,
+)
 from modules.leads.infrastructure.models import LeadRecord
 from platform_core.infrastructure.messaging.models import InboxMessage
+from shared.application.retry import TransientError
 from tests.conftest import ALL_DATABASES, TenantFixture
 
 pytestmark = pytest.mark.django_db(databases=ALL_DATABASES)
@@ -362,3 +367,129 @@ def test_check_connects_the_webhook_without_printing_tokens(
     assert body["webhookUrlToken"] == f"Bearer {WEBHOOK_TOKEN}"
     assert (body["incomingWebhook"], body["outgoingMessageWebhook"]) == ("yes", "yes")
     assert API_TOKEN not in out.getvalue() and WEBHOOK_TOKEN not in out.getvalue()
+
+
+FILE_URL = "https://do-media-7107.fra1.digitaloceanspaces.com/7107/photo.jpg"
+MEDIA = "modules.communications.infrastructure.media.build_http_client"
+MESSAGES_URL = "/api/v1/communications/conversations/{}/messages/"
+
+
+def _media_answers(
+    monkeypatch: pytest.MonkeyPatch, handler: Callable[[httpx.Request], httpx.Response]
+) -> None:
+    monkeypatch.setattr(
+        MEDIA,
+        lambda base_url, transport=None: httpx.Client(
+            base_url=base_url, transport=httpx.MockTransport(handler)
+        ),
+    )
+
+
+def _photo(url: str = FILE_URL, mime: str = "image/jpeg") -> dict[str, Any]:
+    return {
+        "typeMessage": "imageMessage",
+        "fileMessageData": {
+            "downloadUrl": url,
+            "caption": "Счёт",
+            "fileName": "счёт.jpg",
+            "mimeType": mime,
+        },
+    }
+
+
+def _stored() -> MessageAttachmentRecord | None:
+    return MessageAttachmentRecord.objects.using(ALIAS).first()
+
+
+def test_a_photo_is_stored_and_only_the_chat_viewers_can_open_it(
+    monkeypatch: pytest.MonkeyPatch,
+    make_user: Callable[..., Any],
+    tenants: dict[str, TenantFixture],
+    client_for: Callable[..., APIClient],
+) -> None:
+    _media_answers(monkeypatch, lambda _r: httpx.Response(200, content=b"JPEGDATA"))
+    _deliver(_incoming("MEDIA1", _photo()))
+    conversation = ConversationRecord.objects.using(ALIAS).get()
+    owner = client_for(make_user("owner", tenant=tenants["acme"]), "acme")
+    rival = client_for(make_user("rival", tenant=tenants["globex"]), "globex")
+
+    message = owner.get(MESSAGES_URL.format(conversation.id)).json()["results"][0]
+    assert message["text"] == "[Фото] Счёт"
+    assert message["attachment"] == {
+        "kind": "image",
+        "content_type": "image/jpeg",
+        "file_name": "счёт.jpg",
+        "size": 8,
+    }
+
+    url = f"{MESSAGES_URL.format(conversation.id)}{message['id']}/attachment/"
+    response = owner.get(url)
+    assert response.status_code == 200
+    assert response.content == b"JPEGDATA"
+    assert response["Content-Type"] == "image/jpeg"
+    assert response["X-Content-Type-Options"] == "nosniff"
+    assert 'filename=".jpg"' in response["Content-Disposition"]
+    assert "filename*=UTF-8''%D1%81%D1%87%D1%91%D1%82.jpg" in response["Content-Disposition"]
+    assert rival.get(url).status_code == 404
+
+
+def test_a_type_the_browser_could_run_is_stored_as_a_plain_download(
+    monkeypatch: pytest.MonkeyPatch, tenants: dict[str, TenantFixture]
+) -> None:
+    _media_answers(monkeypatch, lambda _r: httpx.Response(200, content=b"<script>"))
+    _deliver(_incoming("MEDIA2", _photo(mime="text/html")))
+
+    stored = _stored()
+    assert stored is not None
+    assert stored.content_type == "application/octet-stream"
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://do-media-7107.fra1.digitaloceanspaces.com/a.jpg",
+        "https://169.254.169.254/latest/meta-data",
+        "https://evil.example/a.jpg",
+        "https://digitaloceanspaces.com.evil.example/a.jpg",
+    ],
+)
+def test_a_file_outside_the_provider_storage_is_not_fetched(
+    monkeypatch: pytest.MonkeyPatch, tenants: dict[str, TenantFixture], url: str
+) -> None:
+    def must_not_be_called(_request: httpx.Request) -> httpx.Response:
+        raise AssertionError("the file must not be fetched")
+
+    _media_answers(monkeypatch, must_not_be_called)
+    _deliver(_incoming("MEDIA3", _photo(url=url)))
+
+    assert MessageRecord.objects.using(ALIAS).get().text == "[Фото] Счёт"
+    assert _stored() is None
+
+
+def test_a_file_over_the_limit_keeps_only_the_label(
+    monkeypatch: pytest.MonkeyPatch, tenants: dict[str, TenantFixture]
+) -> None:
+    monkeypatch.setattr("modules.communications.infrastructure.media.MAX_ATTACHMENT_BYTES", 4)
+    _media_answers(monkeypatch, lambda _r: httpx.Response(200, content=b"too large"))
+    _deliver(_incoming("MEDIA4", _photo()))
+
+    assert MessageRecord.objects.using(ALIAS).count() == 1
+    assert _stored() is None
+
+
+def test_a_failed_download_is_retried_without_a_second_message(
+    monkeypatch: pytest.MonkeyPatch, tenants: dict[str, TenantFixture]
+) -> None:
+    answers = iter([httpx.Response(503), httpx.Response(200, content=b"JPEGDATA")])
+    _media_answers(monkeypatch, lambda _r: next(answers))
+
+    with pytest.raises(TransientError):
+        _deliver(_incoming("MEDIA5", _photo()))
+    inbox = InboxMessage.objects.using(ALIAS).order_by("-received_at").first()
+    assert inbox is not None
+    process_webhook("acme", "green_api", str(inbox.id))
+
+    assert MessageRecord.objects.using(ALIAS).count() == 1
+    stored = _stored()
+    assert stored is not None
+    assert bytes(stored.content) == b"JPEGDATA"

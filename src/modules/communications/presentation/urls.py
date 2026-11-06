@@ -10,6 +10,7 @@ from modules.communications.presentation.views import (
     CloseView,
     ConversationDetailView,
     ConversationListView,
+    MessageAttachmentView,
     MessagesView,
     ReadView,
     ReopenView,
@@ -37,6 +38,11 @@ urlpatterns = [
         "conversations/<uuid:conversation_id>/messages/",
         MessagesView.as_view(),
         name="conversation-messages",
+    ),
+    path(
+        "conversations/<uuid:conversation_id>/messages/<uuid:message_id>/attachment/",
+        MessageAttachmentView.as_view(),
+        name="conversation-message-attachment",
     ),
     path(
         "conversations/<uuid:conversation_id>/assign/",

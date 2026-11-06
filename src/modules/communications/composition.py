@@ -14,6 +14,7 @@ from modules.communications.infrastructure.connection import (
     NoConnection,
 )
 from modules.communications.infrastructure.contact_linking import LeadContactLinker
+from modules.communications.infrastructure.media import HttpMediaFetcher
 from modules.communications.infrastructure.repository import DjangoConversationRepository
 from modules.communications.infrastructure.sender import (
     GreenApiSender,
@@ -108,4 +109,5 @@ def conversation_service() -> ConversationService:
         linker=LeadContactLinker(
             lead_service(), settings.INTEGRATIONS["WHATSAPP"]["LEAD_OWNER_USER_ID"]
         ),
+        media=HttpMediaFetcher(),
     )

@@ -11,12 +11,16 @@ from collections.abc import Iterator
 from datetime import UTC, datetime
 from typing import Any
 
-from modules.communications.application.service import DeliveryFailure, InboundMessage
-from modules.communications.domain.conversation import Channel
+from modules.communications.application.service import (
+    DeliveryFailure,
+    InboundMedia,
+    InboundMessage,
+)
+from modules.communications.domain.conversation import UNKNOWN_CONTENT_TYPE, Channel
 from modules.integrations.domain.providers import Provider
 
-# Media is not downloaded yet: the manager sees what was sent and opens it in the
-# WhatsApp app. These strings are shown in the CRM, hence Russian.
+# Shown in the CRM, hence Russian. Green API files are downloaded next to the label;
+# for the others the manager opens them in the WhatsApp app.
 _MEDIA_LABELS = {
     "image": "[Фото]",
     "video": "[Видео]",
@@ -28,6 +32,13 @@ _MEDIA_LABELS = {
     "contact": "[Контакт]",
 }
 _UNSUPPORTED_LABEL = "[Сообщение не поддерживается]"
+_GREEN_FILE_KINDS = {
+    "imageMessage": "image",
+    "stickerMessage": "image",
+    "videoMessage": "video",
+    "audioMessage": "audio",
+    "documentMessage": "document",
+}
 _IGNORED_TYPES = frozenset({"reaction"})
 # outgoingAPIMessageReceived is left out: the CRM already stored what it sent.
 _GREEN_MESSAGE_WEBHOOKS = frozenset({"incomingMessageReceived", "outgoingMessageReceived"})
@@ -165,6 +176,20 @@ def _green_text(data: dict[str, Any]) -> str | None:
     return text if isinstance(text, str) and text.strip() else None
 
 
+def _green_media(data: dict[str, Any]) -> InboundMedia | None:
+    kind = _GREEN_FILE_KINDS.get(str(data.get("typeMessage")))
+    file = data.get("fileMessageData") or {}
+    url = file.get("downloadUrl")
+    if kind is None or not isinstance(url, str) or not url:
+        return None
+    return InboundMedia(
+        url=url,
+        kind=kind,
+        content_type=str(file.get("mimeType") or UNKNOWN_CONTENT_TYPE)[:100],
+        file_name=str(file.get("fileName") or "file")[:255],
+    )
+
+
 def _green_api(payload: dict[str, Any]) -> InboundMessage | None:
     kind = payload.get("typeWebhook")
     if kind not in _GREEN_MESSAGE_WEBHOOKS or not payload.get("idMessage"):
@@ -186,6 +211,7 @@ def _green_api(payload: dict[str, Any]) -> InboundMessage | None:
         occurred_at=_meta_time(payload),
         contact_name=None if from_business else sender.get("senderName") or sender.get("chatName"),
         from_business=from_business,
+        media=_green_media(payload.get("messageData") or {}),
     )
 
 

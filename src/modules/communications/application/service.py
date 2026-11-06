@@ -23,12 +23,15 @@ from modules.communications.application.ports import (
     ConversationFilter,
     ConversationRepository,
     ConversationVisibility,
+    MediaFetcher,
 )
 from modules.communications.domain.conversation import (
+    AttachmentInfo,
     Channel,
     Conversation,
     Message,
     MessageStatus,
+    safe_content_type,
 )
 from platform_core.application.ports import EventOutbox
 from shared.application.ports import UnitOfWork
@@ -36,6 +39,14 @@ from shared.domain.errors import NotFoundError
 
 AGGREGATE = "conversation"
 _Action = Callable[["Conversation"], object]
+
+
+@dataclass(frozen=True, slots=True)
+class InboundMedia:
+    url: str
+    kind: str
+    content_type: str
+    file_name: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,6 +59,7 @@ class InboundMessage:
     contact_name: str | None = None
     # True for a reply the business sent outside the CRM (WhatsApp app echo).
     from_business: bool = False
+    media: InboundMedia | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,6 +89,7 @@ class ConversationService:
         audit: AuditLog,
         policy: AccessPolicy | None = None,
         linker: ContactLinker | None = None,
+        media: MediaFetcher | None = None,
     ) -> None:
         self._repo = repository
         self._sender = sender
@@ -85,6 +98,7 @@ class ConversationService:
         self._audit = audit
         self._policy = policy or AccessPolicy()
         self._linker = linker
+        self._media = media
 
     # --- system: inbound ----------------------------------------------------
 
@@ -118,6 +132,28 @@ class ConversationService:
                 self._repo.save(conversation, expected_version=version)
             self._repo.add_message(conversation.id, message)
             self._outbox.add(event, aggregate_type=AGGREGATE, aggregate_id=str(conversation.id))
+        return True
+
+    def store_media(self, inbound: InboundMessage) -> bool:
+        """Download the message's file. Apart from ingest_inbound so that a slow download
+        holds no transaction; safe to repeat. Returns True if a file was stored."""
+        media = inbound.media
+        if media is None or self._media is None:
+            return False
+        message_id = self._repo.message_id(inbound.channel, inbound.external_message_id)
+        if message_id is None or self._repo.has_attachment(message_id):
+            return False
+        content = self._media.fetch(media.url)
+        if content is None:
+            return False
+        info = AttachmentInfo(
+            kind=media.kind,
+            content_type=safe_content_type(media.content_type),
+            file_name=media.file_name,
+            size=len(content),
+        )
+        with self._uow:
+            self._repo.add_attachment(message_id, info, content)
         return True
 
     def _link_contact(self, conversation: Conversation, inbound: InboundMessage) -> None:
@@ -161,6 +197,15 @@ class ConversationService:
     ) -> list[Message]:
         self.get(principal, conversation_id)  # visibility check
         return self._repo.list_messages(conversation_id, limit=limit, offset=offset)
+
+    def attachment(
+        self, principal: Principal, conversation_id: UUID, message_id: UUID
+    ) -> tuple[AttachmentInfo, bytes]:
+        self.get(principal, conversation_id)  # visibility check
+        found = self._repo.get_attachment(conversation_id, message_id)
+        if found is None:
+            raise NotFoundError("Attachment not found.")
+        return found
 
     def _visible(self, principal: Principal, conversation: Conversation) -> bool:
         scope = self._policy.scope_for(principal, Permission.COMMUNICATIONS_VIEW)

@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import re
 from dataclasses import asdict
+from urllib.parse import quote
 from uuid import UUID
 
+from django.http import HttpResponse
 from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import OpenApiParameter, extend_schema
 from rest_framework import status
@@ -217,6 +220,35 @@ class MessagesView(_Scoped):
             self.principal(), conversation_id, serializer.validated_data["text"]
         )
         return Response(message_to_dict(message), status=status.HTTP_201_CREATED)
+
+
+class MessageAttachmentView(_Scoped):
+    @extend_schema(
+        tags=_TAGS,
+        operation_id="conversations_message_attachment",
+        summary="Get a message's file",
+        description=(
+            "The file sent in a message, for whoever can see the conversation. 404 if the "
+            "message has no stored file."
+        ),
+        parameters=[_TENANT_HEADER],
+        responses={(200, "application/octet-stream"): OpenApiTypes.BINARY},
+    )
+    def get(self, request: Request, conversation_id: UUID, message_id: UUID) -> HttpResponse:
+        info, content = conversation_service().attachment(
+            self.principal(), conversation_id, message_id
+        )
+        response = HttpResponse(content, content_type=info.content_type)
+        # An ASCII fallback for old clients; the real (e.g. Cyrillic) name goes in filename*.
+        ascii_name = re.sub(r"[^A-Za-z0-9._-]", "", info.file_name) or "file"
+        response["Content-Disposition"] = (
+            f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(info.file_name)}"
+        )
+        response["Content-Length"] = str(info.size)
+        response["Cache-Control"] = "private, no-store"
+        response["X-Content-Type-Options"] = "nosniff"
+        response["Content-Security-Policy"] = "default-src 'none'; sandbox"
+        return response
 
 
 class AssignView(_Scoped):

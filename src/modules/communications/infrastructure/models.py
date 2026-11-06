@@ -99,3 +99,22 @@ class MessageTemplateRecord(models.Model):
 
     def __str__(self) -> str:
         return self.title
+
+
+class MessageAttachmentRecord(models.Model):
+    """A file sent in a chat, kept in the company database next to its message."""
+
+    message = models.OneToOneField(
+        MessageRecord, primary_key=True, on_delete=models.CASCADE, related_name="attachment"
+    )
+    kind = models.CharField(max_length=10)
+    content_type = models.CharField(max_length=100)
+    file_name = models.CharField(max_length=255)
+    size = models.PositiveIntegerField()
+    content = models.BinaryField()
+
+    class Meta:
+        db_table = "communications_message_attachment"
+
+    def __str__(self) -> str:
+        return f"{self.file_name} ({self.content_type}, {self.size} B)"

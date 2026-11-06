@@ -5,6 +5,7 @@ from typing import Protocol
 from uuid import UUID
 
 from modules.communications.domain.conversation import (
+    AttachmentInfo,
     Channel,
     Conversation,
     ConversationStatus,
@@ -55,6 +56,18 @@ class ConversationRepository(Protocol):
         """Mark an outbound message as failed. Returns True if one was found."""
         ...
 
+    def message_id(self, channel: Channel, external_id: str) -> UUID | None: ...
+
+    def has_attachment(self, message_id: UUID) -> bool: ...
+
+    def add_attachment(self, message_id: UUID, info: AttachmentInfo, content: bytes) -> None:
+        """Keep a message's file. A message has at most one: a second call changes nothing."""
+        ...
+
+    def get_attachment(
+        self, conversation_id: UUID, message_id: UUID
+    ) -> tuple[AttachmentInfo, bytes] | None: ...
+
     def list_messages(self, conversation_id: UUID, *, limit: int, offset: int) -> list[Message]: ...
 
     def recent_messages(self, conversation_id: UUID, *, limit: int) -> list[Message]:
@@ -80,3 +93,10 @@ class ContactLinker(Protocol):
     def link(
         self, *, channel: Channel, external_contact_id: str, contact_name: str | None
     ) -> ContactLink: ...
+
+
+class MediaFetcher(Protocol):
+    def fetch(self, url: str) -> bytes | None:
+        """The file, or None if it cannot be had at all (a refused host, too large, gone).
+        Raises TransientError when trying again later may work."""
+        ...

@@ -76,6 +76,40 @@ class MessageSent(DomainEvent):
         return {"conversation_id": str(self.conversation_id), "channel": self.channel}
 
 
+# Larger files stay in the WhatsApp app: they are kept in the company database.
+MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024
+UNKNOWN_CONTENT_TYPE = "application/octet-stream"
+# The only types the browser may render; anything else is served as a plain download.
+SAFE_CONTENT_TYPES = frozenset(
+    {
+        "image/jpeg",
+        "image/png",
+        "image/webp",
+        "image/gif",
+        "audio/ogg",
+        "audio/mpeg",
+        "audio/mp4",
+        "audio/aac",
+        "audio/amr",
+        "video/mp4",
+        "application/pdf",
+    }
+)
+
+
+def safe_content_type(declared: str) -> str:
+    base = declared.split(";", maxsplit=1)[0].strip().lower()
+    return declared if base in SAFE_CONTENT_TYPES else UNKNOWN_CONTENT_TYPE
+
+
+@dataclass(frozen=True, slots=True)
+class AttachmentInfo:
+    kind: str  # image, video, audio or document
+    content_type: str
+    file_name: str
+    size: int
+
+
 @dataclass(slots=True)
 class Message:
     id: UUID
@@ -86,6 +120,7 @@ class Message:
     external_id: str | None = None
     sender_user_id: UUID | None = None
     failure_code: str | None = None
+    attachment: AttachmentInfo | None = None
 
 
 @dataclass(slots=True)

@@ -41,6 +41,8 @@ def process_webhook(tenant_slug: str, provider: str, inbox_id: str) -> None:
                 "webhook_message_ingested",
                 extra={"provider": provider, "message_created": created},
             )
+            # Not only when created: a retry must finish a download that failed.
+            service.store_media(inbound)
         for failure in parse_delivery_failures(Provider(provider), payload):
             found = service.mark_delivery_failed(failure)
             logger.warning(

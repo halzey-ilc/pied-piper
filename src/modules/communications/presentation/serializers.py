@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import asdict
 from typing import Any
 
 from rest_framework import serializers
@@ -11,6 +12,13 @@ class SendMessageSerializer(serializers.Serializer[dict[str, Any]]):
     text = serializers.CharField(max_length=4096)
 
 
+class MessageAttachmentSerializer(serializers.Serializer[dict[str, Any]]):
+    kind = serializers.CharField(read_only=True)
+    content_type = serializers.CharField(read_only=True)
+    file_name = serializers.CharField(read_only=True)
+    size = serializers.IntegerField(read_only=True)
+
+
 class MessageReadSerializer(serializers.Serializer[dict[str, Any]]):
     id = serializers.UUIDField(read_only=True)
     direction = serializers.CharField(read_only=True)
@@ -19,6 +27,7 @@ class MessageReadSerializer(serializers.Serializer[dict[str, Any]]):
     external_id = serializers.CharField(read_only=True, allow_null=True)
     sender_user_id = serializers.UUIDField(read_only=True, allow_null=True)
     failure_code = serializers.CharField(read_only=True, allow_null=True)
+    attachment = MessageAttachmentSerializer(read_only=True, allow_null=True)
     created_at = serializers.DateTimeField(read_only=True)
 
 
@@ -84,6 +93,7 @@ def message_to_dict(m: Message) -> dict[str, Any]:
         "external_id": m.external_id,
         "sender_user_id": str(m.sender_user_id) if m.sender_user_id else None,
         "failure_code": m.failure_code,
+        "attachment": asdict(m.attachment) if m.attachment else None,
         "created_at": m.created_at.isoformat(),
     }
 
