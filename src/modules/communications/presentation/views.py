@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import asdict
 from uuid import UUID
 
 from drf_spectacular.types import OpenApiTypes
@@ -8,9 +9,9 @@ from rest_framework import status
 from rest_framework.request import Request
 from rest_framework.response import Response
 
-from modules.access_control.domain.rbac import Principal, Role
+from modules.access_control.domain.rbac import AccessPolicy, Permission, Principal, Role
 from modules.communications.application.ports import ConversationFilter
-from modules.communications.composition import conversation_service
+from modules.communications.composition import conversation_service, whatsapp_connection
 from modules.communications.domain.conversation import Channel, ConversationStatus
 from modules.communications.presentation.serializers import (
     ConversationListSerializer,
@@ -18,6 +19,8 @@ from modules.communications.presentation.serializers import (
     MessageListSerializer,
     MessageReadSerializer,
     SendMessageSerializer,
+    WhatsAppQrSerializer,
+    WhatsAppStatusSerializer,
     conversation_to_dict,
     message_to_dict,
 )
@@ -84,6 +87,42 @@ class _Scoped(TenantScopedAPIView):
         except ValueError:
             return 50, 0
         return limit, offset
+
+
+class WhatsAppStatusView(_Scoped):
+    @extend_schema(
+        tags=_TAGS,
+        operation_id="whatsapp_status",
+        summary="WhatsApp connection status",
+        description=(
+            "Whether the company's WhatsApp number is connected. `state` is `authorized` when "
+            "it works; `unavailable` means the provider did not answer. Needs "
+            "communications.view."
+        ),
+        parameters=[_TENANT_HEADER],
+        responses=WhatsAppStatusSerializer,
+    )
+    def get(self, request: Request) -> Response:
+        AccessPolicy().require(self.principal(), Permission.COMMUNICATIONS_VIEW)
+        return Response(asdict(whatsapp_connection().status()))
+
+
+class WhatsAppQrView(_Scoped):
+    @extend_schema(
+        tags=_TAGS,
+        operation_id="whatsapp_qr",
+        summary="WhatsApp QR code",
+        description=(
+            "The QR code that connects the number. `status` is `qr` (show `image`, it changes "
+            "about every 20 seconds), `connected` or `unavailable`. Whoever scans it takes "
+            "over the number, so this needs integrations.manage."
+        ),
+        parameters=[_TENANT_HEADER],
+        responses=WhatsAppQrSerializer,
+    )
+    def get(self, request: Request) -> Response:
+        AccessPolicy().require(self.principal(), Permission.INTEGRATIONS_MANAGE)
+        return Response(asdict(whatsapp_connection().qr()))
 
 
 class ConversationListView(_Scoped):

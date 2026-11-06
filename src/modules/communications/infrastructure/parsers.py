@@ -25,9 +25,13 @@ _MEDIA_LABELS = {
     "sticker": "[Стикер]",
     "location": "[Геолокация]",
     "contacts": "[Контакт]",
+    "contact": "[Контакт]",
 }
 _UNSUPPORTED_LABEL = "[Сообщение не поддерживается]"
 _IGNORED_TYPES = frozenset({"reaction"})
+# outgoingAPIMessageReceived is left out: the CRM already stored what it sent.
+_GREEN_MESSAGE_WEBHOOKS = frozenset({"incomingMessageReceived", "outgoingMessageReceived"})
+_GREEN_FAILED_STATUSES = frozenset({"failed", "noAccount", "notInGroup", "suspended", "yellowCard"})
 
 
 def _telegram(payload: dict[str, Any]) -> InboundMessage | None:
@@ -143,6 +147,48 @@ def _meta(payload: dict[str, Any], channel: Channel) -> list[InboundMessage]:
     return parsed
 
 
+def _green_text(data: dict[str, Any]) -> str | None:
+    """The text to show for a message, or None if it should not appear in the chat."""
+    kind = data.get("typeMessage")
+    if kind == "reactionMessage":
+        return None
+    if kind == "textMessage":
+        text = (data.get("textMessageData") or {}).get("textMessage")
+    elif kind in ("extendedTextMessage", "quotedMessage"):
+        text = (data.get("extendedTextMessageData") or {}).get("text")
+    else:
+        label = _MEDIA_LABELS.get(str(kind).removesuffix("Message"))
+        if label is None:
+            return _UNSUPPORTED_LABEL
+        caption = (data.get("fileMessageData") or {}).get("caption")
+        return f"{label} {caption}" if isinstance(caption, str) and caption.strip() else label
+    return text if isinstance(text, str) and text.strip() else None
+
+
+def _green_api(payload: dict[str, Any]) -> InboundMessage | None:
+    kind = payload.get("typeWebhook")
+    if kind not in _GREEN_MESSAGE_WEBHOOKS or not payload.get("idMessage"):
+        return None
+    sender = payload.get("senderData") or {}
+    chat = sender.get("chatId")
+    # Only people: a group is not a lead, and "@lid" is a person without a phone.
+    if not isinstance(chat, str) or not chat.endswith(("@c.us", "@lid")):
+        return None
+    text = _green_text(payload.get("messageData") or {})
+    if text is None:
+        return None
+    from_business = kind == "outgoingMessageReceived"
+    return InboundMessage(
+        channel=Channel.WHATSAPP,
+        external_contact_id=chat.removesuffix("@c.us"),
+        external_message_id=f"{Channel.WHATSAPP.value}:{payload['idMessage']}",
+        text=text,
+        occurred_at=_meta_time(payload),
+        contact_name=None if from_business else sender.get("senderName") or sender.get("chatName"),
+        from_business=from_business,
+    )
+
+
 def parse_messages(provider: Provider, payload: dict[str, Any]) -> list[InboundMessage]:
     """Every message in the payload; Meta may batch several into one webhook."""
     if provider is Provider.TELEGRAM:
@@ -150,6 +196,9 @@ def parse_messages(provider: Provider, payload: dict[str, Any]) -> list[InboundM
         return [message] if message is not None else []
     if provider is Provider.WHATSAPP:
         return _meta(payload, Channel.WHATSAPP)
+    if provider is Provider.GREEN_API:
+        message = _green_api(payload)
+        return [message] if message is not None else []
     if provider is Provider.INSTAGRAM:
         return _meta(payload, Channel.INSTAGRAM)
     return []
@@ -160,9 +209,29 @@ def parse_inbound(provider: Provider, payload: dict[str, Any]) -> InboundMessage
     return messages[0] if messages else None
 
 
+def _green_failures(payload: dict[str, Any]) -> list[DeliveryFailure]:
+    status = payload.get("status")
+    message_id = payload.get("idMessage")
+    if (
+        payload.get("typeWebhook") != "outgoingMessageStatus"
+        or status not in _GREEN_FAILED_STATUSES
+        or not message_id
+    ):
+        return []
+    return [
+        DeliveryFailure(
+            channel=Channel.WHATSAPP,
+            external_message_id=f"{Channel.WHATSAPP.value}:{message_id}",
+            code=str(status),
+        )
+    ]
+
+
 def parse_delivery_failures(provider: Provider, payload: dict[str, Any]) -> list[DeliveryFailure]:
     """WhatsApp accepts a send and reports failure later (e.g. 131047: the 24-hour
     window has closed), so a failed status is the only sign it never arrived."""
+    if provider is Provider.GREEN_API:
+        return _green_failures(payload)
     if provider is not Provider.WHATSAPP:
         return []
     failures: list[DeliveryFailure] = []

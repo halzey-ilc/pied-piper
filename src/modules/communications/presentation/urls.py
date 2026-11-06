@@ -8,9 +8,13 @@ from modules.communications.presentation.views import (
     MessagesView,
     ReadView,
     ReopenView,
+    WhatsAppQrView,
+    WhatsAppStatusView,
 )
 
 urlpatterns = [
+    path("whatsapp/status/", WhatsAppStatusView.as_view(), name="whatsapp-status"),
+    path("whatsapp/qr/", WhatsAppQrView.as_view(), name="whatsapp-qr"),
     path("conversations/", ConversationListView.as_view(), name="conversation-list"),
     path(
         "conversations/<uuid:conversation_id>/",

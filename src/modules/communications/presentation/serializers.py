@@ -37,6 +37,18 @@ class ConversationReadSerializer(serializers.Serializer[dict[str, Any]]):
     created_at = serializers.DateTimeField(read_only=True)
 
 
+class WhatsAppStatusSerializer(serializers.Serializer[dict[str, Any]]):
+    provider = serializers.CharField(read_only=True)
+    configured = serializers.BooleanField(read_only=True)
+    connected = serializers.BooleanField(read_only=True)
+    state = serializers.CharField(read_only=True)
+
+
+class WhatsAppQrSerializer(serializers.Serializer[dict[str, Any]]):
+    status = serializers.CharField(read_only=True)
+    image = serializers.CharField(read_only=True, allow_null=True)
+
+
 class ConversationListSerializer(serializers.Serializer[dict[str, Any]]):
     count = serializers.IntegerField(read_only=True)
     results = ConversationReadSerializer(many=True, read_only=True)

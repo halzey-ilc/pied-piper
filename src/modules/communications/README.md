@@ -22,8 +22,14 @@ new contact starts a new (unassigned) conversation; agents pick it up with
 
 ## WhatsApp
 
-Built for the Cloud API webhook format, including Coexistence (the number stays
-in the WhatsApp Business app). Not yet verified against a live account.
+`WHATSAPP_PROVIDER` selects how the number connects. Both feed the same `whatsapp`
+channel, so switching keeps chats, leads and history. Neither has been verified
+against a live account.
+
+- `green_api` (current bridge): unofficial QR gateway, webhook
+  `/api/v1/webhooks/green_api/<tenant-slug>/` with a bearer token. Groups are skipped;
+  a contact with a hidden number (`@lid`) gets a chat but no lead.
+- `cloud_api`: Meta's Cloud API, including Coexistence. Details below.
 
 - **Webhook URL:** `https://<domain>/api/v1/webhooks/whatsapp/<tenant-slug>/`. Meta
   verifies it with a GET (`WHATSAPP_VERIFY_TOKEN`); events are POSTs signed with

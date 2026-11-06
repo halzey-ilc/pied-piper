@@ -105,6 +105,7 @@ def _ready(settings: Any) -> None:
         ACCESS_TOKEN=SecretStr("super-secret-token"),
         PHONE_NUMBER_ID="123",
         LEAD_OWNER_USER_ID=OWNER,
+        TENANT_SLUG="acme",
     )
 
 
