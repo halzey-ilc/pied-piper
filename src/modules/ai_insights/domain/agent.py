@@ -24,16 +24,78 @@ from modules.ai_insights.domain.report import payload_fingerprint, validate_lang
 from shared.domain.errors import ConflictError, DomainValidationError
 from shared.domain.events import DomainEvent
 
-JOB_TYPE = "agent.plan.v1"
-OUTPUT_SCHEMA = "agent_plan.output.v1"
+JOB_TYPE = "agent.plan.v3"
+# v1: runs submitted before the assistant moved to v3 can still finish.
+OUTPUT_SCHEMAS = frozenset({"agent_plan.output.v1", "agent_plan.output.v2"})
 MAX_REQUEST = 1000
 MAX_ACTIONS = 5
+MAX_HISTORY = 10  # turns sent to the AI Platform (agent_plan.input.v3)
+MAX_CHOICES = 5
+LOCAL_PROVIDER = "crm"  # answered by the CRM itself, no model involved
 
 
 class Tool(StrEnum):
     CREATE_TASK = "create_task"
     LOG_NOTE = "log_note"
     REQUEST_DEAL_BRIEF = "request_deal_brief"
+    SCHEDULE_MEETING = "schedule_meeting"
+    MOVE_DEAL_STAGE = "move_deal_stage"
+
+
+_TOOL_NAMES: dict[str, dict[Tool, str]] = {
+    "ru": {
+        Tool.CREATE_TASK: "поставить задачу",
+        Tool.LOG_NOTE: "записать заметку",
+        Tool.REQUEST_DEAL_BRIEF: "подготовить бриф",
+        Tool.SCHEDULE_MEETING: "назначить встречу",
+        Tool.MOVE_DEAL_STAGE: "перенести сделку на этап",
+    },
+    "ky": {
+        Tool.CREATE_TASK: "тапшырма коюу",
+        Tool.LOG_NOTE: "эскертме жазуу",
+        Tool.REQUEST_DEAL_BRIEF: "бриф даярдоо",
+        Tool.SCHEDULE_MEETING: "жолугушуу белгилөө",
+        Tool.MOVE_DEAL_STAGE: "бүтүмдү этапка которуу",
+    },
+    "en": {
+        Tool.CREATE_TASK: "create a task",
+        Tool.LOG_NOTE: "write a note",
+        Tool.REQUEST_DEAL_BRIEF: "prepare a brief",
+        Tool.SCHEDULE_MEETING: "schedule a meeting",
+        Tool.MOVE_DEAL_STAGE: "move a deal to a stage",
+    },
+}
+
+_MESSAGES: dict[str, dict[str, str]] = {
+    "ru": {
+        "cannot": "Этого я сделать не могу. Я умею: {tools}.",
+        "need_deal": "По какой сделке? Напишите её название, например: по сделке Поставка.",
+        "no_deal": "Не нашёл сделку «{name}». Проверьте название.",  # noqa: RUF001
+        "several": "Нашёл несколько сделок по запросу «{name}». Какую вы имели в виду?",
+    },
+    "ky": {
+        "cannot": "Муну аткара албайм. Мен кыла алам: {tools}.",
+        "need_deal": "Кайсы бүтүм боюнча? Анын аталышын жазыңыз.",
+        "no_deal": "«{name}» бүтүмү табылган жок. Аталышын текшериңиз.",
+        "several": "«{name}» боюнча бир нече бүтүм табылды. Кайсынысы?",
+    },
+    "en": {
+        "cannot": "I cannot do that. I can: {tools}.",
+        "need_deal": "Which deal? Name it, for example: on the deal Supply.",
+        "no_deal": "No deal named “{name}” was found. Check the name.",
+        "several": "Several deals match “{name}”. Which one do you mean?",
+    },
+}
+
+
+def message(language: str, key: str, **values: str) -> str:
+    return _MESSAGES[language][key].format(**values)[:300]
+
+
+def cannot_do(language: str, tools: list[str]) -> str:
+    """Why nothing was proposed, with what the assistant can do for this user."""
+    names = _TOOL_NAMES[language]
+    return message(language, "cannot", tools=", ".join(names[Tool(t)] for t in tools))
 
 
 class ActionStatus(StrEnum):
@@ -52,6 +114,8 @@ class Subject:
     ref: str  # "deal:<uuid>" | "customer:<uuid>"
     kind: str  # deal | customer
     title: str
+    stage: str | None = None  # deals: the current stage
+    stages: tuple[str, ...] = ()  # deals: the stages it may be moved to
 
     @property
     def id(self) -> UUID:
@@ -63,7 +127,7 @@ class AgentAction:
     index: int
     tool: Tool
     subject_ref: str
-    args: dict[str, Any]  # title/due_date for tasks, body for notes
+    args: dict[str, Any]  # the tool's fields (see ACTION_ARGS)
     reason: str
     status: ActionStatus = ActionStatus.PROPOSED
     result_ref: str | None = None  # what was created, e.g. "activity:<uuid>"
@@ -71,7 +135,13 @@ class AgentAction:
     decided_at: datetime | None = None
 
 
+ACTION_ARGS = ("title", "due_date", "body", "start", "duration_minutes", "stage")
+
 _QUOTED = re.compile(r"[«\"“]([^»\"”]{2,200})[»\"”]")
+_DEAL_WORD = re.compile(r"(?:сделк|бүтүм|келишим|\bdeal\b)\w*\s+([^:;,.!?\n]+)", re.IGNORECASE)
+# A word after «сделку» that starts the rest of the sentence, not a name: «сделку на этап…».
+_NOT_A_NAME = frozenset({"на", "в", "во", "по", "с", "со", "к", "ко", "до", "для", "и", "to", "on"})  # noqa: RUF001
+_MAX_NAME_WORDS = 6
 
 
 def quoted_name(request: str) -> str | None:
@@ -80,8 +150,42 @@ def quoted_name(request: str) -> str | None:
     return match.group(1).strip() if match else None
 
 
+def deal_names(request: str) -> list[str]:
+    """What the request may call its deal, the most likely first: the quoted name, or
+    the words after «сделка», longest first, since where the name ends is unknown
+    («по сделке Тест доски завтра» tries «Тест доски завтра», «Тест доски», «Тест»)."""
+    quoted = quoted_name(request)
+    if quoted:
+        return [quoted]
+    match = _DEAL_WORD.search(request)
+    if match is None:
+        return []
+    words = match.group(1).split()[:_MAX_NAME_WORDS]
+    if not words or words[0].casefold() in _NOT_A_NAME:
+        return []
+    return [" ".join(words[:n]) for n in range(len(words), 0, -1)]
+
+
+def proposed_text(actions: list[AgentAction]) -> str:
+    """An assistant turn for agent_plan.input.v3: the tool and its values, which the AI
+    Platform uses to tell a repeated proposal from a changed one."""
+    if not actions:
+        return "Nothing proposed"
+    parts = []
+    for a in actions:
+        values = [str(a.args[k]) for k in ACTION_ARGS if a.args.get(k) is not None]
+        parts.append(" ".join([a.tool.value, *values]))
+    return f"Proposed: {'; '.join(parts)}"[:MAX_REQUEST]
+
+
 def build_payload(
-    *, language: str, today: str, request: str, tools: list[Tool], subjects: list[Subject]
+    *,
+    language: str,
+    today: str,
+    request: str,
+    tools: list[Tool],
+    subjects: list[Subject],
+    history: list[dict[str, str]] | None = None,
 ) -> dict[str, Any]:
     text = request.strip()
     if not text:
@@ -90,29 +194,44 @@ def build_payload(
         raise DomainValidationError(f"The request must be at most {MAX_REQUEST} characters.")
     if not tools:
         raise DomainValidationError("You may not use any assistant tool.")
-    return {
+    payload: dict[str, Any] = {
         "language": validate_language(language),
         "today": today,
         "request": redact_contacts(text),
         "tools": [t.value for t in tools],
-        "subjects": [
-            {"ref": s.ref, "kind": s.kind, "title": mask_personal_data(s.title)[:200]}
-            for s in subjects
-        ],
+        "subjects": [_subject_json(s) for s in subjects],
     }
+    if history:
+        payload["history"] = history[-MAX_HISTORY:]
+    return payload
+
+
+def _subject_json(s: Subject) -> dict[str, Any]:
+    out: dict[str, Any] = {
+        "ref": s.ref,
+        "kind": s.kind,
+        "title": mask_personal_data(s.title)[:200],
+    }
+    if s.stage:
+        out["stage"] = s.stage[:100]
+    if s.stages:
+        out["stages"] = [name[:100] for name in s.stages]
+    return out
 
 
 def actions_from(result: dict[str, Any], payload: dict[str, Any]) -> list[AgentAction]:
     """The proposed actions, re-checked against what the CRM offered: an action
-    with a tool or record that was not offered is dropped, whatever the AI said."""
+    with a tool, record or stage that was not offered is dropped, whatever the AI said."""
     offered = set(payload["tools"])
-    refs = {s["ref"] for s in payload["subjects"]}
+    subjects = {s["ref"]: s for s in payload["subjects"]}
     out: list[AgentAction] = []
     for raw in result.get("actions", [])[:MAX_ACTIONS]:
         tool, ref = raw.get("tool"), raw.get("subject_ref")
-        if tool not in offered or ref not in refs:
+        if tool not in offered or ref not in subjects:
             continue
-        args = {k: raw[k] for k in ("title", "due_date", "body") if k in raw}
+        if tool == Tool.MOVE_DEAL_STAGE and raw.get("stage") not in subjects[ref].get("stages", []):
+            continue
+        args = {k: raw[k] for k in ACTION_ARGS if k in raw}
         out.append(
             AgentAction(
                 index=len(out),
@@ -172,9 +291,38 @@ class AgentRun:
             created_at=datetime.now(UTC),
         )
 
+    @classmethod
+    def answer_locally(
+        cls,
+        *,
+        requested_by: UUID,
+        payload: dict[str, Any],
+        summary: str,
+        choices: list[dict[str, str]] | None = None,
+    ) -> AgentRun:
+        """A run the CRM finishes itself, without the AI Platform. ``choices`` are records
+        the user can pick from; they stay in the CRM."""
+        run = cls.request_plan(
+            requested_by=requested_by, payload={**payload, "choices": choices or []}
+        )
+        run.summary = summary[:300]
+        run.provider, run.model = LOCAL_PROVIDER, "rules"
+        run.status = InsightStatus.SUCCEEDED
+        run.finished_at = run.created_at
+        return run
+
     @property
     def is_finished(self) -> bool:
         return self.status in (InsightStatus.SUCCEEDED, InsightStatus.FAILED)
+
+    def conversation(self) -> list[dict[str, str]]:
+        """The turns up to and including this run, for a request that follows it."""
+        turns = [
+            *self.payload.get("history", []),
+            {"role": "user", "text": str(self.payload["request"])[:MAX_REQUEST]},
+            {"role": "assistant", "text": proposed_text(self.actions)},
+        ]
+        return turns[-MAX_HISTORY:]
 
     def mark_submitted(self, ai_job_id: str) -> None:
         if self.status is not InsightStatus.PENDING or not ai_job_id:
@@ -187,10 +335,14 @@ class AgentRun:
     ) -> AgentRunCompleted:
         if self.status is not InsightStatus.SUBMITTED:
             raise DomainValidationError("Only a submitted run can succeed.")
-        if schema_id != OUTPUT_SCHEMA:
+        if schema_id not in OUTPUT_SCHEMAS:
             raise DomainValidationError("The AI result uses an unsupported output contract.")
         self.actions = actions_from(result, self.payload)
-        self.summary = str(result.get("summary", ""))[:300]
+        self.summary = (
+            str(result.get("summary", ""))[:300]
+            if self.actions
+            else cannot_do(self.payload["language"], self.payload["tools"])
+        )
         self.provider, self.model, self.is_mock = provider, model, is_mock
         self.status = InsightStatus.SUCCEEDED
         self.finished_at = datetime.now(UTC)

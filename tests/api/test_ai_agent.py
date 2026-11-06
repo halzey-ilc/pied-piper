@@ -143,9 +143,16 @@ def test_plan_is_rechecked_and_runs_only_on_confirmation(
         ],
     )
     payload = ai.submits[0]["payload"]
-    assert ai.submits[0]["job_type"] == "agent.plan.v1"
-    assert payload["subjects"] == [{"ref": ref, "kind": "deal", "title": "Внедрение"}]
-    assert set(payload["tools"]) == {"create_task", "log_note", "request_deal_brief"}
+    assert ai.submits[0]["job_type"] == "agent.plan.v3"
+    subject = payload["subjects"][0]
+    assert (subject["ref"], subject["kind"], subject["title"]) == (ref, "deal", "Внедрение")
+    assert set(payload["tools"]) == {
+        "create_task",
+        "log_note",
+        "request_deal_brief",
+        "schedule_meeting",
+        "move_deal_stage",
+    }
 
     run = client.get(f"/api/v1/ai/agent/runs/{run_id}/").json()
     assert run["requires_confirmation"] is True
@@ -253,18 +260,179 @@ def test_deal_named_in_quotes_is_found_among_visible_deals_only(
     title = client.get(f"/api/v1/sales/deals/{deal_id}/").json()["title"]
 
     def subjects(request: str, who: APIClient) -> list[dict[str, Any]]:
+        """What reaches the AI; a run the CRM answered itself sends nothing."""
         ai.submits.clear()
         created = who.post("/api/v1/ai/agent/runs/", {"request": request}, format="json")
         assert created.status_code == 202, created.content
         with system_tenant_scope("acme"):
             composition.agent_service().submit(UUID(created.json()["id"]))
-        result: list[dict[str, Any]] = ai.submits[0]["payload"]["subjects"]
+        result: list[dict[str, Any]] = ai.submits[0]["payload"]["subjects"] if ai.submits else []
         return result
 
     found = subjects(f"Поставь задачу по сделке «{title}» на завтра", client)
+    assert [s["ref"] for s in found] == [f"deal:{deal_id}"]
+    # Without quotes, whatever follows the name.
+    found = subjects(f"Поставь задачу по сделке {title} на завтра", client)
     assert [s["ref"] for s in found] == [f"deal:{deal_id}"]
     assert subjects("Поставь задачу по сделке «Такой нет»", client) == []
     assert subjects("Поставь задачу на завтра", client) == []
     # A manager who does not own the deal cannot reach it by name.
     rep = client_for(make_user("rep", tenant=tenants["acme"], role=Role.SALES_REP), "acme")
     assert subjects(f"Поставь задачу по сделке «{title}»", rep) == []
+
+
+def _ask(client: APIClient, request: str, **extra: Any) -> dict[str, Any]:
+    run: dict[str, Any] = _ok(
+        client.post("/api/v1/ai/agent/runs/", {"request": request, **extra}, format="json")
+    )
+    return run
+
+
+def test_crm_answers_at_once_when_it_cannot_tell_the_record(
+    ai: FakeAiPlatform,
+    make_user: Callable[..., Any],
+    tenants: dict[str, TenantFixture],
+    client_for: Callable[..., APIClient],
+) -> None:
+    client = client_for(make_user("owner", tenant=tenants["acme"]), "acme")
+    first = _deal(client)
+    second = _ok(
+        client.post("/api/v1/sales/deals/", {"title": "Внедрение 2", "amount": "1"}, format="json")
+    )["id"]
+
+    run = _ask(client, "Поставь задачу завтра")
+    assert (run["status"], run["provider"]) == ("succeeded", "crm")
+    assert "По какой сделке" in run["summary"] and run["choices"] == []
+
+    run = _ask(client, "Поставь задачу по сделке «Нет такой»")
+    assert "Не нашёл сделку «Нет такой»" in run["summary"]  # noqa: RUF001
+
+    # «Внедрение» is exact, so it wins over «Внедрение 2».
+    assert _ask(client, "Поставь задачу по сделке Внедрение")["status"] == "pending"
+    # A part of both names: the user chooses, the assistant does not guess.
+    run = _ask(client, "Поставь задачу по сделке Внедр")
+    assert run["status"] == "succeeded" and "несколько сделок" in run["summary"]
+    assert {c["deal_id"] for c in run["choices"]} == {first, second}
+    assert _ask(client, "Поставь задачу", deal_id=second)["status"] == "pending"
+    assert ai.submits == []
+
+
+def test_no_proposal_explains_what_the_assistant_can_do(
+    ai: FakeAiPlatform,
+    make_user: Callable[..., Any],
+    tenants: dict[str, TenantFixture],
+    client_for: Callable[..., APIClient],
+) -> None:
+    client = client_for(make_user("owner", tenant=tenants["acme"]), "acme")
+    run_id = _plan(client, ai, _deal(client), [])
+    summary = client.get(f"/api/v1/ai/agent/runs/{run_id}/").json()["summary"]
+    assert summary.startswith("Этого я сделать не могу") and "назначить встречу" in summary
+
+
+def test_meeting_and_stage_move_run_through_their_modules(
+    ai: FakeAiPlatform,
+    make_user: Callable[..., Any],
+    tenants: dict[str, TenantFixture],
+    client_for: Callable[..., APIClient],
+) -> None:
+    client = client_for(make_user("owner", tenant=tenants["acme"]), "acme")
+    deal_id = _deal(client)
+    ref = f"deal:{deal_id}"
+    deal = client.get(f"/api/v1/sales/deals/{deal_id}/").json()
+    pipeline = client.get(f"/api/v1/sales/pipelines/{deal['pipeline_id']}/").json()
+    current = next(s["name"] for s in pipeline["stages"] if s["id"] == deal["stage_id"])
+    target = next(
+        s for s in pipeline["stages"] if s["kind"] == "open" and s["id"] != deal["stage_id"]
+    )
+    won = next(s["name"] for s in pipeline["stages"] if s["kind"] == "won")
+    run_id = _plan(
+        client,
+        ai,
+        deal_id,
+        [
+            {
+                "tool": "schedule_meeting",
+                "subject_ref": ref,
+                "title": "Встреча",
+                "start": "2030-03-05T15:00",
+                "duration_minutes": 30,
+                "reason": "r",
+            },
+            {"tool": "move_deal_stage", "subject_ref": ref, "stage": target["name"], "reason": "r"},
+            # A sale closes only by a payment: not offered, so dropped.
+            {"tool": "move_deal_stage", "subject_ref": ref, "stage": won, "reason": "r"},
+        ],
+    )
+    subject = ai.submits[0]["payload"]["subjects"][0]
+    assert subject["stage"] == current
+    assert target["name"] in subject["stages"] and won not in subject["stages"]
+    assert len(client.get(f"/api/v1/ai/agent/runs/{run_id}/").json()["actions"]) == 2
+
+    meeting = _ok(client.post(f"/api/v1/ai/agent/runs/{run_id}/actions/0/confirm/"))
+    assert meeting["status"] == "executed" and meeting["result_ref"].startswith("meeting:")
+    found = client.get(f"/api/v1/meetings/{meeting['result_ref'].split(':')[1]}/").json()
+    assert found["title"] == "Встреча"
+
+    # The module's own rule stands: a move needs a planned next step.
+    moved = _ok(client.post(f"/api/v1/ai/agent/runs/{run_id}/actions/1/confirm/"))
+    assert (moved["status"], moved["error_code"]) == ("failed", "next_step_required")
+    assert client.get(f"/api/v1/sales/deals/{deal_id}/").json()["stage_id"] == deal["stage_id"]
+
+    task = {
+        "tool": "create_task",
+        "subject_ref": ref,
+        "title": "Перезвонить",
+        "due_date": "2030-03-04",
+        "reason": "r",
+    }
+    move = {"tool": "move_deal_stage", "subject_ref": ref, "stage": target["name"], "reason": "r"}
+    run_id = _plan(client, ai, deal_id, [task, move])
+    _ok(client.post(f"/api/v1/ai/agent/runs/{run_id}/actions/0/confirm/"))
+    moved = _ok(client.post(f"/api/v1/ai/agent/runs/{run_id}/actions/1/confirm/"))
+    assert moved["status"] == "executed", moved
+    assert client.get(f"/api/v1/sales/deals/{deal_id}/").json()["stage_id"] == target["id"]
+
+
+def test_follow_up_keeps_the_record_and_the_conversation(
+    ai: FakeAiPlatform,
+    make_user: Callable[..., Any],
+    tenants: dict[str, TenantFixture],
+    client_for: Callable[..., APIClient],
+) -> None:
+    owner = make_user("owner", tenant=tenants["acme"])
+    client = client_for(owner, "acme")
+    deal_id = _deal(client)
+    first = _plan(
+        client,
+        ai,
+        deal_id,
+        [
+            {
+                "tool": "schedule_meeting",
+                "subject_ref": f"deal:{deal_id}",
+                "title": "Встреча",
+                "start": "2030-03-05T15:00",
+                "duration_minutes": 60,
+                "reason": "r",
+            }
+        ],
+    )
+    run = _ask(client, "Лучше во вторник", previous_run_id=first)
+    with system_tenant_scope("acme"):
+        composition.agent_service().submit(UUID(run["id"]))
+    payload = ai.submits[-1]["payload"]
+    assert [s["ref"] for s in payload["subjects"]] == [f"deal:{deal_id}"]
+    assert payload["history"][0] == {
+        "role": "user",
+        "text": "Поставь задачу перезвонить завтра",
+    }
+    assert payload["history"][1]["role"] == "assistant"
+    assert "schedule_meeting" in payload["history"][1]["text"]
+    assert "2030-03-05T15:00" in payload["history"][1]["text"]
+
+    # Someone else's run cannot be continued.
+    other = client_for(make_user("rep", tenant=tenants["acme"], role=Role.SALES_REP), "acme")
+    stolen = other.post(
+        "/api/v1/ai/agent/runs/", {"request": "Лучше", "previous_run_id": first}, format="json"
+    )
+    assert stolen.status_code == 404

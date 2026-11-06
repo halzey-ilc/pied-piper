@@ -192,12 +192,24 @@ class AgentRequestSerializer(serializers.Serializer[dict[str, Any]]):
         required=False, help_text="A customer the request is about."
     )
     language = serializers.ChoiceField(choices=list(LANGUAGES), required=False)
+    previous_run_id = serializers.UUIDField(
+        required=False,
+        help_text="Your earlier run this request continues, e.g. «лучше во вторник».",
+    )
+
+
+class AgentChoiceSerializer(serializers.Serializer[dict[str, Any]]):
+    deal_id = serializers.UUIDField(read_only=True)
+    title = serializers.CharField(read_only=True)
 
 
 class AgentActionSerializer(serializers.Serializer[dict[str, Any]]):
     index = serializers.IntegerField(read_only=True)
     tool = serializers.CharField(
-        read_only=True, help_text="create_task | log_note | request_deal_brief"
+        read_only=True,
+        help_text=(
+            "create_task | log_note | request_deal_brief | schedule_meeting | move_deal_stage"
+        ),
     )
     subject_ref = serializers.CharField(read_only=True)
     args = serializers.JSONField(read_only=True)
@@ -219,6 +231,11 @@ class AgentRunSerializer(serializers.Serializer[dict[str, Any]]):
     tools = serializers.ListField(child=serializers.CharField(), read_only=True)
     summary = serializers.CharField(read_only=True, allow_null=True)
     actions = AgentActionSerializer(many=True, read_only=True)
+    choices = AgentChoiceSerializer(
+        many=True,
+        read_only=True,
+        help_text="Deals to pick from when the name was ambiguous; ask again with deal_id.",
+    )
     requires_confirmation = serializers.BooleanField(
         read_only=True, help_text="Always true: nothing runs until you confirm an action."
     )
@@ -252,6 +269,7 @@ def run_to_dict(run: AgentRun) -> dict[str, Any]:
         "tools": run.payload.get("tools", []),
         "summary": run.summary,
         "actions": [action_to_dict(a) for a in run.actions],
+        "choices": run.payload.get("choices", []),
         "requires_confirmation": True,
         "is_mock": run.is_mock,
         "provider": run.provider,

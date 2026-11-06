@@ -275,9 +275,12 @@ class AgentRunsView(_Scoped):
         summary="Ask the CRM assistant to plan actions (Agent Runtime)",
         description=(
             "The AI Platform receives your request, the tools you may use (create_task, "
-            "log_note, request_deal_brief) and the records you name (deal title; a customer is "
-            "referred to by kind only). It proposes actions; **nothing runs** until you confirm "
-            "each one. Returns 202; poll GET. Requires ai.request."
+            "log_note, request_deal_brief, schedule_meeting, move_deal_stage), the records you "
+            "name (deal title, stages; a customer is referred to by kind only) and, with "
+            "previous_run_id, the earlier turns. It proposes actions; **nothing runs** until "
+            "you confirm each one. When no record can be determined the CRM answers at once "
+            "(provider `crm`), with `choices` if several deals match. Returns 202; poll GET. "
+            "Requires ai.request."
         ),
         parameters=[_TENANT_HEADER],
         request=AgentRequestSerializer,
@@ -293,6 +296,7 @@ class AgentRunsView(_Scoped):
             deal_id=data.get("deal_id"),
             customer_id=data.get("customer_id"),
             language=data.get("language"),
+            previous_run_id=data.get("previous_run_id"),
         )
         return Response(run_to_dict(run), status=status.HTTP_202_ACCEPTED)
 

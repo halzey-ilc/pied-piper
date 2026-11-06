@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime
+from typing import Any
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
@@ -28,6 +29,7 @@ from modules.ai_insights.application.ports import AiPlatformClient
 from modules.ai_insights.application.service import AiDisabledError, poll_delay
 from modules.ai_insights.domain.agent import (
     JOB_TYPE,
+    MAX_CHOICES,
     ActionStateError,
     ActionStatus,
     AgentAction,
@@ -35,7 +37,8 @@ from modules.ai_insights.domain.agent import (
     Subject,
     Tool,
     build_payload,
-    quoted_name,
+    deal_names,
+    message,
 )
 from modules.ai_insights.domain.insight import InsightStatus
 from modules.ai_insights.domain.report import validate_language
@@ -56,6 +59,8 @@ TOOL_PERMISSIONS: dict[Tool, tuple[Permission, ...]] = {
     Tool.CREATE_TASK: (Permission.ACTIVITIES_CREATE,),
     Tool.LOG_NOTE: (Permission.ACTIVITIES_CREATE,),
     Tool.REQUEST_DEAL_BRIEF: (Permission.AI_REQUEST, Permission.DEALS_VIEW),
+    Tool.SCHEDULE_MEETING: (Permission.MEETINGS_CREATE,),
+    Tool.MOVE_DEAL_STAGE: (Permission.DEALS_UPDATE,),
 }
 
 
@@ -110,32 +115,81 @@ class AgentService:
         deal_id: UUID | None = None,
         customer_id: UUID | None = None,
         language: str | None = None,
+        previous_run_id: UUID | None = None,
     ) -> AgentRun:
+        """``previous_run_id`` continues a conversation: the earlier turns go to the AI
+        and, unless this request names its own record, so do the earlier records."""
         if not self._enabled:
             raise AiDisabledError("AI features are not enabled for this installation.")
         self._policy.require(principal, Permission.AI_REQUEST)
+        previous = self.get(principal, previous_run_id) if previous_run_id else None
         subjects: list[Subject] = []
         if deal_id is not None:
             subjects.append(self._subjects.deal(principal, deal_id))
         if customer_id is not None:
             subjects.append(self._subjects.customer(principal, customer_id))
-        name = quoted_name(request) if not subjects else None
-        named = self._subjects.deal_named(principal, name) if name else None
-        if named is not None:
-            subjects.append(named)
+        names = deal_names(request) if not subjects else []
+        matches = self._subjects.deals_named(principal, names) if names else []
+        if len(matches) == 1:
+            subjects = matches
+        elif not matches and not subjects and previous is not None:
+            subjects = self._earlier_subjects(principal, previous)
         payload = build_payload(
             language=validate_language(language or self._language),
             today=datetime.now(self._tz).date().isoformat(),
             request=request,
             tools=self.tools_for(principal),
             subjects=subjects,
+            history=previous.conversation() if previous else None,
         )
+        if not subjects:
+            run = self._clarify(principal, payload, names, matches)
+            with self._uow:
+                self._repo.add(run)
+                self._record(principal.user_id, "agent_run.clarified", run)
+            return run
         run = AgentRun.request_plan(requested_by=principal.user_id, payload=payload)
         with self._uow:
             self._repo.add(run)
             self._record(principal.user_id, "agent_run.requested", run)
             self._scheduler.schedule_submit(tenant_slug=self._tenant_slug, run_id=run.id)
         return run
+
+    def _earlier_subjects(self, principal: Principal, previous: AgentRun) -> list[Subject]:
+        """The previous run's records, read again: the user may have lost access since."""
+        subjects: list[Subject] = []
+        for raw in previous.payload.get("subjects", []):
+            subject = previous.subject(raw["ref"])
+            try:
+                if subject.kind == "deal":
+                    subjects.append(self._subjects.deal(principal, subject.id))
+                else:
+                    subjects.append(self._subjects.customer(principal, subject.id))
+            except NotFoundError:
+                continue
+        return subjects
+
+    def _clarify(
+        self,
+        principal: Principal,
+        payload: dict[str, Any],
+        names: list[str],
+        matches: list[Subject],
+    ) -> AgentRun:
+        """No record to act on: ask, instantly, instead of spending a model call."""
+        language = payload["language"]
+        if matches:
+            summary = message(language, "several", name=names[0])
+        elif names:
+            summary = message(language, "no_deal", name=names[0])
+        else:
+            summary = message(language, "need_deal")
+        return AgentRun.answer_locally(
+            requested_by=principal.user_id,
+            payload=payload,
+            summary=summary,
+            choices=[{"deal_id": str(s.id), "title": s.title} for s in matches[:MAX_CHOICES]],
+        )
 
     def get(self, principal: Principal, run_id: UUID) -> AgentRun:
         """Runs are personal: only the requester can read or act on one."""

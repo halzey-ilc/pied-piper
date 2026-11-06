@@ -89,10 +89,11 @@ def agent_service() -> AgentService:
     tenant = require_tenant()
     alias = tenant.db_alias
     cfg = settings.AI_PLATFORM
+    timezone_name = str(company_settings(tenant.tenant_id)["timezone"])
     return AgentService(
         repository=DjangoAgentRunRepository(alias),
         subjects=CrmSubjectReader(),
-        executor=CrmToolExecutor(request_brief=_start_deal_brief),
+        executor=CrmToolExecutor(request_brief=_start_deal_brief, timezone_name=timezone_name),
         client=ai_platform_client(),
         scheduler=CeleryAgentScheduler(alias),
         uow=DjangoUnitOfWork(alias),
@@ -102,7 +103,7 @@ def agent_service() -> AgentService:
         enabled=cfg["ENABLED"],
         default_language=cfg["DEFAULT_LANGUAGE"],
         deadline_seconds=cfg["DEADLINE_SECONDS"],
-        timezone_name=str(company_settings(tenant.tenant_id)["timezone"]),
+        timezone_name=timezone_name,
     )
 
 
