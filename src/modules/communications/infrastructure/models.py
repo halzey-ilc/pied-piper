@@ -22,6 +22,7 @@ class ConversationRecord(models.Model):
         default=ConversationStatus.OPEN.value,
     )
     customer_id = models.UUIDField(null=True, blank=True)
+    lead_id = models.UUIDField(null=True, blank=True)
     owner_user_id = models.UUIDField(null=True, blank=True)
     team_id = models.UUIDField(null=True, blank=True)
     last_message_at = models.DateTimeField(null=True, blank=True)
@@ -41,6 +42,7 @@ class ConversationRecord(models.Model):
             models.Index(fields=["status", "last_message_at"], name="conv_status_idx"),
             models.Index(fields=["owner_user_id"], name="conv_owner_idx"),
             models.Index(fields=["team_id"], name="conv_team_idx"),
+            models.Index(fields=["lead_id"], name="conv_lead_idx"),
         ]
 
     def __str__(self) -> str:
@@ -62,6 +64,7 @@ class MessageRecord(models.Model):
     )
     external_id = models.CharField(max_length=255, null=True, blank=True)  # noqa: DJ001
     sender_user_id = models.UUIDField(null=True, blank=True)
+    failure_code = models.CharField(max_length=32, null=True, blank=True)  # noqa: DJ001
     created_at = models.DateTimeField()
 
     class Meta:
@@ -96,3 +99,22 @@ class MessageTemplateRecord(models.Model):
 
     def __str__(self) -> str:
         return self.title
+
+
+class MessageAttachmentRecord(models.Model):
+    """A file sent in a chat, kept in the company database next to its message."""
+
+    message = models.OneToOneField(
+        MessageRecord, primary_key=True, on_delete=models.CASCADE, related_name="attachment"
+    )
+    kind = models.CharField(max_length=10)
+    content_type = models.CharField(max_length=100)
+    file_name = models.CharField(max_length=255)
+    size = models.PositiveIntegerField()
+    content = models.BinaryField()
+
+    class Meta:
+        db_table = "communications_message_attachment"
+
+    def __str__(self) -> str:
+        return f"{self.file_name} ({self.content_type}, {self.size} B)"

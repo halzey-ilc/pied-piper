@@ -49,6 +49,59 @@ class WhatsAppCloudAdapter:
         )
 
 
+class GreenApiAdapter:
+    """The token is part of the URL, so requests must never be logged at INFO."""
+
+    provider = Provider.GREEN_API
+
+    def __init__(
+        self, client: httpx.Client, instance_id: str, token: str, policy: RetryPolicy
+    ) -> None:
+        self._client = client
+        self._instance_id = instance_id
+        self._token = token
+        self._policy = policy
+
+    def send(self, message: OutboundMessage) -> DeliveryResult:
+        recipient = message.recipient_external_id
+        response = send_with_retry(
+            lambda: self._client.post(
+                f"/waInstance{self._instance_id}/sendMessage/{self._token}",
+                json={
+                    "chatId": recipient if "@" in recipient else f"{recipient}@c.us",
+                    "message": message.text,
+                },
+            ),
+            self._policy,
+        )
+        return DeliveryResult(
+            provider=self.provider,
+            external_message_id=response.json().get("idMessage"),
+            accepted=True,
+        )
+
+    def send_file(
+        self, *, recipient: str, file_name: str, content: bytes, content_type: str, caption: str
+    ) -> str | None:
+        """WhatsApp picks how to show the file from its extension."""
+        data = {
+            "chatId": recipient if "@" in recipient else f"{recipient}@c.us",
+            "fileName": file_name,
+        }
+        if caption:
+            data["caption"] = caption
+        response = send_with_retry(
+            lambda: self._client.post(
+                f"/waInstance{self._instance_id}/sendFileByUpload/{self._token}",
+                data=data,
+                files={"file": (file_name, content, content_type)},
+            ),
+            self._policy,
+        )
+        message_id: str | None = response.json().get("idMessage")
+        return message_id
+
+
 class TelegramBotAdapter:
     provider = Provider.TELEGRAM
 

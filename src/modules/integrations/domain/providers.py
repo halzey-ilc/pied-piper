@@ -8,6 +8,7 @@ from shared.domain.errors import DomainError, DomainValidationError
 
 class Provider(StrEnum):
     WHATSAPP = "whatsapp"
+    GREEN_API = "green_api"
     TELEGRAM = "telegram"
     INSTAGRAM = "instagram"
     TELEPHONY = "telephony"

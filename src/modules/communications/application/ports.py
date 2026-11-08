@@ -4,7 +4,9 @@ from dataclasses import dataclass, field
 from typing import Protocol
 from uuid import UUID
 
+from modules.access_control.domain.rbac import MemberRef, Principal
 from modules.communications.domain.conversation import (
+    AttachmentInfo,
     Channel,
     Conversation,
     ConversationStatus,
@@ -24,6 +26,7 @@ class ConversationFilter:
     channel: Channel | None = None
     status: ConversationStatus | None = None
     customer_id: UUID | None = None
+    lead_id: UUID | None = None
 
 
 class ConversationRepository(Protocol):
@@ -50,6 +53,22 @@ class ConversationRepository(Protocol):
 
     def message_exists(self, channel: Channel, external_id: str) -> bool: ...
 
+    def mark_failed(self, channel: Channel, external_id: str, code: str | None) -> bool:
+        """Mark an outbound message as failed. Returns True if one was found."""
+        ...
+
+    def message_id(self, channel: Channel, external_id: str) -> UUID | None: ...
+
+    def has_attachment(self, message_id: UUID) -> bool: ...
+
+    def add_attachment(self, message_id: UUID, info: AttachmentInfo, content: bytes) -> None:
+        """Keep a message's file. A message has at most one: a second call changes nothing."""
+        ...
+
+    def get_attachment(
+        self, conversation_id: UUID, message_id: UUID
+    ) -> tuple[AttachmentInfo, bytes] | None: ...
+
     def list_messages(self, conversation_id: UUID, *, limit: int, offset: int) -> list[Message]: ...
 
     def recent_messages(self, conversation_id: UUID, *, limit: int) -> list[Message]:
@@ -57,10 +76,57 @@ class ConversationRepository(Protocol):
         ...
 
 
-class ChannelSender(Protocol):
-    """Sends an outbound message through a provider. Returns the provider message id.
+@dataclass(frozen=True, slots=True)
+class OutboundFile:
+    content: bytes
+    file_name: str
+    content_type: str
 
-    Not wired to real accounts in the scaffold; a stub returns a synthetic id.
-    """
+
+class ChannelSender(Protocol):
+    """Sends an outbound message through a provider. Returns the provider message id."""
 
     def send(self, *, channel: Channel, to_contact: str, text: str) -> str: ...
+
+    def send_file(
+        self, *, channel: Channel, to_contact: str, file: OutboundFile, caption: str
+    ) -> str: ...
+
+
+@dataclass(frozen=True, slots=True)
+class ContactLink:
+    lead_id: UUID | None = None
+    customer_id: UUID | None = None
+
+
+class ContactLinker(Protocol):
+    """Finds the lead or customer behind a contact, capturing a lead if there is none."""
+
+    def link(
+        self, *, channel: Channel, external_contact_id: str, contact_name: str | None
+    ) -> ContactLink: ...
+
+    def hand_over(
+        self, principal: Principal, lead_id: UUID, owner_user_id: UUID, team_id: UUID | None
+    ) -> None:
+        """The chat's lead follows the chat to its new owner."""
+        ...
+
+
+class MemberDirectory(Protocol):
+    """Active members of the company (a chat can be handed only to one of them)."""
+
+    def active_member(self, user_id: UUID) -> MemberRef | None: ...
+
+
+class VoiceEncoder(Protocol):
+    def encode(self, content: bytes) -> bytes:
+        """A recording as Ogg Opus, the format WhatsApp plays as a voice message."""
+        ...
+
+
+class MediaFetcher(Protocol):
+    def fetch(self, url: str) -> bytes | None:
+        """The file, or None if it cannot be had at all (a refused host, too large, gone).
+        Raises TransientError when trying again later may work."""
+        ...

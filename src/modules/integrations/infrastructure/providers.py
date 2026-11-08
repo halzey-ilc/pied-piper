@@ -19,6 +19,7 @@ from pydantic import SecretStr
 from modules.integrations.application.ports import WebhookVerifier
 from modules.integrations.domain.providers import Provider
 from modules.integrations.infrastructure.signatures import (
+    BearerTokenVerifier,
     HmacSha256Verifier,
     SharedSecretHeaderVerifier,
     TimestampedHmacVerifier,
@@ -30,13 +31,28 @@ def body_hash(body: bytes) -> str:
 
 
 def _meta_event_id(payload: Mapping[str, Any], body: bytes) -> str:
-    # Meta batches changes in entry[].changes[]; message ids are nested inside.
+    # Meta batches changes in entry[].changes[]. A lone message keeps its own id;
+    # a batch hashes the body, so one sharing a first message is not dropped as a
+    # duplicate. Retries repeat the body, and ingest is idempotent per message.
     try:
-        value = payload["entry"][0]["changes"][0]["value"]
-        message_id = value["messages"][0]["id"]
-        return str(message_id)
-    except (KeyError, IndexError, TypeError):
+        ids = [
+            message["id"]
+            for entry in payload["entry"]
+            for change in entry["changes"]
+            for key in ("messages", "message_echoes")
+            for message in change["value"].get(key) or []
+        ]
+    except (KeyError, TypeError, AttributeError):
         return body_hash(body)
+    return str(ids[0]) if len(ids) == 1 else body_hash(body)
+
+
+def _green_api_event_id(payload: Mapping[str, Any], body: bytes) -> str:
+    # One idMessage is shared by a message and each of its statuses.
+    message_id = payload.get("idMessage")
+    if not isinstance(message_id, str) or not message_id:
+        return body_hash(body)
+    return f"{payload.get('typeWebhook')}:{message_id}:{payload.get('status', '')}"
 
 
 def _telegram_event_id(payload: Mapping[str, Any], body: bytes) -> str:
@@ -71,6 +87,9 @@ def build_provider_specs(
     return {
         Provider.WHATSAPP: ConfiguredProviderSpec(
             Provider.WHATSAPP, secrets.get("whatsapp"), HmacSha256Verifier, _meta_event_id
+        ),
+        Provider.GREEN_API: ConfiguredProviderSpec(
+            Provider.GREEN_API, secrets.get("green_api"), BearerTokenVerifier, _green_api_event_id
         ),
         Provider.INSTAGRAM: ConfiguredProviderSpec(
             Provider.INSTAGRAM, secrets.get("instagram"), HmacSha256Verifier, _meta_event_id

@@ -76,6 +76,54 @@ class MessageSent(DomainEvent):
         return {"conversation_id": str(self.conversation_id), "channel": self.channel}
 
 
+# Larger files stay in the WhatsApp app: they are kept in the company database.
+MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024
+UNKNOWN_CONTENT_TYPE = "application/octet-stream"
+# The only types the browser may render; anything else is served as a plain download.
+SAFE_CONTENT_TYPES = frozenset(
+    {
+        "image/jpeg",
+        "image/png",
+        "image/webp",
+        "image/gif",
+        "audio/ogg",
+        "audio/mpeg",
+        "audio/mp4",
+        "audio/aac",
+        "audio/amr",
+        "video/mp4",
+        "application/pdf",
+    }
+)
+
+
+# Shown in the CRM, hence Russian.
+ATTACHMENT_LABELS = {
+    "image": "[Фото]",
+    "video": "[Видео]",
+    "audio": "[Голосовое сообщение]",
+    "document": "[Документ]",
+}
+
+
+def attachment_kind(content_type: str) -> str:
+    family = content_type.split("/", maxsplit=1)[0].strip().lower()
+    return family if family in ("image", "video", "audio") else "document"
+
+
+def safe_content_type(declared: str) -> str:
+    base = declared.split(";", maxsplit=1)[0].strip().lower()
+    return declared if base in SAFE_CONTENT_TYPES else UNKNOWN_CONTENT_TYPE
+
+
+@dataclass(frozen=True, slots=True)
+class AttachmentInfo:
+    kind: str  # image, video, audio or document
+    content_type: str
+    file_name: str
+    size: int
+
+
 @dataclass(slots=True)
 class Message:
     id: UUID
@@ -85,6 +133,8 @@ class Message:
     created_at: datetime
     external_id: str | None = None
     sender_user_id: UUID | None = None
+    failure_code: str | None = None
+    attachment: AttachmentInfo | None = None
 
 
 @dataclass(slots=True)
@@ -101,6 +151,7 @@ class Conversation:
     unread_count: int = 0
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     version: int = 1
+    lead_id: UUID | None = None
 
     @classmethod
     def start(
@@ -140,6 +191,22 @@ class Conversation:
         self.version += 1
         return message, MessageReceived(conversation_id=self.id, channel=self.channel.value)
 
+    def record_echo(
+        self, *, text: str, external_id: str | None, occurred_at: datetime
+    ) -> tuple[Message, MessageSent]:
+        """Record a reply already sent outside the CRM (the WhatsApp app on the phone)."""
+        message = Message(
+            id=uuid4(),
+            direction=MessageDirection.OUTBOUND,
+            text=_clean_text(text),
+            status=MessageStatus.SENT,
+            created_at=occurred_at,
+            external_id=external_id,
+        )
+        self.last_message_at = occurred_at
+        self.version += 1
+        return message, MessageSent(conversation_id=self.id, channel=self.channel.value)
+
     def send(
         self, *, text: str, sender_user_id: UUID, occurred_at: datetime
     ) -> tuple[Message, MessageSent]:
@@ -159,6 +226,12 @@ class Conversation:
 
     def assign(self, user_id: UUID) -> None:
         self.owner_user_id = user_id
+        self.version += 1
+
+    def hand_over(self, user_id: UUID, team_id: UUID | None) -> None:
+        """Give the chat to another member; their department becomes its team."""
+        self.owner_user_id = user_id
+        self.team_id = team_id
         self.version += 1
 
     def mark_read(self) -> bool:

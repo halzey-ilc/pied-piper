@@ -49,6 +49,10 @@ class Permission(StrEnum):
     SUBSCRIPTIONS_MANAGE = "subscriptions.manage"
     COMMUNICATIONS_VIEW = "communications.view"
     COMMUNICATIONS_SEND = "communications.send"
+    # Link a number to the company's WhatsApp: narrower than integrations.manage.
+    COMMUNICATIONS_CONNECT = "communications.connect"
+    # Hand a chat to another member: a head of sales within their department.
+    COMMUNICATIONS_ASSIGN = "communications.assign"
     REPORTS_VIEW = "reports.view"
     REPORTS_GENERATE = "reports.generate"
     MEMBERS_MANAGE = "members.manage"
@@ -191,6 +195,8 @@ _HEAD_OF_SALES: Mapping[Permission, Scope] = {
     Permission.SUBSCRIPTIONS_VIEW: Scope.ALL,
     Permission.COMMUNICATIONS_VIEW: Scope.TEAM,
     Permission.COMMUNICATIONS_SEND: Scope.TEAM,
+    Permission.COMMUNICATIONS_CONNECT: Scope.ALL,
+    Permission.COMMUNICATIONS_ASSIGN: Scope.TEAM,
     Permission.REPORTS_VIEW: Scope.ALL,
     Permission.REPORTS_GENERATE: Scope.ALL,
     Permission.AI_REQUEST: Scope.TEAM,

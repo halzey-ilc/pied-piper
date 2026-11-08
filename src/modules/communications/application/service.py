@@ -14,27 +14,46 @@ from modules.access_control.domain.rbac import (
     Principal,
     ResourceOwnership,
     Scope,
+    check_assignable,
 )
 from modules.audit.application.ports import AuditLog
 from modules.audit.domain.entry import AuditEntry
 from modules.communications.application.ports import (
     ChannelSender,
+    ContactLinker,
     ConversationFilter,
     ConversationRepository,
     ConversationVisibility,
+    MediaFetcher,
+    MemberDirectory,
+    OutboundFile,
+    VoiceEncoder,
 )
 from modules.communications.domain.conversation import (
+    ATTACHMENT_LABELS,
+    MAX_ATTACHMENT_BYTES,
+    AttachmentInfo,
     Channel,
     Conversation,
     Message,
     MessageStatus,
+    attachment_kind,
+    safe_content_type,
 )
 from platform_core.application.ports import EventOutbox
 from shared.application.ports import UnitOfWork
-from shared.domain.errors import NotFoundError
+from shared.domain.errors import DomainValidationError, NotFoundError
 
 AGGREGATE = "conversation"
 _Action = Callable[["Conversation"], object]
+
+
+@dataclass(frozen=True, slots=True)
+class InboundMedia:
+    url: str
+    kind: str
+    content_type: str
+    file_name: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,6 +64,24 @@ class InboundMessage:
     text: str
     occurred_at: datetime
     contact_name: str | None = None
+    # True for a reply the business sent outside the CRM (WhatsApp app echo).
+    from_business: bool = False
+    media: InboundMedia | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class UploadedFile:
+    content: bytes
+    file_name: str
+    content_type: str
+    voice: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class DeliveryFailure:
+    channel: Channel
+    external_message_id: str
+    code: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,6 +103,10 @@ class ConversationService:
         outbox: EventOutbox,
         audit: AuditLog,
         policy: AccessPolicy | None = None,
+        linker: ContactLinker | None = None,
+        media: MediaFetcher | None = None,
+        members: MemberDirectory | None = None,
+        voice: VoiceEncoder | None = None,
     ) -> None:
         self._repo = repository
         self._sender = sender
@@ -73,6 +114,10 @@ class ConversationService:
         self._outbox = outbox
         self._audit = audit
         self._policy = policy or AccessPolicy()
+        self._linker = linker
+        self._media = media
+        self._members = members
+        self._voice = voice
 
     # --- system: inbound ----------------------------------------------------
 
@@ -92,11 +137,14 @@ class ConversationService:
                     created_at=inbound.occurred_at,
                 )
             version = conversation.version
-            message, event = conversation.receive(
+            record = conversation.record_echo if inbound.from_business else conversation.receive
+            message, event = record(
                 text=inbound.text,
                 external_id=inbound.external_message_id,
                 occurred_at=inbound.occurred_at,
             )
+            if not inbound.from_business:
+                self._link_contact(conversation, inbound)
             if new_conversation:
                 self._repo.add(conversation)
             else:
@@ -104,6 +152,46 @@ class ConversationService:
             self._repo.add_message(conversation.id, message)
             self._outbox.add(event, aggregate_type=AGGREGATE, aggregate_id=str(conversation.id))
         return True
+
+    def store_media(self, inbound: InboundMessage) -> bool:
+        """Download the message's file. Apart from ingest_inbound so that a slow download
+        holds no transaction; safe to repeat. Returns True if a file was stored."""
+        media = inbound.media
+        if media is None or self._media is None:
+            return False
+        message_id = self._repo.message_id(inbound.channel, inbound.external_message_id)
+        if message_id is None or self._repo.has_attachment(message_id):
+            return False
+        content = self._media.fetch(media.url)
+        if content is None:
+            return False
+        info = AttachmentInfo(
+            kind=media.kind,
+            content_type=safe_content_type(media.content_type),
+            file_name=media.file_name,
+            size=len(content),
+        )
+        with self._uow:
+            self._repo.add_attachment(message_id, info, content)
+        return True
+
+    def _link_contact(self, conversation: Conversation, inbound: InboundMessage) -> None:
+        if self._linker is None or conversation.lead_id or conversation.customer_id:
+            return
+        link = self._linker.link(
+            channel=inbound.channel,
+            external_contact_id=inbound.external_contact_id,
+            contact_name=inbound.contact_name,
+        )
+        conversation.lead_id = link.lead_id
+        conversation.customer_id = link.customer_id
+
+    def mark_delivery_failed(self, failure: DeliveryFailure) -> bool:
+        """Record that the provider could not deliver a sent message."""
+        with self._uow:
+            return self._repo.mark_failed(
+                failure.channel, failure.external_message_id, failure.code
+            )
 
     # --- reads --------------------------------------------------------------
 
@@ -128,6 +216,15 @@ class ConversationService:
     ) -> list[Message]:
         self.get(principal, conversation_id)  # visibility check
         return self._repo.list_messages(conversation_id, limit=limit, offset=offset)
+
+    def attachment(
+        self, principal: Principal, conversation_id: UUID, message_id: UUID
+    ) -> tuple[AttachmentInfo, bytes]:
+        self.get(principal, conversation_id)  # visibility check
+        found = self._repo.get_attachment(conversation_id, message_id)
+        if found is None:
+            raise NotFoundError("Attachment not found.")
+        return found
 
     def _visible(self, principal: Principal, conversation: Conversation) -> bool:
         scope = self._policy.scope_for(principal, Permission.COMMUNICATIONS_VIEW)
@@ -176,6 +273,80 @@ class ConversationService:
             self._outbox.add(event, aggregate_type=AGGREGATE, aggregate_id=str(conversation.id))
             self._record(principal, "conversation.message_sent", conversation)
         return message
+
+    def send_file(
+        self, principal: Principal, conversation_id: UUID, upload: UploadedFile, caption: str = ""
+    ) -> Message:
+        self._policy.require(principal, Permission.COMMUNICATIONS_SEND)
+        file = self._prepare(upload)
+        info = AttachmentInfo(
+            kind=attachment_kind(file.content_type),
+            content_type=safe_content_type(file.content_type),
+            file_name=file.file_name,
+            size=len(file.content),
+        )
+        with self._uow:
+            conversation = self.get(principal, conversation_id)
+            version = conversation.version
+            message, event = conversation.send(
+                text=f"{ATTACHMENT_LABELS[info.kind]} {caption}".strip(),
+                sender_user_id=principal.user_id,
+                occurred_at=_now(),
+            )
+            message.external_id = self._sender.send_file(
+                channel=conversation.channel,
+                to_contact=conversation.external_contact_id,
+                file=file,
+                caption=caption,
+            )
+            message.status = MessageStatus.SENT
+            self._repo.save(conversation, expected_version=version)
+            self._repo.add_message(conversation.id, message)
+            self._repo.add_attachment(message.id, info, file.content)
+            self._outbox.add(event, aggregate_type=AGGREGATE, aggregate_id=str(conversation.id))
+            self._record(principal, "conversation.file_sent", conversation)
+        message.attachment = info
+        return message
+
+    def _prepare(self, upload: UploadedFile) -> OutboundFile:
+        if not upload.content:
+            raise DomainValidationError("The file is empty.")
+        if len(upload.content) > MAX_ATTACHMENT_BYTES:
+            raise DomainValidationError("The file is too large.")
+        if upload.voice and self._voice is not None:
+            return OutboundFile(
+                content=self._voice.encode(upload.content),
+                file_name="voice.ogg",
+                content_type="audio/ogg; codecs=opus",
+            )
+        return OutboundFile(
+            content=upload.content,
+            file_name=upload.file_name[-255:],
+            content_type=upload.content_type[:100],
+        )
+
+    def transfer(
+        self, principal: Principal, conversation_id: UUID, owner_user_id: UUID
+    ) -> Conversation:
+        """Hand a chat, and the lead behind it, to another member: a head of sales within
+        their department, a director to anyone active in the company."""
+        scope = self._policy.require(principal, Permission.COMMUNICATIONS_ASSIGN)
+        member = (
+            self._members.active_member(owner_user_id)
+            if self._members is not None and owner_user_id != principal.user_id
+            else None
+        )
+        check_assignable(principal, scope, owner_user_id, member, what="chats")
+        team_id = member.department_id if member is not None else principal.department_id
+        with self._uow:
+            conversation = self.get(principal, conversation_id)
+            version = conversation.version
+            conversation.hand_over(owner_user_id, team_id)
+            self._repo.save(conversation, expected_version=version)
+            self._record(principal, "conversation.transferred", conversation)
+            if conversation.lead_id is not None and self._linker is not None:
+                self._linker.hand_over(principal, conversation.lead_id, owner_user_id, team_id)
+        return conversation
 
     def assign_to_me(self, principal: Principal, conversation_id: UUID) -> Conversation:
         self._policy.require(principal, Permission.COMMUNICATIONS_SEND)

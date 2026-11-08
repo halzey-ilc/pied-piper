@@ -9,6 +9,7 @@ from modules.communications.application.ports import (
     ConversationVisibility,
 )
 from modules.communications.domain.conversation import (
+    AttachmentInfo,
     Channel,
     Conversation,
     ConversationStatus,
@@ -16,7 +17,11 @@ from modules.communications.domain.conversation import (
     MessageDirection,
     MessageStatus,
 )
-from modules.communications.infrastructure.models import ConversationRecord, MessageRecord
+from modules.communications.infrastructure.models import (
+    ConversationRecord,
+    MessageAttachmentRecord,
+    MessageRecord,
+)
 from shared.domain.errors import ConflictError
 
 
@@ -29,6 +34,7 @@ def _conv_to_domain(row: ConversationRecord) -> Conversation:
         status=ConversationStatus(row.status),
         contact_name=row.contact_name,
         customer_id=row.customer_id,
+        lead_id=row.lead_id,
         team_id=row.team_id,
         last_message_at=row.last_message_at,
         unread_count=row.unread_count,
@@ -46,6 +52,13 @@ def _msg_to_domain(row: MessageRecord) -> Message:
         created_at=row.created_at,
         external_id=row.external_id,
         sender_user_id=row.sender_user_id,
+        failure_code=row.failure_code,
+    )
+
+
+def _attachment_info(row: MessageAttachmentRecord) -> AttachmentInfo:
+    return AttachmentInfo(
+        kind=row.kind, content_type=row.content_type, file_name=row.file_name, size=row.size
     )
 
 
@@ -102,6 +115,8 @@ class DjangoConversationRepository:
             qs = qs.filter(status=filters.status.value)
         if filters.customer_id is not None:
             qs = qs.filter(customer_id=filters.customer_id)
+        if filters.lead_id is not None:
+            qs = qs.filter(lead_id=filters.lead_id)
         return qs
 
     def list_visible(
@@ -139,13 +154,71 @@ class DjangoConversationRepository:
     def message_exists(self, channel: Channel, external_id: str) -> bool:
         return self._msg().filter(channel=channel.value, external_id=external_id).exists()
 
+    def mark_failed(self, channel: Channel, external_id: str, code: str | None) -> bool:
+        updated = (
+            self._msg()
+            .filter(
+                channel=channel.value,
+                external_id=external_id,
+                direction=MessageDirection.OUTBOUND.value,
+            )
+            .update(status=MessageStatus.FAILED.value, failure_code=code[:32] if code else None)
+        )
+        return updated > 0
+
+    def _attachments(self) -> QuerySet[MessageAttachmentRecord]:
+        return MessageAttachmentRecord.objects.using(self.using)
+
+    def message_id(self, channel: Channel, external_id: str) -> UUID | None:
+        return (
+            self._msg()
+            .filter(channel=channel.value, external_id=external_id)
+            .values_list("id", flat=True)
+            .first()
+        )
+
+    def has_attachment(self, message_id: UUID) -> bool:
+        return self._attachments().filter(message_id=message_id).exists()
+
+    def add_attachment(self, message_id: UUID, info: AttachmentInfo, content: bytes) -> None:
+        self._attachments().get_or_create(
+            message_id=message_id,
+            defaults={
+                "kind": info.kind,
+                "content_type": info.content_type,
+                "file_name": info.file_name,
+                "size": info.size,
+                "content": content,
+            },
+        )
+
+    def get_attachment(
+        self, conversation_id: UUID, message_id: UUID
+    ) -> tuple[AttachmentInfo, bytes] | None:
+        row = (
+            self._attachments()
+            .filter(message_id=message_id, message__conversation_id=conversation_id)
+            .first()
+        )
+        return None if row is None else (_attachment_info(row), bytes(row.content))
+
     def list_messages(self, conversation_id: UUID, *, limit: int, offset: int) -> list[Message]:
-        rows = (
+        rows = list(
             self._msg()
             .filter(conversation_id=conversation_id)
             .order_by("created_at", "id")[offset : offset + limit]
         )
-        return [_msg_to_domain(row) for row in rows]
+        # The chat is polled, so the files themselves stay out of this query.
+        attachments = {
+            row.message_id: _attachment_info(row)
+            for row in self._attachments()
+            .filter(message_id__in=[row.id for row in rows])
+            .defer("content")
+        }
+        messages = [_msg_to_domain(row) for row in rows]
+        for message in messages:
+            message.attachment = attachments.get(message.id)
+        return messages
 
     def recent_messages(self, conversation_id: UUID, *, limit: int) -> list[Message]:
         rows = (
@@ -162,6 +235,7 @@ class DjangoConversationRepository:
             "contact_name": conversation.contact_name,
             "status": conversation.status.value,
             "customer_id": conversation.customer_id,
+            "lead_id": conversation.lead_id,
             "owner_user_id": conversation.owner_user_id,
             "team_id": conversation.team_id,
             "last_message_at": conversation.last_message_at,

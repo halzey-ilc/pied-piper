@@ -1,0 +1,24 @@
+# Overlay for running WhatsApp (Green API) on a PC with no public server:
+#   ./scripts/setup_whatsapp_pc.sh
+# A Cloudflare quick tunnel gives a temporary public https address. Only the Green
+# API webhook is reachable through it; webhook-proxy answers 404 for everything else.
+
+services:
+  webhook-proxy:
+    image: nginx:1.27-bookworm
+    volumes:
+      - ./infrastructure/nginx/whatsapp-webhook.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      api: {condition: service_healthy}
+    networks: [backend, edge]
+    restart: unless-stopped
+
+  tunnel:
+    image: cloudflare/cloudflared:2025.2.0
+    command: ["tunnel", "--no-autoupdate", "--url", "http://webhook-proxy:8080"]
+    depends_on: [webhook-proxy]
+    networks: [edge]
+    restart: unless-stopped
+
+networks:
+  edge:

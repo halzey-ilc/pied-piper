@@ -10,9 +10,13 @@ from modules.communications.presentation.views import (
     CloseView,
     ConversationDetailView,
     ConversationListView,
+    MessageAttachmentView,
     MessagesView,
     ReadView,
     ReopenView,
+    TransferView,
+    WhatsAppQrView,
+    WhatsAppStatusView,
 )
 
 urlpatterns = [
@@ -23,6 +27,8 @@ urlpatterns = [
         name="message-template-detail",
     ),
     path("channels/", ChannelsView.as_view(), name="communication-channels"),
+    path("whatsapp/status/", WhatsAppStatusView.as_view(), name="whatsapp-status"),
+    path("whatsapp/qr/", WhatsAppQrView.as_view(), name="whatsapp-qr"),
     path("conversations/", ConversationListView.as_view(), name="conversation-list"),
     path(
         "conversations/<uuid:conversation_id>/",
@@ -33,6 +39,16 @@ urlpatterns = [
         "conversations/<uuid:conversation_id>/messages/",
         MessagesView.as_view(),
         name="conversation-messages",
+    ),
+    path(
+        "conversations/<uuid:conversation_id>/messages/<uuid:message_id>/attachment/",
+        MessageAttachmentView.as_view(),
+        name="conversation-message-attachment",
+    ),
+    path(
+        "conversations/<uuid:conversation_id>/transfer/",
+        TransferView.as_view(),
+        name="conversation-transfer",
     ),
     path(
         "conversations/<uuid:conversation_id>/assign/",

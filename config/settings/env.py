@@ -11,6 +11,7 @@ import os
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Annotated, Any, Literal
+from uuid import UUID
 
 from pydantic import Field, SecretStr, ValidationError, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
@@ -146,6 +147,23 @@ class AppEnv(BaseSettings):
     TELEGRAM_WEBHOOK_SECRET: SecretStr | None = None
     TELEPHONY_WEBHOOK_SECRET: SecretStr | None = None
 
+    # WhatsApp Cloud API. Replies stay on the stub sender until both the access
+    # token and the phone number id are set. Leads are auto-created for unknown
+    # numbers only when an owner is set (a lead always needs an owner).
+    WHATSAPP_VERIFY_TOKEN: SecretStr | None = None
+    WHATSAPP_ACCESS_TOKEN: SecretStr | None = None
+    WHATSAPP_PHONE_NUMBER_ID: str | None = None
+    WHATSAPP_API_BASE_URL: str = "https://graph.facebook.com/v23.0"
+    WHATSAPP_LEAD_OWNER_USER_ID: UUID | None = None
+    # Which company owns the number: only it sees the connection and the QR code.
+    WHATSAPP_TENANT_SLUG: str | None = None
+    # cloud_api is Meta; green_api is an unofficial QR gateway, a temporary bridge.
+    WHATSAPP_PROVIDER: Literal["cloud_api", "green_api"] = "cloud_api"
+    GREEN_API_URL: str | None = None
+    GREEN_API_INSTANCE_ID: str | None = None
+    GREEN_API_TOKEN: SecretStr | None = None
+    GREEN_API_WEBHOOK_TOKEN: SecretStr | None = None
+
     # CRM AI Platform (separate service). Off unless explicitly enabled.
     AI_PLATFORM_ENABLED: bool = False
     AI_PLATFORM_URL: str | None = None
@@ -183,6 +201,15 @@ class AppEnv(BaseSettings):
         "INSTAGRAM_APP_SECRET",
         "TELEGRAM_WEBHOOK_SECRET",
         "TELEPHONY_WEBHOOK_SECRET",
+        "WHATSAPP_VERIFY_TOKEN",
+        "WHATSAPP_ACCESS_TOKEN",
+        "WHATSAPP_PHONE_NUMBER_ID",
+        "WHATSAPP_LEAD_OWNER_USER_ID",
+        "WHATSAPP_TENANT_SLUG",
+        "GREEN_API_URL",
+        "GREEN_API_INSTANCE_ID",
+        "GREEN_API_TOKEN",
+        "GREEN_API_WEBHOOK_TOKEN",
         "AI_PLATFORM_TOKEN_KEY",
         mode="before",
     )
@@ -253,6 +280,57 @@ def hardening_errors(env: AppEnv) -> list[str]:  # noqa: PLR0912 - one guard per
         errors.append("DIAGNOSTIC_TASKS_ENABLED must be false in production")
     if env.API_DOCS_ENABLED:
         errors.append("API_DOCS_ENABLED must be false in production")
+    errors.extend(_whatsapp_errors(env))
+    return errors
+
+
+def _whatsapp_errors(env: AppEnv) -> list[str]:
+    """Production only: all of WhatsApp is configured, or none of it. A partial setup
+    would receive messages it cannot answer, or answer with no lead to attach to."""
+    green = env.WHATSAPP_PROVIDER == "green_api"
+    secrets: dict[str, SecretStr | None] = (
+        {
+            "GREEN_API_TOKEN": env.GREEN_API_TOKEN,
+            "GREEN_API_WEBHOOK_TOKEN": env.GREEN_API_WEBHOOK_TOKEN,
+        }
+        if green
+        else {
+            "WHATSAPP_APP_SECRET": env.WHATSAPP_APP_SECRET,
+            "WHATSAPP_VERIFY_TOKEN": env.WHATSAPP_VERIFY_TOKEN,
+            "WHATSAPP_ACCESS_TOKEN": env.WHATSAPP_ACCESS_TOKEN,
+        }
+    )
+    own: dict[str, object] = (
+        {"GREEN_API_URL": env.GREEN_API_URL, "GREEN_API_INSTANCE_ID": env.GREEN_API_INSTANCE_ID}
+        if green
+        else {"WHATSAPP_PHONE_NUMBER_ID": env.WHATSAPP_PHONE_NUMBER_ID}
+    )
+    if not any([*secrets.values(), *own.values()]):
+        return []
+    required: dict[str, object] = {
+        **secrets,
+        **own,
+        "WHATSAPP_TENANT_SLUG": env.WHATSAPP_TENANT_SLUG,
+        "WHATSAPP_LEAD_OWNER_USER_ID": env.WHATSAPP_LEAD_OWNER_USER_ID,
+    }
+    errors = [
+        f"{name} is required when WhatsApp is configured"
+        for name, value in required.items()
+        if not value
+    ]
+    errors.extend(
+        f"{name} contains a placeholder value"
+        for name, secret in secrets.items()
+        if secret is not None and _looks_like_placeholder(secret.get_secret_value())
+    )
+    token_name = "GREEN_API_WEBHOOK_TOKEN" if green else "WHATSAPP_VERIFY_TOKEN"
+    token = secrets[token_name]
+    if token is not None and len(token.get_secret_value()) < _MIN_SECRET_LENGTH:
+        errors.append(f"{token_name} must be at least {_MIN_SECRET_LENGTH} characters")
+    url_name = "GREEN_API_URL" if green else "WHATSAPP_API_BASE_URL"
+    url = env.GREEN_API_URL if green else env.WHATSAPP_API_BASE_URL
+    if url and not url.startswith("https://"):
+        errors.append(f"{url_name} must use https in production")
     return errors
 
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from modules.access_control.domain.rbac import (
     AccessPolicy,
@@ -29,7 +29,7 @@ from modules.leads.application.ports import (
     MemberDirectory,
 )
 from modules.leads.application.routing import pick_assignee
-from modules.leads.domain.lead import Lead, LeadSource, LeadStatus
+from modules.leads.domain.lead import MAX_NAME_LENGTH, Lead, LeadSource, LeadStatus
 from platform_core.application.ports import EventOutbox
 from shared.application.ports import UnitOfWork
 from shared.domain.errors import ConflictError, DomainValidationError, NotFoundError
@@ -67,6 +67,12 @@ class ConversionResult:
     lead: Lead
     customer_id: UUID
     already_converted: bool
+
+
+@dataclass(frozen=True, slots=True)
+class ContactMatch:
+    lead_id: UUID | None = None
+    customer_id: UUID | None = None
 
 
 def _ownership(lead: Lead) -> ResourceOwnership:
@@ -160,6 +166,28 @@ class LeadService:
                 )
         return lead
 
+    def hand_over(
+        self, principal: Principal, lead_id: UUID, owner_user_id: UUID, team_id: UUID | None
+    ) -> None:
+        """A lead follows its WhatsApp chat. The chat's handover already checked who may
+        receive it; a head of sales may not see the lead yet, so nothing is checked here.
+        A converted lead stays as it is: it is handled through its customer."""
+        with self._uow:
+            lead = self._repo.get(lead_id)
+            if lead is None or lead.status is LeadStatus.CONVERTED:
+                return
+            version = lead.version
+            previous_owner = lead.owner_user_id
+            if lead.assign(owner_user_id, team_id):
+                self._repo.save(lead, expected_version=version)
+                self._record(
+                    principal,
+                    "lead.reassigned",
+                    lead,
+                    ("owner",),
+                    details=_owner_change(previous_owner, owner_user_id),
+                )
+
     def find_duplicates(self, principal: Principal, lead_id: UUID) -> list[DuplicateCandidate]:
         """Candidate duplicates (other leads and existing customers) that share this
         lead's e-mail or phone. No automatic merge; the caller decides."""
@@ -228,6 +256,40 @@ class LeadService:
             elif pick is not None and self._routing is not None:
                 self._routing.notify_assignee_missing(pick.department_id, lead)
         return lead
+
+    def match_or_capture_contact(
+        self, *, phone: str, name: str | None, source: LeadSource, owner_user_id: UUID | None
+    ) -> ContactMatch:
+        """System path (provider webhook, no principal): the newest lead and customer
+        with this phone, or a new lead if there is neither and an owner is set."""
+        digits = re.sub(r"\D", "", phone)
+        candidates = (
+            self._duplicates.find(exclude_lead_id=uuid4(), email=None, phone_digits=digits)
+            if self._duplicates is not None
+            else []
+        )
+        lead_id = next((c.id for c in candidates if c.kind == "lead"), None)
+        customer_id = next((c.id for c in candidates if c.kind == "customer"), None)
+        if lead_id is not None or customer_id is not None or owner_user_id is None:
+            return ContactMatch(lead_id=lead_id, customer_id=customer_id)
+        lead, event = Lead.capture(
+            name=(name or "").strip()[:MAX_NAME_LENGTH] or phone,
+            owner_user_id=owner_user_id,
+            source=source,
+            phone=phone,
+        )
+        with self._uow:
+            self._repo.add(lead)
+            self._outbox.add(event, aggregate_type=AGGREGATE, aggregate_id=str(lead.id))
+            self._audit.record(
+                AuditEntry(
+                    actor_user_id=None,
+                    action="lead.captured",
+                    resource_type=AGGREGATE,
+                    resource_id=str(lead.id),
+                )
+            )
+        return ContactMatch(lead_id=lead.id)
 
     def update(self, principal: Principal, command: UpdateLead) -> Lead:
         with self._uow:
