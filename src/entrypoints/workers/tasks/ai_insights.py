@@ -15,6 +15,7 @@ from celery import shared_task
 from modules.ai_insights.composition import (
     agent_service,
     ai_report_service,
+    call_analysis_service,
     call_insight_service,
     deal_brief_service,
     reply_suggestion_service,
@@ -83,6 +84,12 @@ def submit_agent_run(tenant_slug: str, run_id: str) -> None:
 def poll_agent_run(tenant_slug: str, run_id: str) -> None:
     with system_tenant_scope(tenant_slug):
         agent_service().poll(UUID(run_id))
+
+
+@shared_task(base=ResilientTask, name="integrations.ai_call_analysis_step", ignore_result=True)
+def call_analysis_step(tenant_slug: str, analysis_id: str) -> None:
+    with system_tenant_scope(tenant_slug):
+        call_analysis_service().step(UUID(analysis_id))
 
 
 @shared_task(base=ResilientTask, name="integrations.ai_daily_digests", ignore_result=True)

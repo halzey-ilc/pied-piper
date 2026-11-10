@@ -194,3 +194,49 @@ class AgentRunRecord(models.Model):
 
     def __str__(self) -> str:
         return f"agent run {self.id} ({self.status})"
+
+
+class CallAnalysisRecord(models.Model):
+    """A call's transcript and its review against the company checklist."""
+
+    id = models.UUIDField(primary_key=True, editable=False)
+    call_id = models.UUIDField()
+    requested_by = models.UUIDField(null=True, blank=True)  # None: started by the PBX event
+    language = models.CharField(max_length=2)
+    channels = models.CharField(max_length=16)
+    status = models.CharField(max_length=12)
+    transcribe_job_id = models.CharField(max_length=64, null=True, blank=True)  # noqa: DJ001
+    review_job_id = models.CharField(max_length=64, null=True, blank=True)  # noqa: DJ001
+    segments = models.JSONField(default=list)
+    duration_s = models.FloatField(null=True, blank=True)
+    criteria = models.JSONField(default=list)
+    review = models.JSONField(null=True, blank=True)
+    score = models.PositiveSmallIntegerField(null=True, blank=True)
+    is_mock = models.BooleanField(default=False)
+    model = models.CharField(max_length=128, null=True, blank=True)  # noqa: DJ001
+    error_code = models.CharField(max_length=64, null=True, blank=True)  # noqa: DJ001
+    version = models.PositiveIntegerField(default=1)
+    created_at = models.DateTimeField()
+    finished_at = models.DateTimeField(null=True, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "ai_insights_call_analysis"
+        indexes = [models.Index(fields=["call_id", "created_at"], name="call_analysis_call_idx")]
+
+    def __str__(self) -> str:
+        return f"call analysis {self.id} ({self.status})"
+
+
+class CallChecklistRecord(models.Model):
+    """The company's call checklist (one per company); defaults apply without it."""
+
+    id = models.PositiveSmallIntegerField(primary_key=True, default=1)
+    criteria = models.JSONField(default=list)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "ai_insights_call_checklist"
+
+    def __str__(self) -> str:
+        return "call checklist"

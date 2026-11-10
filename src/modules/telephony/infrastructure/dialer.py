@@ -7,9 +7,9 @@ provider's API (through the integrations layer) and return its call id.
 
 from __future__ import annotations
 
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 
 class StubDialer:
-    def dial(self, *, from_number: str, to_number: str) -> str:
+    def dial(self, *, from_number: str, to_number: str, owner_user_id: UUID | None = None) -> str:
         return "stub-" + uuid4().hex[:16]

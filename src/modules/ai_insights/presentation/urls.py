@@ -1,5 +1,6 @@
 from django.urls import path
 
+from modules.ai_insights.presentation.call_analysis_views import CallAnalysisView, CallChecklistView
 from modules.ai_insights.presentation.views import (
     AgentActionConfirmView,
     AgentActionRejectView,
@@ -17,6 +18,8 @@ from modules.ai_insights.presentation.views import (
 urlpatterns = [
     path("status/", AiStatusView.as_view(), name="ai-status"),
     path("calls/<uuid:call_id>/summary/", CallSummaryView.as_view(), name="ai-call-summary"),
+    path("calls/<uuid:call_id>/analysis/", CallAnalysisView.as_view(), name="ai-call-analysis"),
+    path("calls/checklist/", CallChecklistView.as_view(), name="ai-call-checklist"),
     path(
         "conversations/<uuid:conversation_id>/reply/",
         ConversationReplyView.as_view(),

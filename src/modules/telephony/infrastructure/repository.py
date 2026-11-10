@@ -87,6 +87,10 @@ class DjangoCallRepository:
         row = self._qs().filter(id=call_id).first()
         return None if row is None else _to_domain(row)
 
+    def get_by_external_id(self, external_id: str) -> Call | None:
+        row = self._qs().filter(external_id=external_id).first()
+        return None if row is None else _to_domain(row)
+
     def save(self, call: Call, expected_version: int) -> None:
         updated = (
             self._qs()

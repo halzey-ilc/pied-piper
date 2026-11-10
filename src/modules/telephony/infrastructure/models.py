@@ -47,3 +47,29 @@ class CallRecord(models.Model):
 
     def __str__(self) -> str:
         return f"{self.direction} {self.from_number}->{self.to_number} ({self.status})"
+
+
+class TelephonyConnectionRecord(models.Model):
+    """The company's PBX account (one per company). The integration key is encrypted;
+    the event address token is stored only as a SHA-256 hash."""
+
+    id = models.PositiveSmallIntegerField(primary_key=True, default=1)
+    provider = models.CharField(max_length=16, default="sipuni")
+    account = models.CharField(max_length=16)
+    encrypted_secret = models.BinaryField()
+    company_number = models.CharField(max_length=16)
+    fallback_owner_id = models.UUIDField()
+    webhook_token_hash = models.CharField(max_length=64)
+    extensions = models.JSONField(default=dict)  # short number -> user id
+    country_code = models.CharField(max_length=4, default="996")
+    call_language = models.CharField(max_length=2, default="ru")
+    record_channels = models.CharField(max_length=16, default="mono")
+    analyze_calls = models.BooleanField(default=True)
+    enabled = models.BooleanField(default=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "telephony_connection"
+
+    def __str__(self) -> str:
+        return f"{self.provider} {self.account}"

@@ -34,6 +34,8 @@ class CallRepository(Protocol):
 
     def get(self, call_id: UUID) -> Call | None: ...
 
+    def get_by_external_id(self, external_id: str) -> Call | None: ...
+
     def save(self, call: Call, expected_version: int) -> None: ...
 
     def list_visible(
@@ -50,8 +52,10 @@ class SubjectChecker(Protocol):
 class CallDialer(Protocol):
     """Click-to-call provider. Returns the provider's call id.
 
-    Not wired to a real telephony account; a stub returns a synthetic id. A real
-    adapter would place the call through the provider's API (via integrations).
+    Sipuni places the call from the owner's internal number (infrastructure.sipuni);
+    without a connected PBX a stub returns a synthetic id.
     """
 
-    def dial(self, *, from_number: str, to_number: str) -> str: ...
+    def dial(
+        self, *, from_number: str, to_number: str, owner_user_id: UUID | None = None
+    ) -> str: ...

@@ -17,6 +17,7 @@ SUBMIT_BRIEF_TASK = "integrations.ai_submit_brief"
 POLL_BRIEF_TASK = "integrations.ai_poll_brief"
 SUBMIT_AGENT_TASK = "integrations.ai_submit_agent_run"
 POLL_AGENT_TASK = "integrations.ai_poll_agent_run"
+CALL_ANALYSIS_TASK = "integrations.ai_call_analysis_step"
 # Outbound calls to an external service: the existing integrations queue.
 QUEUE = "integrations"
 
@@ -145,4 +146,19 @@ class CeleryAgentScheduler:
             POLL_AGENT_TASK,
             {"tenant_slug": tenant_slug, "run_id": str(run_id)},
             delay_seconds,
+        )
+
+
+class CeleryCallAnalysisScheduler:
+    """Enqueues the next call-analysis step after the analysis row has been committed."""
+
+    def __init__(self, using: str) -> None:
+        self.using = using
+
+    def schedule_step(self, *, tenant_slug: str, analysis_id: UUID, delay_seconds: float) -> None:
+        _send_on_commit(
+            self.using,
+            CALL_ANALYSIS_TASK,
+            {"tenant_slug": tenant_slug, "analysis_id": str(analysis_id)},
+            delay_seconds or None,
         )

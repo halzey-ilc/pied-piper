@@ -9,6 +9,7 @@ from django.conf import settings
 
 from modules.access_control.domain.rbac import Principal
 from modules.ai_insights.application.agent_service import AgentService
+from modules.ai_insights.application.call_analysis_service import CallAnalysisService
 from modules.ai_insights.application.deal_brief_service import DealBriefService
 from modules.ai_insights.application.reply_service import ReplySuggestionService
 from modules.ai_insights.application.report_service import AiReportService
@@ -17,6 +18,11 @@ from modules.ai_insights.infrastructure.agent_answers import CrmDataAnswers
 from modules.ai_insights.infrastructure.agent_commands import CrmCommands
 from modules.ai_insights.infrastructure.agent_repository import DjangoAgentRunRepository
 from modules.ai_insights.infrastructure.agent_tools import CrmSubjectReader, CrmToolExecutor
+from modules.ai_insights.infrastructure.call_analysis import (
+    DjangoAnalysisRepository,
+    DjangoChecklistStore,
+    TelephonyCallAudio,
+)
 from modules.ai_insights.infrastructure.calls import TelephonyCallReader
 from modules.ai_insights.infrastructure.client import HttpAiPlatformClient
 from modules.ai_insights.infrastructure.conversations import CommunicationsConversationReader
@@ -33,6 +39,7 @@ from modules.ai_insights.infrastructure.report_sources import (
 from modules.ai_insights.infrastructure.repository import DjangoInsightRepository
 from modules.ai_insights.infrastructure.scheduler import (
     CeleryAgentScheduler,
+    CeleryCallAnalysisScheduler,
     CeleryDealBriefScheduler,
     CeleryInsightScheduler,
     CeleryReplyScheduler,
@@ -166,4 +173,22 @@ def call_insight_service() -> CallInsightService:
         enabled=cfg["ENABLED"],
         default_language=cfg["DEFAULT_LANGUAGE"],
         deadline_seconds=cfg["DEADLINE_SECONDS"],
+    )
+
+
+def call_analysis_service() -> CallAnalysisService:
+    tenant = require_tenant()
+    alias = tenant.db_alias
+    cfg = settings.AI_PLATFORM
+    return CallAnalysisService(
+        repository=DjangoAnalysisRepository(alias),
+        criteria=DjangoChecklistStore(alias),
+        audio=TelephonyCallAudio(),
+        client=ai_platform_client(),
+        scheduler=CeleryCallAnalysisScheduler(alias),
+        uow=DjangoUnitOfWork(alias),
+        tenant_slug=tenant.slug,
+        enabled=cfg["ENABLED"],
+        # A transcription takes about a third of the call on CPU; leave room for long calls.
+        deadline_seconds=max(float(cfg["DEADLINE_SECONDS"]), 1800.0),
     )

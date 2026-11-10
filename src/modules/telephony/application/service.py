@@ -146,7 +146,9 @@ class CallService:
                 link=command.link,
             )
             external_id = self._dialer.dial(
-                from_number=str(call.from_number), to_number=str(call.to_number)
+                from_number=str(call.from_number),
+                to_number=str(call.to_number),
+                owner_user_id=principal.user_id,
             )
             call.set_external_id(external_id)
             self._repo.add(call)

@@ -90,6 +90,29 @@ class HttpAiPlatformClient:
         )
         return _job_state(response)
 
+    def put_audio(
+        self, *, tenant_slug: str, subject: str, ref: str, data: bytes, content_type: str
+    ) -> None:
+        """Upload a call recording for call.transcribe.v1 (PUT /v1/audio/{ref})."""
+        self._send(
+            "PUT",
+            f"/v1/audio/{ref}",
+            tenant_slug=tenant_slug,
+            subject=subject,
+            scopes=("ai.audio.write",),
+            content=data,
+            headers={"Content-Type": content_type},
+        )
+
+    def delete_audio(self, *, tenant_slug: str, subject: str, ref: str) -> None:
+        self._send(
+            "DELETE",
+            f"/v1/audio/{ref}",
+            tenant_slug=tenant_slug,
+            subject=subject,
+            scopes=("ai.audio.write",),
+        )
+
     def _send(
         self,
         method: str,
@@ -99,6 +122,7 @@ class HttpAiPlatformClient:
         subject: str,
         scopes: tuple[str, ...],
         json: dict[str, Any] | None = None,
+        content: bytes | None = None,
         headers: dict[str, str] | None = None,
     ) -> httpx.Response:
         token = self.token(tenant_slug=tenant_slug, subject=subject, scopes=scopes)
@@ -111,7 +135,9 @@ class HttpAiPlatformClient:
         if correlation_id:
             request_headers["X-Correlation-ID"] = correlation_id
         try:
-            response = self._http.request(method, path, json=json, headers=request_headers)
+            response = self._http.request(
+                method, path, json=json, content=content, headers=request_headers
+            )
         except (httpx.TimeoutException, httpx.TransportError) as exc:
             raise TransientError(f"AI Platform unreachable: {type(exc).__name__}") from exc
         if response.status_code in _RETRYABLE_STATUS:
