@@ -4,7 +4,7 @@
   key encrypted and gives an event address with a random token, shown once.
 * Sipuni sends call events there. A hang-up becomes a logged call, linked to the
   customer or lead with that phone and owned by the manager of the internal number;
-  an answered call with a recording is handed to the AI for transcription and review.
+  telephony.call_ended lets the AI module analyse answered, recorded calls.
 * Click-to-call goes through Sipuni when the manager has an internal number.
 """
 
@@ -23,7 +23,7 @@ from modules.access_control.domain.rbac import AccessPolicy, Permission, Princip
 from modules.audit.application.ports import AuditLog
 from modules.audit.domain.entry import AuditEntry
 from modules.telephony.application.ports import CallRepository
-from modules.telephony.domain.call import Call, CallDirection, CallLink, CallStatus
+from modules.telephony.domain.call import Call, CallDirection, CallLink
 from modules.telephony.domain.sipuni import (
     SipuniConnection,
     finished_call,
@@ -55,12 +55,6 @@ class ContactMatcher(Protocol):
 
 class Departments(Protocol):
     def department_of(self, user_id: UUID) -> UUID | None: ...
-
-
-class RecordingSink(Protocol):
-    def schedule_analysis(self, call_id: UUID) -> None:
-        """Hand an answered, recorded call to the AI after the transaction commits."""
-        ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -95,7 +89,6 @@ class SipuniService:
         calls: CallRepository,
         contacts: ContactMatcher,
         departments: Departments,
-        recordings: RecordingSink,
         uow: UnitOfWork,
         outbox: EventOutbox,
         audit: AuditLog,
@@ -105,7 +98,6 @@ class SipuniService:
         self._calls = calls
         self._contacts = contacts
         self._departments = departments
-        self._recordings = recordings
         self._uow = uow
         self._outbox = outbox
         self._audit = audit
@@ -213,10 +205,4 @@ class SipuniService:
                     resource_id=str(call.id),
                 )
             )
-            if (
-                connection.analyze_calls
-                and call.status is CallStatus.COMPLETED
-                and call.recording_url
-            ):
-                self._recordings.schedule_analysis(call.id)
         return call

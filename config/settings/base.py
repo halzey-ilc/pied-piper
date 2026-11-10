@@ -416,6 +416,9 @@ SPECTACULAR_SETTINGS: dict[str, Any] = {
     # Several endpoints have a "status" field/param with different value sets;
     # name each distinctly so the schema has stable, unambiguous enum components.
     "ENUM_NAME_OVERRIDES": {
+        # A call is spoken ru or ky; AI texts are ru, ky or en: two sets, two names.
+        "CallLanguageEnum": ["ru", "ky"],
+        "LanguageEnum": ["ru", "ky", "en"],
         "LeadStatusEnum": ["new", "qualified", "unqualified", "converted"],
         "DealStatusEnum": ["open", "won", "lost"],
         "RiskSubjectTypeEnum": ["deal", "user"],

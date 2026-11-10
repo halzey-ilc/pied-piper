@@ -14,7 +14,9 @@ from rest_framework.test import APIClient
 from modules.access_control.domain.rbac import Role
 from modules.ai_insights import composition
 from modules.ai_insights.application.ports import AiJobState
+from modules.ai_insights.infrastructure.handlers import on_call_ended
 from modules.telephony.infrastructure.models import CallRecord, TelephonyConnectionRecord
+from platform_core.infrastructure.messaging.models import OutboxMessage
 from platform_core.infrastructure.tenancy.services import system_tenant_scope
 from tests.conftest import ALL_DATABASES, TenantFixture
 
@@ -208,9 +210,12 @@ def test_answered_call_is_transcribed_reviewed_and_scored(
     owner_user = make_user("owner", tenant=tenants["acme"])
     owner = client_for(owner_user, "acme")
     url = _connect(owner, owner_user.pk)["events_url"].split("testserver")[-1]
-    with django_capture_on_commit_callbacks(using=ALIAS, execute=True):
-        APIClient().post(url, _hangup())
+    APIClient().post(url, _hangup())
     call_id = str(CallRecord.objects.using(ALIAS).get().id)
+    # The outbox dispatcher delivers telephony.call_ended to the AI module's handler.
+    event = OutboxMessage.objects.using(ALIAS).get(event_type="telephony.call_ended")
+    with system_tenant_scope("acme"):
+        on_call_ended({"event_id": str(event.id), "payload": event.payload})
 
     analysis = owner.get(f"/api/v1/ai/calls/{call_id}/analysis/").json()
     assert analysis["status"] == "pending"

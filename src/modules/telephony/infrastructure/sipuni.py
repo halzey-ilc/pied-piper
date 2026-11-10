@@ -10,7 +10,6 @@ from uuid import UUID, uuid4
 import httpx
 from cryptography.fernet import Fernet, InvalidToken
 from django.conf import settings
-from django.db import transaction
 
 from modules.leads.composition import lead_service
 from modules.leads.domain.lead import LeadSource
@@ -18,7 +17,6 @@ from modules.organizations.composition import active_member_departments
 from modules.telephony.domain.call import CallLink, SubjectType
 from modules.telephony.domain.sipuni import SipuniConnection, sign
 from modules.telephony.infrastructure.models import TelephonyConnectionRecord
-from platform_core.infrastructure.tenancy.services import system_tenant_scope
 from shared.application.retry import PermanentError, TransientError
 from shared.domain.errors import DomainValidationError
 
@@ -185,25 +183,6 @@ class MemberDepartments:
         return next(
             (d for u, _, d in active_member_departments(self._tenant_id) if u == user_id), None
         )
-
-
-class AiRecordingSink:
-    """Starts the AI analysis of a call (ai_insights) once the call row is committed."""
-
-    def __init__(self, using: str, tenant_slug: str) -> None:
-        self.using = using
-        self._tenant_slug = tenant_slug
-
-    def schedule_analysis(self, call_id: UUID) -> None:
-        def _go() -> None:
-            # Imported here: ai_insights reads calls through telephony's composition.
-            from modules.ai_insights.composition import call_analysis_service
-
-            # on_commit may run after the request's tenant scope: enter it again.
-            with system_tenant_scope(self._tenant_slug):
-                call_analysis_service().start(call_id)
-
-        transaction.on_commit(_go, using=self.using)
 
 
 class SipuniDialer:
